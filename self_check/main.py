@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 
 # Monetization flags default off in source; self_check exercises production gates.
+# Committed ciphertext .env has no private key in CI — skip decrypt (dotenv_loader).
+os.environ.setdefault("DOTENV_OPTIONAL", "1")
 os.environ["ENABLE_PREMIUM"] = "1"
 os.environ["ENABLE_HELP"] = "1"
 os.environ["ENABLE_PARTNER"] = "1"
@@ -67,7 +69,7 @@ def check_product_flags() -> None:
 
 
 def check_dotenv_loader() -> None:
-    """Plaintext load + encrypted-without-key fails closed."""
+    """Plaintext load + encrypted-without-key fails closed (unless DOTENV_OPTIONAL)."""
     import tempfile
 
     from dotenv_loader import (
@@ -82,29 +84,48 @@ def check_dotenv_loader() -> None:
     assert text_has_ciphertext('A=encrypted:abc\nDOTENV_PUBLIC_KEY="pub"\n')
     assert not text_has_ciphertext('A=plain\nDOTENV_PUBLIC_KEY="pub"\n')
 
-    with tempfile.TemporaryDirectory() as tmp:
-        env_path = Path(tmp) / ".env"
-        env_path.write_text("SELFCHECK_DOTENV_PLAIN=ok\n", encoding="utf-8")
-        os.environ.pop("SELFCHECK_DOTENV_PLAIN", None)
-        load_dotenv(env_path)
-        assert os.environ.get("SELFCHECK_DOTENV_PLAIN") == "ok"
-        os.environ.pop("SELFCHECK_DOTENV_PLAIN", None)
+    saved_optional = os.environ.get("DOTENV_OPTIONAL")
+    saved_ci = os.environ.get("CI")
+    try:
+        os.environ.pop("DOTENV_OPTIONAL", None)
+        os.environ.pop("CI", None)
 
-        env_path.write_text(
-            'DOTENV_PUBLIC_KEY="02deadbeef"\n'
-            "SELFCHECK_DOTENV_SECRET=encrypted:notarealcipher\n",
-            encoding="utf-8",
-        )
-        os.environ.pop("SELFCHECK_DOTENV_SECRET", None)
-        try:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("SELFCHECK_DOTENV_PLAIN=ok\n", encoding="utf-8")
+            os.environ.pop("SELFCHECK_DOTENV_PLAIN", None)
             load_dotenv(env_path)
-            raise AssertionError("expected RuntimeError for undecryptable .env")
-        except RuntimeError as exc:
-            assert "Encrypted values" in str(exc)
-            assert "Bitwarden" in str(exc)
+            assert os.environ.get("SELFCHECK_DOTENV_PLAIN") == "ok"
+            os.environ.pop("SELFCHECK_DOTENV_PLAIN", None)
 
-        apply_env_pairs({"DOTENV_PRIVATE_KEY": "should-not-apply"}, overload=True)
-        assert os.environ.get("DOTENV_PRIVATE_KEY") != "should-not-apply"
+            env_path.write_text(
+                'DOTENV_PUBLIC_KEY="02deadbeef"\n'
+                "SELFCHECK_DOTENV_SECRET=encrypted:notarealcipher\n",
+                encoding="utf-8",
+            )
+            os.environ.pop("SELFCHECK_DOTENV_SECRET", None)
+            try:
+                load_dotenv(env_path)
+                raise AssertionError("expected RuntimeError for undecryptable .env")
+            except RuntimeError as exc:
+                assert "Encrypted values" in str(exc)
+                assert "Bitwarden" in str(exc)
+
+            os.environ["DOTENV_OPTIONAL"] = "1"
+            load_dotenv(env_path)  # soft-skip: must not raise or inject ciphertext
+            assert os.environ.get("SELFCHECK_DOTENV_SECRET") in (None, "")
+
+            apply_env_pairs({"DOTENV_PRIVATE_KEY": "should-not-apply"}, overload=True)
+            assert os.environ.get("DOTENV_PRIVATE_KEY") != "should-not-apply"
+    finally:
+        if saved_optional is None:
+            os.environ.pop("DOTENV_OPTIONAL", None)
+        else:
+            os.environ["DOTENV_OPTIONAL"] = saved_optional
+        if saved_ci is None:
+            os.environ.pop("CI", None)
+        else:
+            os.environ["CI"] = saved_ci
 
 
 def main() -> None:

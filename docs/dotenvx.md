@@ -95,4 +95,6 @@ Never copy `.env.keys` into the Docker image (`.dockerignore` blocks `.env` / `.
 dotenvx protect
 ```
 
-CI: gitleaks + omerta. Local hook: `scripts/pre-commit-gitleaks.sh` (calls `dotenvx protect` when available).
+CI: gitleaks + omerta (omerta temporarily hides tracked ciphertext `.env` — it is not a plaintext value source). Local hook: `scripts/pre-commit-gitleaks.sh` (calls `dotenvx protect` when available). Optional local leak values: `.env.local` (gitignored).
+
+`python -m self_check` and GitHub Actions set `DOTENV_OPTIONAL` / `CI` so imports skip decrypt without Bitwarden. Running `python main.py` without a key still fails closed.

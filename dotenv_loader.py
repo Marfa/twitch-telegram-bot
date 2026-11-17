@@ -5,7 +5,7 @@ Encrypted values (`encrypted:…`) are decrypted via the `dotenvx` CLI when a
 private key is available (`DOTENV_PRIVATE_KEY`, `.env.keys`, OS secret store,
 or Bitwarden / 1Password references resolved by dotenvx).
 
-Never commit `.env.keys` or plaintext production secrets to the public repo.
+Encrypted `.env` may be committed; never commit `.env.keys` or plaintext secrets.
 """
 from __future__ import annotations
 
@@ -13,6 +13,18 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+
+
+def _soft_skip_without_key() -> bool:
+    """CI / self_check can import config without Bitwarden; the bot must not."""
+    if os.environ.get("CI", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return os.environ.get("DOTENV_OPTIONAL", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 _CIPHER_PREFIX = "encrypted:"
 _PUBLIC_KEY_PREFIX = "DOTENV_PUBLIC_KEY"
@@ -119,6 +131,9 @@ def load_dotenv(path: Path | None = None, *, overload: bool = False) -> None:
         else:
             missing = ciphertext_keys_unresolved(pairs)
             if missing:
+                if _soft_skip_without_key():
+                    # Do not inject encrypted:… placeholders into the environment.
+                    return
                 raise _encrypted_env_error(env_path, missing)
             return
     apply_env_pairs(pairs, overload=overload)

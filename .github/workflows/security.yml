@@ -31,8 +31,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Value-based: fails if a tracked .env* slipped in (CI has no secrets .env).
-  # Local pre-commit uses real .env values via scripts/pre-commit-gitleaks.sh.
+  # Value-based leak scan. Encrypted dotenvx `.env` is intentionally tracked —
+  # hide it for omerta's "tracked env file" gate (ciphertext is not a value source).
+  # Local pre-commit: scripts/pre-commit-gitleaks.sh (+ optional .env.local).
   omerta:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -43,6 +44,22 @@ jobs:
       # No floating major tag (v10); pin a release. See astral-sh/setup-uv releases.
       - uses: astral-sh/setup-uv@v10.3.3
       - name: omerta check (tracked files)
-        run: uvx omerta@0.1.2 check --all
+        run: |
+          set -euo pipefail
+          if [[ -f .env ]]; then
+            mv .env /tmp/dotenvx-ciphertext.env
+          fi
+          uvx omerta@0.1.2 check --all
+          if [[ -f /tmp/dotenvx-ciphertext.env ]]; then
+            mv /tmp/dotenvx-ciphertext.env .env
+          fi
       - name: omerta history
-        run: uvx omerta@0.1.2 history
+        run: |
+          set -euo pipefail
+          if [[ -f .env ]]; then
+            mv .env /tmp/dotenvx-ciphertext.env
+          fi
+          uvx omerta@0.1.2 history
+          if [[ -f /tmp/dotenvx-ciphertext.env ]]; then
+            mv /tmp/dotenvx-ciphertext.env .env
+          fi

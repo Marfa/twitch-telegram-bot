@@ -1,6 +1,8 @@
-# Values from untracked .env / .env.local — not templates (*.example are skipped as sources).
-# Never list .env.keys here as a “source of truth” to embed; keys live in Bitwarden.
-env-files = [".env", ".env.local"]
+# Plaintext leak source for local checks. Committed dotenvx ciphertext (.env) is
+# not a value source (and must stay tracked). Use .env.local for optional local
+# plaintext when running omerta by hand.
+# Never list .env.keys here; keys live in Bitwarden.
+env-files = [".env.local"]
 
 # Non-secrets that intentionally appear in docs/compose/config defaults.
 ignore = [
