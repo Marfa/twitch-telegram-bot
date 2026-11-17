@@ -1,6 +1,7 @@
 # dotenvx + Bitwarden (local secrets)
 
-Sync encrypted `.env` between Windows / macOS without putting the private key in git.
+Encrypted `.env` on Windows / macOS; private key in Bitwarden (not git).
+Cross-device ciphertext sync: **Resilio** folder (on this Mac: `~/Dropbox/.env`).
 Production VPS keeps a **plaintext** `.env` next to compose (existing deploy scripts).
 
 Cursor agent rules: `.cursor/rules/dotenvx-bitwarden.mdc` (always on) · critical key sync: `.cursor/rules/twitch-client-secret.mdc`.
@@ -9,20 +10,39 @@ Official docs: [dotenvx](https://dotenvx.com/) · [Bitwarden custody](https://do
 
 ## Security rules (this public repo)
 
-| Keep out of git | OK locally / in Bitwarden |
+| Keep out of git / Resilio | OK |
 |---|---|
-| `.env.keys`, plaintext prod secrets | Encrypted `.env` values (`encrypted:…`) |
-| Private key in chat / commits | `DOTENV_PRIVATE_KEY` item in Bitwarden |
+| `.env.keys`, plaintext prod secrets, `BW_SESSION` | Encrypted `.env` values (`encrypted:…`) in Resilio |
+| Private key in chat / commits | Bitwarden login item (see naming below) |
 
-Do **not** push real production ciphertext to the public GitHub remote unless you accept that anyone with the Bitwarden key (or a leaked key) can decrypt every historical commit. Prefer syncing the encrypted `.env` between your machines via Bitwarden Secure Note / private channel, or a private remote.
+**Bitwarden item name:** dotenvx always creates `dotenvx (02A 49E)`-style titles (short public key). That is correct — do **not** rename to `DOTENV_PRIVATE_KEY`. `DOTENV_PRIVATE_KEY` is only the field name inside `.env.keys` / process env, not the vault item title. `bitwarden pull`/`run` use a local custody UUID reference, not the display name.
+
+Do **not** push real production ciphertext to the public GitHub remote unless you accept that anyone with the Bitwarden key (or a leaked key) can decrypt every historical commit.
 
 `.env.example` stays the public contract. Docker/`compose*.yml` still use plaintext `env_file: .env`.
+
+## Resilio sync (source of truth for ciphertext)
+
+| Role | What |
+|---|---|
+| SoR | Encrypted `.env` in the Resilio-shared folder |
+| This Mac | `/Users/Blogger/Dropbox/.env` (`~/Dropbox` — Resilio, not Dropbox Inc.) |
+| Other PCs | Same Resilio share; **ask for the local path** if `~/Dropbox` is missing |
+| Never sync | `.env.keys`, plaintext dumps |
+
+Workflow:
+
+1. **Pull** current ciphertext into the repo: `cp -f ~/Dropbox/.env .env` (or the path the user gave).
+2. Edit with `dotenvx set KEY "value"` (needs matching private key via Bitwarden / `.env.keys`).
+3. **Publish** back: `cp -f .env ~/Dropbox/.env` so other devices get the update via Resilio.
+4. VPS plaintext remains a separate step ([`twitch-client-secret.mdc`](.cursor/rules/twitch-client-secret.mdc)).
 
 ## One-time setup (PC #1)
 
 1. Install tools  
-   - **dotenvx:** Windows `winget install dotenvx.dotenvx` · macOS `brew install dotenvx/brew/dotenvx` · or https://dotenvx.sh  
-   - **Bitwarden CLI:** `bw` ([install](https://bitwarden.com/help/cli/)) → `bw login`
+   - **dotenvx:** Windows `winget install dotenvx.dotenvx` · macOS `brew install dotenvx/brew/dotenvx` · or binary from [GitHub releases](https://github.com/dotenvx/dotenvx/releases)  
+   - **Bitwarden CLI:** `bw` ([install](https://bitwarden.com/help/cli/)) → `bw login`  
+   - **Resilio Sync** sharing the Dropbox-named folder (already used on this Mac)
 
 2. Create local secrets from the template (if needed):
 
@@ -35,51 +55,62 @@ cp .env.example .env
 
 ```bash
 dotenvx encrypt
+export BW_SESSION="$(bw unlock --raw)"
 dotenvx bitwarden up
 ```
 
-`bitwarden up` creates a vault item, verifies it, and **removes** the key from `.env.keys`. Keep Bitwarden as the only copy of the private key (plus Bitwarden backup / emergency kit).
+`bitwarden up` creates a personal vault item named like `dotenvx (02A 49E)` (short public key), stores a **local** custody reference, verifies, and **removes** the key from `.env.keys`.
 
-4. Run the bot (dotenvx unlocks via `bw`):
+Note: `dotenvx bitwarden pull` only works when that local reference already exists on this machine. On a new PC, use `bw get password <item-id>` into `.env.keys` (do not print the key), or run `bitwarden up` once after a local encrypt.
+
+4. Publish ciphertext to Resilio and run:
 
 ```bash
+cp -f .env ~/Dropbox/.env
 dotenvx run -- python main.py
 ```
 
-Or use the helper scripts: `scripts/env-run.sh` / `scripts/env-run.ps1`.
-
-Non-interactive (CI / scripted shell):
-
-```bash
-export BW_SESSION="$(bw unlock --raw)"
-dotenvx run -- python main.py
-# or:
-DOTENV_PRIVATE_KEY="$(bw get password DOTENV_PRIVATE_KEY)" dotenvx run -- python main.py
-```
+Helpers: `scripts/env-run.sh` / `scripts/env-run.ps1`.
 
 ## Second machine (Windows or macOS)
 
-1. Install `dotenvx` + `bw`, `bw login` (same Bitwarden account).
-2. Copy the **encrypted** `.env` from PC #1 (git private remote, Bitwarden note, USB — not plaintext).
-3. Either:
-   - `dotenvx run -- python main.py` (pulls key from Bitwarden when custody was set with `bitwarden up`), or  
-   - `dotenvx bitwarden pull` once to materialize `.env.keys` (still gitignored), then `python main.py`.
+1. Install `dotenvx` + `bw`, `bw login` (same Bitwarden account). Ensure Resilio has the shared folder.
+2. If the Resilio path is not `~/Dropbox`, **ask / note the local path**.
+3. `cp -f "$RESILIO_ENV" .env` (encrypted only).
+4. Materialize the private key (Bitwarden item / `bw get password <id>` → `.env.keys`, or custody `up`/`pull` when the local reference exists).
+5. `dotenvx run -- python main.py`.
 
-`config.py` / `dotenv_loader.py` call `dotenvx decrypt --stdout` when they see `encrypted:` values, so a plain `python main.py` also works if the key is available via env, `.env.keys`, or Bitwarden-backed dotenvx.
+`config.py` / `dotenv_loader.py` call `dotenvx decrypt --stdout` when they see `encrypted:` values.
 
 ## Update a secret
 
 ```bash
+cp -f ~/Dropbox/.env .env          # start from SoR
 dotenvx set SOME_KEY "new-value"
-# sync encrypted .env to the other PC; key stays in Bitwarden
+cp -f .env ~/Dropbox/.env          # publish ciphertext
+# then sync VPS plaintext if the key is critical (twitch-client-secret.mdc)
 ```
+
+## Rotate the keypair (after key leak)
+
+```bash
+cp -f ~/Dropbox/.env .env
+dotenvx decrypt -f .env --stdout > /tmp/env-plain.env   # umask 077; delete ASAP
+# replace .env with plaintext (no DOTENV_PUBLIC_KEY); remove .env.keys
+dotenvx encrypt
+export BW_SESSION="$(bw unlock --raw)"
+dotenvx bitwarden up               # new vault item; delete the old leaked item in Bitwarden UI
+cp -f .env ~/Dropbox/.env
+```
+
+Old ciphertext encrypted with a leaked private key is obsolete once Dropbox/Resilio has the new file — delete leftover Finder copies (`— копия.env`, etc.).
 
 ## Docker / VPS
 
 Leave server `.env` **plaintext** (current `scripts/vps-deploy.sh` / compose). Decrypt on a trusted machine if you need a one-shot plaintext export:
 
 ```bash
-dotenvx decrypt   # writes plaintext .env — do not commit
+dotenvx decrypt   # writes plaintext .env — do not commit / do not put in Resilio
 ```
 
 Never copy `.env.keys` into the Docker image (`.dockerignore` blocks it).
@@ -87,7 +118,6 @@ Never copy `.env.keys` into the Docker image (`.dockerignore` blocks it).
 ## Protect commits
 
 ```bash
-# optional local guard (blocks unencrypted secret commits when dotenvx is installed)
 dotenvx protect
 ```
 
