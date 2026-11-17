@@ -94,7 +94,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Sync `.env` across Windows / macOS without putting the private key in git: [dotenvx](https://dotenvx.com/) + Bitwarden — [`docs/dotenvx.md`](docs/dotenvx.md) (`dotenvx encrypt` → `dotenvx bitwarden up` → `dotenvx run -- python main.py`).
+Local secrets: encrypted `.env` in git + private key in Bitwarden ([dotenvx](https://dotenvx.com/) — [`docs/dotenvx.md`](docs/dotenvx.md)): `dotenvx encrypt` → `dotenvx bitwarden up` → `git add .env && git commit -m "encrypt .env"` → `dotenvx run -- python main.py`.
 
 ## Twitch API keys
 

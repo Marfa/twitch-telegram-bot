@@ -12,7 +12,7 @@ Source: adapted from [awesome-cursorrules](https://github.com/PatrickJS/awesome-
 
 - Python 3.13, `python-telegram-bot` (async), `requests`, SQLite locally / PostgreSQL via `DATABASE_URL` + `psycopg`
 - Flat layout at repo root (`bot.py`, `config.py`, …) plus packages `db/`, `handlers/`, `self_check/` — do not invent a `src/` layout
-- Config only from env via `dotenv_loader` / `config.py` (`.env` / `.env.example`); local encrypt + Bitwarden per [`dotenvx-bitwarden.mdc`](dotenvx-bitwarden.mdc); never commit secrets / `.env.keys`
+- Config only from env via `dotenv_loader` / `config.py` (encrypted `.env` in git / `.env.example`); Bitwarden private key per [`dotenvx-bitwarden.mdc`](dotenvx-bitwarden.mdc); never commit `.env.keys` / plaintext secrets
 - Checks: prefer existing `python -m self_check` over adding a full pytest tree unless asked
 
 ## Style

@@ -1,68 +1,53 @@
 ---
-description: Local secrets via dotenvx + Bitwarden; Resilio Dropbox sync; VPS plaintext
+description: Local secrets via dotenvx + Bitwarden; encrypted .env in git; VPS plaintext
 alwaysApply: true
 ---
 
 # dotenvx + Bitwarden (local env)
 
-Canonical how-to: [`docs/dotenvx.md`](docs/dotenvx.md). Stack: [dotenvx](https://dotenvx.com/) · [Bitwarden custody](https://dotenvx.com/docs/custody/bitwarden/) · Resilio Sync.
+Canonical how-to: [`docs/dotenvx.md`](docs/dotenvx.md). Stack: [dotenvx](https://dotenvx.com/) · [Bitwarden custody](https://dotenvx.com/docs/custody/bitwarden/).
 
 ## Model
 
 | Place | Format | Private key |
 |---|---|---|
-| Dev PC (Win/macOS) project `.env` | Encrypted (`encrypted:…`) | Bitwarden / local `.env.keys` — not git, not Dropbox |
-| **Resilio SoR** | Encrypted `.env` only | Never |
+| Git (this public repo) | **Encrypted** `.env` (`encrypted:…`) | Never |
+| Dev PC (Win/macOS) | Same encrypted `.env` from git | Bitwarden (`dotenvx bitwarden up`) / local `.env.keys` |
 | VPS `/opt/twitch-telegram-bot` | **Plaintext** `.env` (compose / deploy) | N/A |
-| Public git | `.env.example` only | Never `.env.keys` / `DOTENV_PRIVATE_KEY` / `BW_SESSION` |
 
-### Encrypted `.env` sync (Resilio / Dropbox)
+Sync between devices = `git pull` of ciphertext + Bitwarden for the private key. No Resilio / Dropbox / side copies of `.env`.
 
-Source of truth for the **encrypted** file between personal machines:
-
-| Machine | Path (this Mac) | Notes |
-|---|---|---|
-| Ekaterinas-MacBook-Air | `/Users/Blogger/Dropbox/.env` | Resilio folder named Dropbox (`~/Dropbox`) |
-
-- Sync is **Resilio**, not Dropbox Inc. cloud. Folder may still be named `Dropbox`.
-- **Always** take the current encrypted `.env` from that Resilio path into the project (copy over repo `.env`).
-- After `dotenvx set` / encrypt / rotate on any PC: write the new encrypted `.env` **back** to the Resilio path.
-- Never put `.env.keys` or plaintext secrets in the Resilio folder.
-- Do **not** commit production ciphertext to the public GitHub remote.
-
-**If the Resilio/Dropbox path is missing** (other machine, different folder name, not mounted): **stop and ask the user** for the local path. Do not invent `~/Dropbox`, OneDrive, or CasaOS paths.
+**Trade-off:** anyone with the Bitwarden private key can decrypt every historical commit that contains that ciphertext. Protect the vault item; rotate the keypair after any leak.
 
 ## Agent must
 
 - Load via `dotenv_loader` / `config.py` — never invent a second parser
-- Prefer `dotenvx set KEY "value"` for encrypted local updates (then sync VPS plaintext per [`twitch-client-secret.mdc`](twitch-client-secret.mdc) **and** copy encrypted `.env` to the Resilio path)
-- Before trusting local repo `.env`, refresh from Resilio SoR when that path exists
-- Run local bot with `dotenvx run -- python main.py` (or after Bitwarden unlock / `.env.keys`)
+- Prefer `dotenvx set KEY "value"` for encrypted updates, then **commit** the encrypted `.env` (and push when syncing devices)
+- After changes to critical keys, also sync VPS **plaintext** per [`twitch-client-secret.mdc`](twitch-client-secret.mdc)
+- Run local bot with `dotenvx run -- python main.py` (or Bitwarden unlock / `.env.keys`)
 - Keep `.env.keys`, plaintext secrets, Hostkey/API keys, `BW_SESSION` out of chat, commits, logs — print counts/prefixes only
-- Refuse committing `.env.keys`; remind `dotenvx bitwarden up` if a private key appears on disk after encrypt/rotate
+- Refuse committing `.env.keys` or plaintext secrets; remind `dotenvx bitwarden up` if a private key appears on disk after encrypt/rotate
 - Know that `dotenvx bitwarden pull` needs a **local custody reference** from a prior `bitwarden up` on this machine; otherwise materialize `.env.keys` via `bw get password <item-id>` (never print the key)
-- Docker image: no `.env` / `.env.keys` (`.dockerignore`)
+- Docker image: no `.env` / `.env.keys` (`.dockerignore`); VPS deploy must keep restoring plaintext `.env` (not the git ciphertext)
 
 ## Agent must not
 
+- Use Resilio / Dropbox / USB as the env sync path
 - Put private key or vault session in source / README / rules examples with real values
-- Put `.env.keys` into Resilio/Dropbox
+- Commit `.env.keys` or a plaintext `.env`
 - Replace VPS plaintext workflow with encrypted-only without an explicit user request
 - Log decrypted env or `bw` / Hostkey tokens
 - Assume Bitwarden custody is done while `.env.keys` still holds `DOTENV_PRIVATE_KEY=…`
-- Guess the sync folder on an unknown machine — ask
 
 ## Quick commands
 
 ```bash
-# refresh ciphertext from Resilio SoR (this Mac)
-cp -f ~/Dropbox/.env .env
-
 dotenvx set SOME_KEY "new-value"
-cp -f .env ~/Dropbox/.env   # publish back to Resilio
+git add .env
+git commit -m "encrypt .env"
 
 export BW_SESSION="$(bw unlock --raw)"
-dotenvx bitwarden up        # custody after encrypt/rotate (removes .env.keys)
+dotenvx bitwarden up        # after first encrypt / rotate
 dotenvx run -- python main.py
 ```
 

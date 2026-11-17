@@ -94,7 +94,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Синхронизация `.env` между Windows / macOS без ключа в git: [dotenvx](https://dotenvx.com/) + Bitwarden — [`docs/dotenvx.md`](docs/dotenvx.md) (`dotenvx encrypt` → `dotenvx bitwarden up` → `dotenvx run -- python main.py`).
+Секреты локально: encrypted `.env` в git + private key в Bitwarden ([dotenvx](https://dotenvx.com/) — [`docs/dotenvx.md`](docs/dotenvx.md)): `dotenvx encrypt` → `dotenvx bitwarden up` → `git add .env && git commit -m "encrypt .env"` → `dotenvx run -- python main.py`.
 
 ## Twitch API ключи
 

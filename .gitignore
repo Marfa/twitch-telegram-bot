@@ -1,7 +1,6 @@
-.env
+# Encrypted .env is committed (dotenvx). Private keys stay out of git.
 .env.local
 .env.*.local
-# dotenvx private keys — custody in Bitwarden (never commit)
 .env.keys
 .env.keys.*
 .deploy-sha

@@ -42,7 +42,7 @@ Adapted for this Telegram bot (handlers + small HTTP surface), not a full web AS
 
 | # | Check | Expected |
 |---|--------|----------|
-| C1 | No secrets in git | `.env` / `.env.keys` gitignored; dotenvx private key in Bitwarden (`docs/dotenvx.md`); `gitleaks` + `omerta` CI green; local hook `scripts/pre-commit-gitleaks.sh` |
+| C1 | No secrets in git | Encrypted `.env` may be committed; `.env.keys` / plaintext never; dotenvx private key in Bitwarden (`docs/dotenvx.md`); `gitleaks` + `omerta` CI green; local hook `scripts/pre-commit-gitleaks.sh` |
 | C2 | Twitch refresh tokens encrypted at rest | `token_crypto` / `enc:v1:`; prefer dedicated `TOKEN_ENCRYPTION_KEY` in prod |
 | C3 | Logs do not print access/refresh tokens or API keys | OAuth paths avoid `logger.exception` with tokens in locals; PostHog scrubbers |
 | C4 | OAuth `state` unpredictable + short TTL + one-time | uuid4 / equivalent; pop-on-use; TTL ≤ 10–15 min |
