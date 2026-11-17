@@ -23,8 +23,8 @@ Docker/`compose*.yml` on the VPS still use plaintext `env_file: .env` (not the c
 
 ## One-time setup (PC #1)
 
-1. Install tools  
-   - **dotenvx:** Windows `winget install dotenvx.dotenvx` · macOS binary / brew · [releases](https://github.com/dotenvx/dotenvx/releases)  
+1. Install tools (**host CLIs**, not Python/`requirements.txt` deps)  
+   - **dotenvx:** Windows `winget install dotenvx.dotenvx` · macOS binary / brew · [releases](https://github.com/dotenvx/dotenvx/releases) — keep reasonably current on each PC; the repo does not pin a version  
    - **Bitwarden CLI:** `bw` ([install](https://bitwarden.com/help/cli/)) → `bw login`
 
 2. Fill secrets (from `.env.example` if needed), then:

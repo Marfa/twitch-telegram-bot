@@ -7,47 +7,74 @@ alwaysApply: true
 
 Canonical how-to: [`docs/dotenvx.md`](docs/dotenvx.md). Stack: [dotenvx](https://dotenvx.com/) · [Bitwarden custody](https://dotenvx.com/docs/custody/bitwarden/).
 
+Critical key changes also follow [`twitch-client-secret.mdc`](twitch-client-secret.mdc) (local ciphertext → VPS plaintext → verify).
+
+## Tooling (not a Python dep)
+
+- `dotenvx` is a **host CLI** (`~/.local/bin`, brew, winget) — **not** in `requirements.txt` / Docker image.
+- Keep a current CLI on each PC; no need to pin it in the repo. Bot runtime uses `dotenv_loader` + optional `dotenvx decrypt` on PATH.
+- Bitwarden CLI: `bw` on each PC; same vault account.
+
 ## Model
 
 | Place | Format | Private key |
 |---|---|---|
 | Git (this public repo) | **Encrypted** `.env` (`encrypted:…`) | Never |
-| Dev PC (Win/macOS) | Same encrypted `.env` from git | Bitwarden (`dotenvx bitwarden up`) / local `.env.keys` |
-| VPS `/opt/twitch-telegram-bot` | **Plaintext** `.env` (compose / deploy) | N/A |
+| Dev PC (Win/macOS) | Same file from `git pull` | Bitwarden / temporary `.env.keys` |
+| VPS `/opt/twitch-telegram-bot` | **Plaintext** `.env` (compose; deploy restores it) | N/A |
 
-Sync between devices = `git pull` of ciphertext + Bitwarden for the private key. No Resilio / Dropbox / side copies of `.env`.
+Device sync = `git pull` of ciphertext + Bitwarden for the private key. No Resilio / Dropbox / USB copies of `.env`.
 
-**Trade-off:** anyone with the Bitwarden private key can decrypt every historical commit that contains that ciphertext. Protect the vault item; rotate the keypair after any leak.
+**Trade-off:** anyone with the Bitwarden private key can decrypt every git revision of that ciphertext. Protect the vault; rotate after leaks.
 
-## Agent must
+**Bitwarden item title:** native name is `dotenvx (02A 49E)`-style (short public key). Do **not** rename to `DOTENV_PRIVATE_KEY` — that string is only the field in `.env.keys` / env. `bitwarden pull` needs a **local custody UUID** from a prior `bitwarden up` on this machine; otherwise `bw get password <item-id>` → `.env.keys` (never print the key). After UI vault edits: `bw sync`.
 
-- Load via `dotenv_loader` / `config.py` — never invent a second parser
-- Prefer `dotenvx set KEY "value"` for encrypted updates, then **commit** the encrypted `.env` (and push when syncing devices)
-- After changes to critical keys, also sync VPS **plaintext** per [`twitch-client-secret.mdc`](twitch-client-secret.mdc)
-- Run local bot with `dotenvx run -- python main.py` (or Bitwarden unlock / `.env.keys`)
-- Keep `.env.keys`, plaintext secrets, Hostkey/API keys, `BW_SESSION` out of chat, commits, logs — print counts/prefixes only
-- Refuse committing `.env.keys` or plaintext secrets; remind `dotenvx bitwarden up` if a private key appears on disk after encrypt/rotate
-- Know that `dotenvx bitwarden pull` needs a **local custody reference** from a prior `bitwarden up` on this machine; otherwise materialize `.env.keys` via `bw get password <item-id>` (never print the key)
-- Docker image: no `.env` / `.env.keys` (`.dockerignore`); VPS deploy must keep restoring plaintext `.env` (not the git ciphertext)
+## Agent must — day-to-day
+
+1. Load only via `dotenv_loader` / `config.py` — no second parser.
+2. Change secrets with `dotenvx set KEY "value"` (keeps encryption). Never paste plaintext into an encrypted `.env` by hand.
+3. Then publish ciphertext:
+   ```bash
+   git add .env
+   git commit -m "encrypt .env"
+   git push   # when other devices / remote should see it
+   ```
+4. If the key is critical (see [`twitch-client-secret.mdc`](twitch-client-secret.mdc)): update VPS **plaintext** `.env` and recreate `bot` in the same turn; verify.
+5. Run locally: `dotenvx run -- python main.py` (or `scripts/env-run.sh` / `.ps1`).
+6. After first encrypt / rotate: `export BW_SESSION="$(bw unlock --raw)"` → `dotenvx bitwarden up` (removes `.env.keys`). Remind the user if `.env.keys` is still on disk.
+7. Refuse committing `.env.keys`, plaintext secrets, `BW_SESSION`. Log only counts/prefixes/lengths.
+8. Docker: no `.env` / `.env.keys` in the image (`.dockerignore`). Never treat git ciphertext as VPS runtime env.
+
+## Agent must — second PC / new clone
+
+1. `git pull` (encrypted `.env` arrives).
+2. `bw login` / unlock; materialize key (`bitwarden pull` if local ref exists, else `bw get password <item-id>` → `.env.keys`).
+3. `dotenvx run -- python main.py`.
 
 ## Agent must not
 
-- Use Resilio / Dropbox / USB as the env sync path
-- Put private key or vault session in source / README / rules examples with real values
-- Commit `.env.keys` or a plaintext `.env`
+- Put dotenvx in `requirements.txt` or bake `.env.keys` into CI/image
+- Use Resilio / Dropbox / side folders as env SoR
+- Commit plaintext `.env` or `.env.keys`
+- Put private keys / `BW_SESSION` in chat, rules examples, or commits
 - Replace VPS plaintext workflow with encrypted-only without an explicit user request
-- Log decrypted env or `bw` / Hostkey tokens
-- Assume Bitwarden custody is done while `.env.keys` still holds `DOTENV_PRIVATE_KEY=…`
+- Assume custody is done while `.env.keys` still holds `DOTENV_PRIVATE_KEY=…`
+- Dump `bw list` JSON (it includes passwords) into chat
+
+## CI notes (do not “fix” by adding the private key to Actions)
+
+- Self-check / GHA use `CI` / `DOTENV_OPTIONAL` so `dotenv_loader` soft-skips decrypt.
+- Omerta hides tracked ciphertext `.env` during check (not a plaintext value source). Optional local omerta values: `.env.local` (gitignored).
 
 ## Quick commands
 
 ```bash
 dotenvx set SOME_KEY "new-value"
-git add .env
-git commit -m "encrypt .env"
+git add .env && git commit -m "encrypt .env" && git push
 
 export BW_SESSION="$(bw unlock --raw)"
-dotenvx bitwarden up        # after first encrypt / rotate
+bw sync
+dotenvx bitwarden up
 dotenvx run -- python main.py
 ```
 
