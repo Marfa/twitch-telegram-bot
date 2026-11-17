@@ -66,9 +66,51 @@ def check_product_flags() -> None:
         cfg.ENABLE_PREMIUM, cfg.ENABLE_HELP, cfg.ENABLE_PARTNER = saved
 
 
+def check_dotenv_loader() -> None:
+    """Plaintext load + encrypted-without-key fails closed."""
+    import tempfile
+
+    from dotenv_loader import (
+        apply_env_pairs,
+        load_dotenv,
+        parse_env_text,
+        text_has_ciphertext,
+    )
+
+    pairs = parse_env_text('FOO=bar\n# c\nQUOTED="x y"\n')
+    assert pairs == {"FOO": "bar", "QUOTED": "x y"}
+    assert text_has_ciphertext('A=encrypted:abc\nDOTENV_PUBLIC_KEY="pub"\n')
+    assert not text_has_ciphertext('A=plain\nDOTENV_PUBLIC_KEY="pub"\n')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env_path = Path(tmp) / ".env"
+        env_path.write_text("SELFCHECK_DOTENV_PLAIN=ok\n", encoding="utf-8")
+        os.environ.pop("SELFCHECK_DOTENV_PLAIN", None)
+        load_dotenv(env_path)
+        assert os.environ.get("SELFCHECK_DOTENV_PLAIN") == "ok"
+        os.environ.pop("SELFCHECK_DOTENV_PLAIN", None)
+
+        env_path.write_text(
+            'DOTENV_PUBLIC_KEY="02deadbeef"\n'
+            "SELFCHECK_DOTENV_SECRET=encrypted:notarealcipher\n",
+            encoding="utf-8",
+        )
+        os.environ.pop("SELFCHECK_DOTENV_SECRET", None)
+        try:
+            load_dotenv(env_path)
+            raise AssertionError("expected RuntimeError for undecryptable .env")
+        except RuntimeError as exc:
+            assert "Encrypted values" in str(exc)
+            assert "Bitwarden" in str(exc)
+
+        apply_env_pairs({"DOTENV_PRIVATE_KEY": "should-not-apply"}, overload=True)
+        assert os.environ.get("DOTENV_PRIVATE_KEY") != "should-not-apply"
+
+
 def main() -> None:
     check_undefined_names()
     check_product_flags()
+    check_dotenv_loader()
     check_core()
     check_db_premium()
     check_handlers()

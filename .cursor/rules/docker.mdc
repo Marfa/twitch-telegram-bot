@@ -20,7 +20,7 @@ Source: [awesome-cursorrules docker.mdc](https://github.com/PatrickJS/awesome-cu
 
 - Never run as root in production
 - No secrets in Dockerfile, build args, or image layers
-- Keep `.env` out of the image (`.dockerignore`)
+- Keep `.env` and `.env.keys` out of the image (`.dockerignore`); VPS injects plaintext via compose `env_file`
 
 ## Compose / runtime
 

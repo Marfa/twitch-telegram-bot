@@ -1,4 +1,9 @@
 .env
+.env.local
+.env.*.local
+# dotenvx private keys — custody in Bitwarden (never commit)
+.env.keys
+.env.keys.*
 .deploy-sha
 __pycache__/
 *.pyc

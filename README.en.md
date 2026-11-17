@@ -89,10 +89,12 @@ Prices from env: `PREMIUM_STARS_AMOUNT`, `PREMIUM_STARS_YEAR`, `PREMIUM_STARS_LI
 Local run:
 
 ```bash
-python -m venv.venv && source.venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
+
+Sync `.env` across Windows / macOS without putting the private key in git: [dotenvx](https://dotenvx.com/) + Bitwarden — [`docs/dotenvx.md`](docs/dotenvx.md) (`dotenvx encrypt` → `dotenvx bitwarden up` → `dotenvx run -- python main.py`).
 
 ## Twitch API keys
 

@@ -7,28 +7,17 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import requests
 
+from dotenv_loader import load_dotenv as _load_dotenv
+
 logger = logging.getLogger(__name__)
 
-# Load .env into os.environ without importing config (avoids hard fail on placeholders).
-_env_path = Path(".env")
-if _env_path.is_file():
-    for _raw in _env_path.read_text(encoding="utf-8").splitlines():
-        _line = _raw.strip()
-        if not _line or _line.startswith("#") or "=" not in _line:
-            continue
-        _k, _, _v = _line.partition("=")
-        _k, _v = _k.strip(), _v.strip()
-        if (_v.startswith('"') and _v.endswith('"')) or (
-            _v.startswith("'") and _v.endswith("'")
-        ):
-            _v = _v[1:-1]
-        os.environ.setdefault(_k, _v)
+# Load .env without importing config (avoids hard fail on placeholders).
+_load_dotenv()
 
 _GP_BASE = "https://www.gamerpower.com/api"
 _ITAD_BASE = "https://api.isthereanydeal.com"

@@ -1,4 +1,5 @@
 # Values from untracked .env / .env.local — not templates (*.example are skipped as sources).
+# Never list .env.keys here as a “source of truth” to embed; keys live in Bitwarden.
 env-files = [".env", ".env.local"]
 
 # Non-secrets that intentionally appear in docs/compose/config defaults.

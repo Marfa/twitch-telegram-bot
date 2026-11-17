@@ -10,9 +10,9 @@ Source: [awesome-cursorrules security-devsecops-ssdls-appsec.mdc](https://github
 
 ## General
 
-- Never hardcode secrets, tokens, or API keys — use env / vaults
-- Do not commit `.env`, private keys, or unknown tokens
-- Never log secrets, session tokens, or OAuth codes
+- Never hardcode secrets, tokens, or API keys — local: dotenvx + Bitwarden ([`dotenvx-bitwarden.mdc`](dotenvx-bitwarden.mdc)); VPS: plaintext `.env`
+- Do not commit `.env`, `.env.keys`, `DOTENV_PRIVATE_KEY`, `BW_SESSION`, Hostkey API keys, or unknown tokens
+- Never log secrets, session tokens, OAuth codes, or decrypted env
 - Validate and sanitize user input; escape output in HTML/JS/SQL contexts
 - Avoid `eval` / unsafe dynamic execution
 

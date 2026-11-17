@@ -10,9 +10,9 @@ Canonical sources of truth for humans and AI agents. When docs or rules conflict
 | Beta features (opt-in) | `beta/manifest.json` | `beta.py` runtime view | Lifecycle: `.github/workflows/beta-lifecycle.yml` |
 | Beta enrollment state | DB (`beta_enrollments`) | — | Per-user opt-in |
 | Config defaults | `config.py` | — | |
-| Runtime secrets | `.env` (not in git) | `.env.example` | Contract for devs |
+| Runtime secrets | `.env` (not in git; plaintext on VPS) | `.env.example`; optional dotenvx encrypt + Bitwarden key custody (`docs/dotenvx.md`) | Never commit `.env.keys` |
 | User / subscription data | DB (`db/` schema) | — | SQLite local; Postgres on VPS |
-| Env contract | `.env.example` | README Quick Start | |
+| Env contract | `.env.example` | README Quick Start; `docs/dotenvx.md` | |
 | Deploy topology | `compose.yml`, `compose.vps.yml` | VPS scripts in `scripts/` | |
 | Onboarding | `README.md`, `README.en.md` | — | Update both when product surface changes |
 | End-user guide (public HTML) | `webapp/guide/ru.html`, `webapp/guide/en.html` | served as `/guide` | Update when user-facing features change (`.cursor/rules/user-guide.mdc`) |

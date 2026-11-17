@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install: cp scripts/pre-commit-gitleaks.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 # Runs gitleaks (pattern) + omerta (your .env values) on staged changes.
+# Optional: dotenvx protect (blocks unencrypted secret / .env.keys commits).
 set -euo pipefail
 
 if ! command -v gitleaks >/dev/null 2>&1; then
@@ -8,6 +9,16 @@ if ! command -v gitleaks >/dev/null 2>&1; then
   exit 1
 fi
 gitleaks protect --staged --verbose
+
+if command -v dotenvx >/dev/null 2>&1; then
+  dotenvx protect
+fi
+
+# Never allow private key files in the index.
+if git diff --cached --name-only | grep -E '(^|/)\.env\.keys(\.|$)' >/dev/null 2>&1; then
+  echo "Refusing commit: .env.keys must stay out of git (use Bitwarden: dotenvx bitwarden up)." >&2
+  exit 1
+fi
 
 run_omerta() {
   if command -v uvx >/dev/null 2>&1; then

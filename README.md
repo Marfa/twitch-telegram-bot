@@ -83,16 +83,18 @@ English: [README.en.md](README.en.md)
 
 1. Бот у [@BotFather](https://t.me/BotFather) → `TELEGRAM_BOT_TOKEN`
 2. Приложение на [Twitch Developer Console](https://dev.twitch.tv/console) → `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` (см. ниже)
-3. `cp.env.example.env` — заполните переменные
+3. `cp .env.example .env` — заполните переменные
 4. `docker compose up -d --build`
 
 Локально:
 
 ```bash
-python -m venv.venv && source.venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
+
+Синхронизация `.env` между Windows / macOS без ключа в git: [dotenvx](https://dotenvx.com/) + Bitwarden — [`docs/dotenvx.md`](docs/dotenvx.md) (`dotenvx encrypt` → `dotenvx bitwarden up` → `dotenvx run -- python main.py`).
 
 ## Twitch API ключи
 
