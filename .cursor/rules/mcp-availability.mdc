@@ -31,7 +31,7 @@ Do **not** burn a long workflow before the check. One short availability pass is
 
 1. **Stop** the part of the work that needs that MCP (or stop entirely if the task cannot proceed without it).
 2. **Ask the user** to connect / enable / re-auth the missing MCP(s). Name them explicitly (e.g. «PostHog MCP», «Viaduct», «PingZen»).
-3. Give a short hint: Cursor Settings → MCP; for Viaduct also `VIADUCT_MCP_TOKEN` in `.env`; then reload MCP / retry.
+3. Give a short hint: Cursor Settings → MCP; for Viaduct also `VIADUCT_MCP_TOKEN` in `.env`; for **vps-db** SSH failures check gitignored `.ssh/artalk_vps` (`./scripts/vps-ssh-key-pull.sh` from Bitwarden), then reload MCP / retry.
 4. Resume only after the user confirms they are connected, or after a re-check shows the namespace is ready.
 
 ## Do not

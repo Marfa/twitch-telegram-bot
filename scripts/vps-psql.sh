@@ -12,9 +12,13 @@
 #   VPS_PSQL_SOURCE=aiven ./scripts/vps-psql.sh -c "SELECT 1"
 #
 # VPS SSH auth (first match wins):
-#   1) VPS_SSH_KEY — path to a private key
-#   2) ssh without -i — ~/.ssh/config Host / ssh-agent (recommended on other PCs)
-#   3) ~/.ssh/artalk_vps — convenience fallback on the primary machine only
+#   1) VPS_SSH_KEY — path to a private key (absolute, or relative to repo root)
+#   2) <repo>/.ssh/artalk_vps — materialize from Bitwarden (see scripts/vps-ssh-key-pull.sh)
+#   3) ssh without -i — ~/.ssh/config Host / ssh-agent
+#   4) ~/.ssh/artalk_vps — last-resort convenience on one machine only
+#
+# Do not put the PEM in .env. Store the key in Bitwarden (SSH key item);
+# VPS_SSH_KEY is only a local path (typically .ssh/artalk_vps).
 #
 # Other env overrides (optional):
 #   VPS_SSH_HOST        default bot.themarfa.name
@@ -132,16 +136,39 @@ run_aiven_psql() {
   fi
 }
 
+resolve_vps_ssh_key() {
+  # Print absolute path to a usable private key, or empty if none.
+  local cand=""
+  if [[ -n "${VPS_SSH_KEY:-}" ]]; then
+    cand="$VPS_SSH_KEY"
+    if [[ "$cand" != /* && "$cand" != ~* ]]; then
+      cand="$REPO_ROOT/$cand"
+    fi
+    cand="${cand/#\~/$HOME}"
+    if [[ -f "$cand" ]]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+    echo "error: VPS_SSH_KEY is set but file missing: $VPS_SSH_KEY" >&2
+    return 1
+  fi
+  for cand in "$REPO_ROOT/.ssh/artalk_vps" "$HOME/.ssh/artalk_vps"; do
+    if [[ -f "$cand" ]]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  return 0
+}
+
 run_vps_psql() {
   local ssh_identity_args=()
-  if [[ -n "${VPS_SSH_KEY:-}" ]]; then
-    if [[ ! -f "$VPS_SSH_KEY" ]]; then
-      echo "error: VPS_SSH_KEY is set but file missing: $VPS_SSH_KEY" >&2
-      return 1
-    fi
-    ssh_identity_args=(-i "$VPS_SSH_KEY" -o IdentitiesOnly=yes)
-  elif [[ -f "$HOME/.ssh/artalk_vps" ]]; then
-    ssh_identity_args=(-i "$HOME/.ssh/artalk_vps" -o IdentitiesOnly=yes)
+  local key_path=""
+  if ! key_path="$(resolve_vps_ssh_key)"; then
+    return 1
+  fi
+  if [[ -n "$key_path" ]]; then
+    ssh_identity_args=(-i "$key_path" -o IdentitiesOnly=yes)
   fi
   # else: rely on ssh-agent / IdentityFile in ~/.ssh/config for this host
 
@@ -172,12 +199,9 @@ case "$VPS_PSQL_SOURCE" in
 error: cannot reach VPS Postgres via SSH.
 
 On this machine, set up one of:
-  export VPS_SSH_KEY=/path/to/private_key
-  # or ~/.ssh/config, e.g.:
-  #   Host bot.themarfa.name
-  #     User root
-  #     IdentityFile ~/.ssh/your_vps_key
-  #     IdentitiesOnly yes
+  ./scripts/vps-ssh-key-pull.sh          # Bitwarden → <repo>/.ssh/artalk_vps
+  export VPS_SSH_KEY=.ssh/artalk_vps     # or absolute path
+  # or ~/.ssh/config IdentityFile for bot.themarfa.name
 Or use Aiven DR: ./scripts/vps-psql.sh --aiven -c "SELECT …"
 EOF
       exit 1
@@ -195,7 +219,8 @@ EOF
 error: cannot reach VPS Postgres via SSH, and Aiven fallback failed.
 
 VPS auth — set up one of:
-  export VPS_SSH_KEY=/path/to/private_key
+  ./scripts/vps-ssh-key-pull.sh
+  export VPS_SSH_KEY=.ssh/artalk_vps
   # or ~/.ssh/config IdentityFile for bot.themarfa.name
 
 Aiven — set AIVEN_DATABASE_URL in the environment or repo .env

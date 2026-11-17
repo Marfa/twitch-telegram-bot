@@ -79,6 +79,27 @@ git add .env
 git commit -m "encrypt .env"
 ```
 
+## VPS SSH key (not dotenvx ciphertext)
+
+OpenSSH needs a **file**, not a PEM string in `.env`. Keep the private key in Bitwarden as an **SSH key** item; materialize locally:
+
+```bash
+export BW_SESSION="$(bw unlock --raw)"
+./scripts/vps-ssh-key-pull.sh          # → .ssh/artalk_vps (gitignored, 600)
+# optional name override if the vault title differs:
+# ./scripts/vps-ssh-key-pull.sh "VPS HOSTKET"
+```
+
+`.env` / `.env.example` only store the path:
+
+```bash
+VPS_SSH_KEY=.ssh/artalk_vps
+```
+
+Project MCP `vps-db` (`.cursor/mcp.json`) sets the same `env.VPS_SSH_KEY` so Cursor does not need a shell export. Details: `.cursor/rules/vps-db-query.mdc`.
+
+Do **not** put the private key in Dropbox, commit `.ssh/`, or paste PEM into dotenvx.
+
 ## Docker / VPS
 
 Leave server `.env` **plaintext**. `scripts/vps-deploy.sh` backs up and restores it around `git pull` so committed ciphertext does not become runtime env.

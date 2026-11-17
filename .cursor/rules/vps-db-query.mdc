@@ -36,24 +36,34 @@ If **`vps-db` MCP is unavailable**: ask the user to enable/reload it (Cursor Set
 
 ## Auth on any PC
 
-### VPS SSH
+### VPS SSH (Bitwarden → repo-local file)
 
-Do **not** assume `~/.ssh/artalk_vps` exists (local convenience on one machine only).
+| Place | What |
+|---|---|
+| Bitwarden | SoR — item type **SSH key** (e.g. `VPS HOSTKEY` / `VPS HOSTKET`) |
+| Disk | `<repo>/.ssh/artalk_vps` (`600`, **gitignored**) |
+| `.env` | `VPS_SSH_KEY=.ssh/artalk_vps` — **path only**, never the PEM |
+| MCP `vps-db` | `.cursor/mcp.json` sets `env.VPS_SSH_KEY=.ssh/artalk_vps`; server also defaults to that file |
 
-Order used by the script:
+Do **not** store the private key in Dropbox, git, or as PEM inside `.env` / dotenvx. OpenSSH needs a file; dotenvx holds only the path.
 
-1. `VPS_SSH_KEY=/path/to/key` if set
-2. Otherwise plain `ssh` (agent / `~/.ssh/config` `IdentityFile`)
-3. Else `~/.ssh/artalk_vps` if that file happens to exist
+First-time / new PC:
 
-Example config on another PC:
-
+```bash
+export BW_SESSION="$(bw unlock --raw)"
+./scripts/vps-ssh-key-pull.sh          # or: ./scripts/vps-ssh-key-pull.sh "VPS HOSTKET"
+chmod 600 .ssh/artalk_vps              # pull script already sets 600
+# Reload Cursor MCP (vps-db) after the file exists
 ```
-Host bot.themarfa.name
-  User root
-  IdentityFile ~/.ssh/your_vps_key
-  IdentitiesOnly yes
-```
+
+Auth order in [`scripts/vps-psql.sh`](scripts/vps-psql.sh):
+
+1. `VPS_SSH_KEY` if set (absolute, or relative to **repo root**)
+2. `<repo>/.ssh/artalk_vps`
+3. plain `ssh` (agent / `~/.ssh/config` `IdentityFile`)
+4. `~/.ssh/artalk_vps` (last-resort convenience)
+
+If MCP `run_sql` fails with SSH `Permission denied` / missing key: check `.ssh/artalk_vps` exists and is `600`, then reload MCP — do not invent other DB routes.
 
 ### Aiven URL
 
@@ -74,6 +84,7 @@ If both VPS and Aiven fail, report the error and **stop** — do not invent furt
 - New one-off query scripts unless the user asks
 - Writes via Aiven or treating Aiven as live SoR
 - Official Aiven HTTP MCP (`aiven` in mcp.json) as a substitute for live VPS writes
+- Putting SSH PEM into dotenvx / chat / commits
 
 ## Premium unlock check (example)
 

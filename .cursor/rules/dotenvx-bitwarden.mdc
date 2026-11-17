@@ -25,6 +25,8 @@ Critical key changes also follow [`twitch-client-secret.mdc`](twitch-client-secr
 
 Device sync = `git pull` of ciphertext + Bitwarden for the private key. No Resilio / Dropbox / USB copies of `.env`.
 
+**VPS SSH key (separate from dotenvx):** SoR = Bitwarden **SSH key** item → materialize to gitignored `<repo>/.ssh/artalk_vps` via [`scripts/vps-ssh-key-pull.sh`](scripts/vps-ssh-key-pull.sh). `.env` may hold only `VPS_SSH_KEY=.ssh/artalk_vps` (path). Never put the PEM in dotenvx / Dropbox / git. See [`vps-db-query.mdc`](vps-db-query.mdc).
+
 **Trade-off:** anyone with the Bitwarden private key can decrypt every git revision of that ciphertext. Protect the vault; rotate after leaks.
 
 **Bitwarden item title:** native name is `dotenvx (02A 49E)`-style (short public key). Do **not** rename to `DOTENV_PRIVATE_KEY` — that string is only the field in `.env.keys` / env. `bitwarden pull` needs a **local custody UUID** from a prior `bitwarden up` on this machine; otherwise `bw get password <item-id>` → `.env.keys` (never print the key). After UI vault edits: `bw sync`.

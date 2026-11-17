@@ -7,6 +7,7 @@ Supports SELECT and DML/DDL against live VPS — not read-only.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -15,6 +16,25 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VPS_PSQL = REPO_ROOT / "scripts" / "vps-psql.sh"
+DEFAULT_VPS_SSH_KEY = REPO_ROOT / ".ssh" / "artalk_vps"
+
+
+def _ensure_vps_ssh_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Ensure VPS_SSH_KEY points at a usable key file for child processes.
+
+    Relative paths resolve against the repo root (not the process cwd).
+    If unset, default to <repo>/.ssh/artalk_vps when that file exists.
+    """
+    out = dict(env if env is not None else os.environ)
+    raw = (out.get("VPS_SSH_KEY") or "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        out["VPS_SSH_KEY"] = str(path)
+    elif DEFAULT_VPS_SSH_KEY.is_file():
+        out["VPS_SSH_KEY"] = str(DEFAULT_VPS_SSH_KEY)
+    return out
 SERVER_NAME = "vps-db"
 SERVER_VERSION = "1.0.0"
 PROTOCOL_VERSION = "2024-11-05"
@@ -139,6 +159,7 @@ def run_sql(
         text=True,
         timeout=timeout_sec,
         cwd=str(REPO_ROOT),
+        env=_ensure_vps_ssh_env(),
     )
     out = proc.stdout or ""
     err = proc.stderr or ""
