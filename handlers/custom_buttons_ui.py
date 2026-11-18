@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import logging
 from typing import Awaitable, Callable
 
 from telegram import Update
@@ -14,6 +15,8 @@ import premium as prem
 from bot_helpers import _user_lang, reply_chat_id
 from db import Database
 from i18n import all_wizard_nav_buttons, custom_buttons_keyboard, is_menu_button, t
+
+logger = logging.getLogger(__name__)
 
 OnDone = Callable[[Update, ContextTypes.DEFAULT_TYPE, str], Awaitable[int]]
 OnBack = Callable[[Update, ContextTypes.DEFAULT_TYPE, str], Awaitable[int]]
@@ -68,8 +71,8 @@ async def show_custom_buttons_screen(
                 text, reply_markup=markup, parse_mode=ParseMode.HTML
             )
             return state
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("custom_buttons screen edit failed: %s", exc)
     if update.callback_query:
         await context.bot.send_message(
             chat_id, text, reply_markup=markup, parse_mode=ParseMode.HTML
@@ -111,6 +114,12 @@ async def receive_custom_buttons_callback(
 
     parts = (query.data or "").split(":")
     action = parts[1] if len(parts) > 1 else ""
+    logger.info(
+        "custom_buttons callback action=%s user=%s buttons=%s",
+        action or "-",
+        query.from_user.id,
+        len(_ud_buttons(context)),
+    )
 
     if action == "cancel" and on_cancel:
         return await on_cancel(update, context)
@@ -227,6 +236,7 @@ async def receive_custom_buttons_text(
 
     parsed = cbtn.parse_button_line(text)
     if not parsed:
+        logger.debug("custom_buttons invalid input user=%s", update.effective_user.id)
         await update.effective_message.reply_text(
             t("custom_buttons_invalid", lang),
             parse_mode=ParseMode.HTML,
@@ -253,6 +263,12 @@ async def receive_custom_buttons_text(
     context.user_data.pop("cbtn_edit_index", None)
     if persist:
         persist(context)
+    logger.info(
+        "custom_buttons saved user=%s mode=%s buttons=%s",
+        update.effective_user.id,
+        mode or "add",
+        len(buttons),
+    )
     return await show_custom_buttons_screen(
         update,
         context,

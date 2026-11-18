@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
@@ -21,6 +23,8 @@ from stream_alert_defaults import (
     subscription_update_from_defaults,
     update_defaults_draft,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def defaults_options_markup(
@@ -92,6 +96,7 @@ async def show_defaults_editor(
         except BadRequest as exc:
             if "not modified" not in str(exc).lower():
                 raise
+            logger.debug("stream_defaults editor not modified")
         return
     chat_id = reply_chat_id(update)
     await context.bot.send_message(
@@ -147,6 +152,7 @@ async def on_defedit_callback(
     db: Database = context.application.bot_data["db"]
     user_id = query.from_user.id
     draft = ensure_defaults_draft(context.user_data, db, user_id)
+    logger.info("stream_defaults callback field=%s user=%s", field, user_id)
 
     if field == "cancel":
         await query.answer()
@@ -166,6 +172,7 @@ async def on_defedit_callback(
         await query.answer()
         db.set_stream_alert_defaults(user_id, draft)
         n = db.resync_bound_stream_alert_defaults(user_id)
+        logger.info("stream_defaults saved user=%s resynced_subs=%s", user_id, n)
         context.user_data.clear()
         try:
             await query.edit_message_text("✓")
@@ -323,6 +330,7 @@ async def _handoff_edit_field(
         if field == "schedule_cancel":
             starter = start_edit_schedule_cancel
     if starter is None:
+        logger.warning("stream_defaults handoff unknown field=%s", field)
         await query.answer()
         return ConversationHandler.END
     return await starter(update, context)
@@ -356,6 +364,12 @@ async def on_edit_apply_defaults(
     from bot import _edit_options_for_sub
 
     turning_on = not bool(getattr(sub, "use_stream_defaults", False))
+    logger.info(
+        "stream_defaults apply sub=%s user=%s use_defaults=%s",
+        sub_id,
+        query.from_user.id,
+        turning_on,
+    )
     if turning_on:
         defaults = db.get_stream_alert_defaults(query.from_user.id)
         if not defaults_ready_to_apply(defaults):
