@@ -2034,7 +2034,7 @@ def check_handlers() -> None:
     assert (WEBAPP_DIR / "index.html").is_file()
     assert static_file("index.html") is not None
     assert static_file("app.js") is not None
-    assert '/app/chat/app.js?v=20' in (WEBAPP_DIR / "index.html").read_text(
+    assert '/app/chat/app.js?v=21' in (WEBAPP_DIR / "index.html").read_text(
         encoding="utf-8"
     )
     html = (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
@@ -2464,6 +2464,50 @@ def check_handlers() -> None:
         cdb.set_premium_permanent(779, True)
         with patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", fake):
             assert cw._other_promo_streams(779, sub_logins=set()) == []
+
+        # Relay send is bounded per Telegram user at Twitch's own chat rate:
+        # over the window the request stops before any Helix call.
+        from health import reset_http_rate_limits_for_tests
+
+        class _FakeTwitchSend:
+            def __init__(self):
+                self.sent = 0
+                self.resolved = 0
+
+            def parse_username(self, raw):
+                return (raw or "").strip().lower().lstrip("@")
+
+            def get_user(self, login):
+                self.resolved += 1
+                return {"id": "100", "login": login}
+
+            def refresh_user_token(self, refresh_token):
+                return {"access_token": "user-access", "refresh_token": refresh_token}
+
+            def send_chat_message(self, access, *, broadcaster_id, sender_id, message):
+                self.sent += 1
+                return {"message_id": "m1"}
+
+        reset_http_rate_limits_for_tests()
+        send_twitch = _FakeTwitchSend()
+        with patch.object(
+            cw, "TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK"
+        ), patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", send_twitch):
+            chat_token = cw.make_webapp_token(777)
+            for _ in range(cw._CHAT_SEND_LIMIT):
+                status, body = cw.api_send(
+                    token=chat_token, broadcaster_login="marfapr", message="hello"
+                )
+                assert status == 200 and body["ok"] is True
+            assert send_twitch.sent == cw._CHAT_SEND_LIMIT
+            status, body = cw.api_send(
+                token=chat_token, broadcaster_login="marfapr", message="hello"
+            )
+            assert status == 429 and body["error"] == "rate_limited"
+            assert body["retry_after"] == int(cw._CHAT_SEND_WINDOW_SEC)
+            assert send_twitch.sent == cw._CHAT_SEND_LIMIT
+            assert send_twitch.resolved == cw._CHAT_SEND_LIMIT
+        reset_http_rate_limits_for_tests()
 
     # Free user cannot enable a non-live alert without alert_types.
     import asyncio
