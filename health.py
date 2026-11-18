@@ -38,6 +38,9 @@ _pending_login_lock = threading.Lock()
 # Keyed by client IP (direct peer). Behind nginx, prefer limit_req there too.
 _HTTP_RL_LOCK = threading.Lock()
 _HTTP_RL_HITS: dict[str, list[float]] = {}
+# Shed logging state: one line per bucket kind per window, so a flood cannot amplify logs.
+_HTTP_RL_SHED_LAST: dict[str, float] = {}
+_HTTP_RL_SHED_COUNT: dict[str, int] = {}
 _HTTP_RL_OAUTH_LIMIT = 60
 _HTTP_RL_OAUTH_WINDOW_SEC = 60.0
 _HTTP_RL_HOOKS_LIMIT = 300
@@ -90,6 +93,26 @@ def _http_rate_limit_allow(
 def reset_http_rate_limits_for_tests() -> None:
     with _HTTP_RL_LOCK:
         _HTTP_RL_HITS.clear()
+        _HTTP_RL_SHED_LAST.clear()
+        _HTTP_RL_SHED_COUNT.clear()
+
+
+def _note_http_rate_limited(kind: str, path: str, window_sec: float) -> None:
+    """Report shed requests once per kind per window, counting the ones not logged."""
+    now = time.monotonic()
+    with _HTTP_RL_LOCK:
+        last = _HTTP_RL_SHED_LAST.get(kind)
+        if last is not None and now - last < window_sec:
+            _HTTP_RL_SHED_COUNT[kind] = _HTTP_RL_SHED_COUNT.get(kind, 0) + 1
+            return
+        _HTTP_RL_SHED_LAST[kind] = now
+        unshed_since_last = _HTTP_RL_SHED_COUNT.pop(kind, 0)
+    logger.warning(
+        "http rate limit shed kind=%s path=%s not_logged_since_last=%s",
+        kind,
+        path,
+        unshed_since_last,
+    )
 
 
 def _send_rate_limited(handler: BaseHTTPRequestHandler, *, retry_after: int) -> None:
@@ -118,6 +141,7 @@ def _enforce_http_rate_limit(handler: BaseHTTPRequestHandler, path: str) -> bool
     key = f"{kind}:{_http_client_ip(handler)}"
     if _http_rate_limit_allow(key, limit=limit, window_sec=window):
         return False
+    _note_http_rate_limited(kind, path, window)
     _send_rate_limited(handler, retry_after=max(1, int(window)))
     return True
 
@@ -1384,6 +1408,7 @@ def _handle_chat_webapp_post(handler: BaseHTTPRequestHandler) -> bool:
 
 class _HealthHandler(BaseHTTPRequestHandler):
     timeout = 60  # half-open clients must not hold a worker forever
+    _response_started = False
 
     def _path_only(self) -> str:
         return urlparse(self.path).path
@@ -1391,7 +1416,39 @@ class _HealthHandler(BaseHTTPRequestHandler):
     def _health_paths(self) -> bool:
         return self._path_only() == "/health"
 
+    def send_response(self, code: int, message: str | None = None) -> None:
+        self._response_started = True
+        super().send_response(code, message)
+
+    def _run_route(self, method: str, route: Callable[[], None]) -> None:
+        """Log a crashing route and answer 500 instead of dropping the connection."""
+        self._response_started = False
+        try:
+            route()
+        except (BrokenPipeError, ConnectionResetError):
+            # Client left mid-response; nothing for the operator to fix.
+            return
+        except Exception:
+            logger.exception(
+                "http request failed method=%s route=%s",
+                method,
+                self._path_only(),
+            )
+            if not self._response_started:
+                _send_bytes(
+                    self,
+                    b"internal error",
+                    content_type="text/plain",
+                    status=500,
+                )
+
     def do_GET(self) -> None:
+        self._run_route("GET", self._get)
+
+    def do_POST(self) -> None:
+        self._run_route("POST", self._post)
+
+    def _get(self) -> None:
         path = self._path_only()
         if _enforce_http_rate_limit(self, path):
             return
@@ -1512,7 +1569,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self) -> None:
+    def _post(self) -> None:
         path = self._path_only()
         if _enforce_http_rate_limit(self, path):
             return

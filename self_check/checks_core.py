@@ -2242,12 +2242,44 @@ def check_core() -> None:
         except urllib.error.HTTPError as exc:
             assert exc.code == 404
         # OAuth path rate limit: health stays unlimited; oauth trips 429.
+        import logging
+
         import health as health_mod
 
+        records: list[logging.LogRecord] = []
+
+        class _Collect(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        collector = _Collect()
+        logging.getLogger("health").addHandler(collector)
+        saved_webapp_get = health_mod._handle_chat_webapp_get
         saved_oauth_limit = health_mod._HTTP_RL_OAUTH_LIMIT
-        health_mod._HTTP_RL_OAUTH_LIMIT = 2
-        reset_http_rate_limits_for_tests()
         try:
+            # A crashing route answers 500 and logs method+route; it used to drop the socket.
+            def _crashing_route(handler: object) -> bool:
+                raise RuntimeError("route failed")
+
+            health_mod._handle_chat_webapp_get = _crashing_route
+            try:
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/app/chat/api/session", timeout=2
+                )
+                raise AssertionError("crashing route must answer 500")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 500
+            finally:
+                health_mod._handle_chat_webapp_get = saved_webapp_get
+            assert any(
+                r.getMessage()
+                == "http request failed method=GET route=/app/chat/api/session"
+                for r in records
+            ), "crashing route left no log record"
+
+            health_mod._HTTP_RL_OAUTH_LIMIT = 2
+            reset_http_rate_limits_for_tests()
+            records.clear()
             oauth_url = f"http://127.0.0.1:{port}/oauth/twitch/callback?state=x"
 
             def _oauth_status() -> int:
@@ -2259,9 +2291,15 @@ def check_core() -> None:
 
             assert _oauth_status() == 400
             assert _oauth_status() == 400
+            records.clear()
             assert _oauth_status() == 429
+            assert any(
+                "http rate limit shed kind=oauth" in r.getMessage() for r in records
+            ), "shed request left no log record"
         finally:
+            health_mod._handle_chat_webapp_get = saved_webapp_get
             health_mod._HTTP_RL_OAUTH_LIMIT = saved_oauth_limit
+            logging.getLogger("health").removeHandler(collector)
             reset_http_rate_limits_for_tests()
     finally:
         hung.close()
