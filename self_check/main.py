@@ -132,6 +132,9 @@ def main() -> None:
     check_undefined_names()
     check_product_flags()
     check_dotenv_loader()
+    from .checks_log_format import run as check_log_format
+
+    check_log_format()
     check_core()
     check_db_premium()
     check_handlers()

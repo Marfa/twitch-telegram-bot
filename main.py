@@ -5,12 +5,10 @@ from bot import build_application
 from config import DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN, validate
 from db import open_database
 from health import start_health_server
+from log_format import install_logging
 from twitch import TwitchClient
 
-logging.basicConfig(
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    level=logging.INFO,
-)
+install_logging()
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 

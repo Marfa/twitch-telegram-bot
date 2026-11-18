@@ -1,0 +1,43 @@
+"""Structured logging: one JSON line per record on stdout, secrets redacted."""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Any
+
+from analytics import _redact_secrets
+
+# Fields every LogRecord already carries; anything else is an extra= field.
+_RESERVED = frozenset(logging.makeLogRecord({}).__dict__)
+
+
+class JsonFormatter(logging.Formatter):
+    """Render a record as one JSON line; extra= keys become top-level fields."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "ts": datetime.fromtimestamp(record.created, timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": _redact_secrets(record.getMessage()),
+        }
+        for key, value in record.__dict__.items():
+            if key in _RESERVED or key.startswith("_"):
+                continue
+            payload[key] = _redact_secrets(value) if isinstance(value, str) else value
+        if record.exc_info:
+            payload["exc"] = _redact_secrets(self.formatException(record.exc_info))
+        if record.stack_info:
+            payload["stack"] = _redact_secrets(self.formatStack(record.stack_info))
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def install_logging(level: int = logging.INFO) -> None:
+    """Send root logs to stdout as JSON; keeps any handler already configured."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(JsonFormatter())
+    logging.basicConfig(handlers=[handler], level=level)
