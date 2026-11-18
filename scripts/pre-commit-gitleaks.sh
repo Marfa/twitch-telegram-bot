@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Install: cp scripts/pre-commit-gitleaks.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-# Runs gitleaks (pattern) + omerta (your .env values) on staged changes.
-# Optional: dotenvx protect (blocks unencrypted secret / .env.keys commits).
+# Install (required on every clone / PC):
+#   cp scripts/pre-commit-gitleaks.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Runs gitleaks (pattern) + dotenvx protect (required) + omerta on staged changes.
+# Without dotenvx this hook fails closed — do not commit secrets without it.
 set -euo pipefail
 
 if ! command -v gitleaks >/dev/null 2>&1; then
@@ -10,9 +11,13 @@ if ! command -v gitleaks >/dev/null 2>&1; then
 fi
 gitleaks protect --staged --verbose
 
-if command -v dotenvx >/dev/null 2>&1; then
-  dotenvx protect
+if ! command -v dotenvx >/dev/null 2>&1; then
+  echo "dotenvx not found — refuse commit." >&2
+  echo "Install: https://dotenvx.com  (macOS: brew install dotenvx/brew/dotenvx)" >&2
+  echo "Without dotenvx you cannot verify .env ciphertext (dotenvx protect)." >&2
+  exit 1
 fi
+dotenvx protect
 
 # Never allow private key files in the index.
 if git diff --cached --name-only | grep -E '(^|/)\.env\.keys(\.|$)' >/dev/null 2>&1; then

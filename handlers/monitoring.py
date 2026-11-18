@@ -1154,3 +1154,222 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
     except OSError:
         logger.warning("Could not persist PostHog seen reports", exc_info=True)
 
+
+_POLYLANE_SEEN_ISSUES_MAX = 200
+_POLYLANE_ISSUE_LIMIT = 20
+
+
+def _polylane_seen_issues_path() -> Path:
+    from config import DATABASE_PATH
+
+    return Path(DATABASE_PATH).expanduser().resolve().parent / "polylane_seen_issues.json"
+
+
+def _load_polylane_seen_issue_ids(path: Path) -> set[str]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return set()
+    if isinstance(raw, list):
+        return {str(x) for x in raw if x}
+    if isinstance(raw, dict) and isinstance(raw.get("ids"), list):
+        return {str(x) for x in raw["ids"] if x}
+    return set()
+
+
+def _save_polylane_seen_issue_ids(path: Path, ids: set[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kept = sorted(ids)[-_POLYLANE_SEEN_ISSUES_MAX:]
+    path.write_text(json.dumps(kept), encoding="utf-8")
+
+
+def _polylane_api_get(path: str, *, api_key: str, host: str) -> dict[str, Any]:
+    import urllib.request
+
+    url = f"{host}{path}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "x-api-key": api_key,
+            "User-Agent": "twitch-telegram-bot",
+            "Accept": "application/json",
+        },
+    )
+    raw = urllib.request.urlopen(req, timeout=30).read()
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("polylane response is not an object")
+    return data
+
+
+def _resolve_polylane_workspace_id(
+    application: Application, *, api_key: str, host: str
+) -> str | None:
+    from config import POLYLANE_WORKSPACE_ID
+
+    cached = application.bot_data.get("_polylane_workspace_id")
+    if isinstance(cached, str) and cached:
+        return cached
+    if POLYLANE_WORKSPACE_ID:
+        application.bot_data["_polylane_workspace_id"] = POLYLANE_WORKSPACE_ID
+        return POLYLANE_WORKSPACE_ID
+    data = _polylane_api_get("/v1/workspaces", api_key=api_key, host=host)
+    items = ((data.get("result") or {}).get("items")) or []
+    if not items:
+        return None
+    wid = str(items[0].get("id") or "").strip()
+    if not wid:
+        return None
+    application.bot_data["_polylane_workspace_id"] = wid
+    return wid
+
+
+async def notify_admins_polylane_issue(
+    application: Application, payload: dict[str, str]
+) -> None:
+    """Telegram DM to ADMIN_USER_IDS for a new Polylane issue."""
+    from config import ADMIN_USER_IDS
+    from translate import markdown_to_telegram_html, translate_text
+
+    if not ADMIN_USER_IDS:
+        return
+    db: Database = application.bot_data["db"]
+    name = (payload.get("name") or "Issue").strip()
+    description = (payload.get("description") or "").strip()
+    url = (payload.get("url") or "").strip()
+    severity = (payload.get("severity") or "").strip()
+    try:
+        name_ru = translate_text(name, target_lang="ru")
+    except Exception:
+        logger.exception("DeepL name translate failed for Polylane issue")
+        name_ru = name
+    desc_ru = ""
+    if description:
+        if len(description) > 1200:
+            description = description[:1197] + "…"
+        desc_html = markdown_to_telegram_html(description)
+        try:
+            desc_ru = translate_text(desc_html, target_lang="ru")
+        except Exception:
+            logger.exception("DeepL description translate failed for Polylane issue")
+            desc_ru = desc_html
+        if len(desc_ru) > 1200:
+            desc_ru = desc_ru[:1197] + "…"
+    sev_block = f"{html.escape(severity)} · " if severity else ""
+    link_block = f"\n\n{html.escape(url)}" if url else ""
+    desc_block = desc_ru + "\n" if desc_ru else ""
+    for admin_id in ADMIN_USER_IDS:
+        lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
+        text = t(
+            "polylane_issue_body",
+            lang,
+            title=t("polylane_issue_created", lang),
+            severity=sev_block,
+            name=html.escape(name_ru),
+            description=desc_block,
+            link=link_block,
+        )
+        try:
+            await application.bot.send_message(
+                admin_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=dm_main_menu_keyboard(lang),
+            )
+        except (BadRequest, Forbidden) as exc:
+            logger.warning("Cannot send Polylane issue to admin %s: %s", admin_id, exc)
+
+
+async def poll_polylane_new_issues(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Poll Polylane for status=new issues and notify admins about unseen ones."""
+    from config import POLYLANE_API_HOST, POLYLANE_API_KEY
+    from urllib.parse import quote
+
+    if not POLYLANE_API_KEY:
+        if not context.application.bot_data.get("_polylane_poll_key_warned"):
+            context.application.bot_data["_polylane_poll_key_warned"] = True
+            logger.info("Polylane new-issue poll skipped: POLYLANE_API_KEY unset")
+        return
+
+    try:
+        workspace_id = await asyncio.to_thread(
+            _resolve_polylane_workspace_id,
+            context.application,
+            api_key=POLYLANE_API_KEY,
+            host=POLYLANE_API_HOST,
+        )
+    except Exception as exc:
+        if _is_transient_network_error(exc):
+            logger.warning("Polylane workspace resolve network error: %s", exc)
+            return
+        logger.exception("Polylane workspace resolve failed")
+        return
+    if not workspace_id:
+        logger.warning("Polylane new-issue poll: no workspace for API key")
+        return
+
+    path_q = (
+        f"/v1/issues/{quote(workspace_id, safe='')}"
+        f"?status=new&limit={_POLYLANE_ISSUE_LIMIT}&excludeDuplicates=true"
+    )
+    try:
+        data = await asyncio.to_thread(
+            _polylane_api_get,
+            path_q,
+            api_key=POLYLANE_API_KEY,
+            host=POLYLANE_API_HOST,
+        )
+    except Exception as exc:
+        if _is_transient_network_error(exc):
+            logger.warning("Polylane new-issue poll network error: %s", exc)
+            return
+        logger.exception("Polylane new-issue poll failed")
+        return
+
+    issues = ((data.get("result") or {}).get("items")) or []
+    path = _polylane_seen_issues_path()
+    seen: set[str] = context.application.bot_data.setdefault(
+        "_polylane_seen_issues", set()
+    )
+    seen.update(_load_polylane_seen_issue_ids(path))
+    seeded = path.is_file()
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        iid = str(issue.get("id") or "").strip()
+        if not iid or iid in seen:
+            continue
+        seen.add(iid)
+        if not seeded:
+            continue
+        # API already filters status=new; keep a hard gate for safety.
+        if str(issue.get("status") or "").strip() != "new":
+            continue
+        title = (issue.get("title") or "").strip()
+        if not title:
+            continue
+        summary = (
+            (issue.get("summary") or issue.get("message") or issue.get("reasoning") or "")
+            .strip()
+        )
+        url = str(issue.get("_html_url") or "").strip()
+        if not url:
+            url = f"https://console.polylane.com/issues/{iid}"
+        payload = {
+            "kind": "created",
+            "name": title,
+            "description": summary,
+            "url": url,
+            "fingerprint": iid,
+            "status": "new",
+            "severity": str(issue.get("severity") or "").strip(),
+        }
+        await notify_admins_polylane_issue(context.application, payload)
+
+    try:
+        _save_polylane_seen_issue_ids(path, seen)
+    except OSError:
+        logger.warning("Could not persist Polylane seen issues", exc_info=True)
+

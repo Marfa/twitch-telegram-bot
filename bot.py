@@ -218,6 +218,7 @@ from handlers.monitoring import (
     monthly_lucky_premium,
     monthly_new_users_report,
     notify_admins_posthog_issue,
+    poll_polylane_new_issues,
     poll_posthog_inbox_reports,
     weekly_new_users_report,
 )
@@ -4575,6 +4576,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         first=60,
         name="poll_posthog_inbox_reports",
         job_kwargs=_stream_job_kwargs("poll_posthog_inbox_reports", misfire_grace=300),
+    )
+    app.job_queue.run_repeating(
+        poll_polylane_new_issues,
+        interval=300,
+        first=75,
+        name="poll_polylane_new_issues",
+        job_kwargs=_stream_job_kwargs("poll_polylane_new_issues", misfire_grace=300),
     )
     app.job_queue.run_repeating(
         weekly_new_users_report,

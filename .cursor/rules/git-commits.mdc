@@ -14,6 +14,18 @@ Inspired by [awesome-cursorrules git-conventional-commit-messages.mdc](https://g
 - Focus on why when it is not obvious from the diff
 - Only commit when the user explicitly asks
 
+## Before commit — dotenvx + pre-commit hook
+
+Hard gate (see [`dotenvx-bitwarden.mdc`](dotenvx-bitwarden.mdc)):
+
+1. `command -v dotenvx` must succeed — otherwise **stop** (install dotenvx; no plaintext workaround).
+2. `.git/hooks/pre-commit` must be installed from `scripts/pre-commit-gitleaks.sh`; if missing, install it before committing:
+   ```bash
+   cp scripts/pre-commit-gitleaks.sh .git/hooks/pre-commit
+   chmod +x .git/hooks/pre-commit
+   ```
+3. Never `git commit --no-verify` to skip `dotenvx protect`.
+
 ## After commit
 
 Run `./scripts/cleanup-artifacts.sh` (also via `.git/hooks/post-commit`).

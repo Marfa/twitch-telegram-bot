@@ -9,11 +9,30 @@ Canonical how-to: [`docs/dotenvx.md`](docs/dotenvx.md). Stack: [dotenvx](https:/
 
 Critical key changes also follow [`twitch-client-secret.mdc`](twitch-client-secret.mdc) (local ciphertext → VPS plaintext → verify).
 
-## Tooling (not a Python dep)
+## Tooling (not a Python dep) — hard requirements
 
 - `dotenvx` is a **host CLI** (`~/.local/bin`, brew, winget) — **not** in `requirements.txt` / Docker image.
-- Keep a current CLI on each PC; no need to pin it in the repo. Bot runtime uses `dotenv_loader` + optional `dotenvx decrypt` on PATH.
+- **Without `dotenvx` on PATH: stop.** Do not edit `.env`, do not `git commit` / `git push`, do not invent a plaintext workaround. Tell the user to install dotenvx ([dotenvx.com](https://dotenvx.com) / brew / winget) and retry.
+- Keep a current CLI on each PC; the repo does not pin a version. Bot runtime uses `dotenv_loader` + `dotenvx decrypt` on PATH.
 - Bitwarden CLI: `bw` on each PC; same vault account.
+
+## Pre-commit hook — must be installed
+
+Local gate: [`scripts/pre-commit-gitleaks.sh`](scripts/pre-commit-gitleaks.sh) → `.git/hooks/pre-commit`.
+
+It runs **gitleaks**, **`dotenvx protect` (required)**, blocks `.env.keys`, then **omerta**.
+
+**Before any `git commit` on this machine** (agent or human workflow the agent drives):
+
+1. If `.git/hooks/pre-commit` is missing or not the repo script, **install it** and continue only after that:
+   ```bash
+   cp scripts/pre-commit-gitleaks.sh .git/hooks/pre-commit
+   chmod +x .git/hooks/pre-commit
+   ```
+2. Confirm `command -v dotenvx` succeeds. If not — **stop** (see above). Do not commit with `--no-verify` to bypass this.
+3. Staged `.env` must be ciphertext (`encrypted:…` / `DOTENV_PUBLIC_KEY`). Never stage plaintext secrets or `.env.keys`.
+
+CI soft-skips decrypt via `CI` / `DOTENV_OPTIONAL`; that does **not** relax the local commit gate.
 
 ## Model
 
@@ -34,18 +53,19 @@ Device sync = `git pull` of ciphertext + Bitwarden for the private key. No Resil
 ## Agent must — day-to-day
 
 1. Load only via `dotenv_loader` / `config.py` — no second parser.
-2. Change secrets with `dotenvx set KEY "value"` (keeps encryption). Never paste plaintext into an encrypted `.env` by hand.
-3. Then publish ciphertext:
+2. **Gate:** `dotenvx` on PATH + pre-commit hook installed (section above). Missing either → install hook / ask user to install dotenvx; do not proceed with env or commit work.
+3. Change secrets with `dotenvx set KEY "value"` (keeps encryption). Never paste plaintext into an encrypted `.env` by hand.
+4. Then publish ciphertext:
    ```bash
    git add .env
    git commit -m "encrypt .env"
    git push   # when other devices / remote should see it
    ```
-4. If the key is critical (see [`twitch-client-secret.mdc`](twitch-client-secret.mdc)): update VPS **plaintext** `.env` and recreate `bot` in the same turn; verify.
-5. Run locally: `dotenvx run -- python main.py` (or `scripts/env-run.sh` / `.ps1`).
-6. After first encrypt / rotate: `export BW_SESSION="$(bw unlock --raw)"` → `dotenvx bitwarden up` (removes `.env.keys`). Remind the user if `.env.keys` is still on disk.
-7. Refuse committing `.env.keys`, plaintext secrets, `BW_SESSION`. Log only counts/prefixes/lengths.
-8. Docker: no `.env` / `.env.keys` in the image (`.dockerignore`). Never treat git ciphertext as VPS runtime env.
+5. If the key is critical (see [`twitch-client-secret.mdc`](twitch-client-secret.mdc)): update VPS **plaintext** `.env` and recreate `bot` in the same turn; verify.
+6. Run locally: `dotenvx run -- python main.py` (or `scripts/env-run.sh` / `.ps1`).
+7. After first encrypt / rotate: `export BW_SESSION="$(bw unlock --raw)"` → `dotenvx bitwarden up` (removes `.env.keys`). Remind the user if `.env.keys` is still on disk.
+8. Refuse committing `.env.keys`, plaintext secrets, `BW_SESSION`. Log only counts/prefixes/lengths.
+9. Docker: no `.env` / `.env.keys` in the image (`.dockerignore`). Never treat git ciphertext as VPS runtime env.
 
 ## Agent must — second PC / new clone
 
@@ -55,6 +75,8 @@ Device sync = `git pull` of ciphertext + Bitwarden for the private key. No Resil
 
 ## Agent must not
 
+- Continue env/commit work without `dotenvx` on PATH
+- Skip or leave out the pre-commit hook; never `--no-verify` to dodge `dotenvx protect`
 - Put dotenvx in `requirements.txt` or bake `.env.keys` into CI/image
 - Use Resilio / Dropbox / side folders as env SoR
 - Commit plaintext `.env` or `.env.keys`

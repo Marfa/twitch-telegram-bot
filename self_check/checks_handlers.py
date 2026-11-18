@@ -2703,6 +2703,7 @@ def check_handlers() -> None:
     _check_broadcast_feedback_refresh()
     _check_broadcast_feedback_refresh_transient_failures()
     _check_posthog_inbox_poll_network_blip()
+    _check_polylane_new_issue_poll()
 
 
 def _check_posthog_inbox_poll_network_blip() -> None:
@@ -2745,6 +2746,69 @@ def _check_posthog_inbox_poll_network_blip() -> None:
         notify.assert_awaited_once()
         assert notify.await_args.args[1]["fingerprint"] == "new"
         log.exception.assert_not_called()
+
+
+def _check_polylane_new_issue_poll() -> None:
+    """Polylane poll: seed skips notify; later status=new id notifies once."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from handlers.monitoring import poll_polylane_new_issues
+
+    issue_new = {
+        "id": "iss_new1",
+        "title": "Latency spike",
+        "summary": "p99 up",
+        "status": "new",
+        "severity": "high",
+        "_html_url": "https://console.polylane.com/issues/iss_new1",
+    }
+    api_payload = {"success": True, "result": {"items": [issue_new], "count": 1}}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        seen_path = Path(tmp) / "polylane_seen_issues.json"
+        ctx = SimpleNamespace(application=SimpleNamespace(bot_data={}))
+        with (
+            patch("config.POLYLANE_API_KEY", "sk_test"),
+            patch("config.POLYLANE_API_HOST", "https://api.polylane.com"),
+            patch("config.POLYLANE_WORKSPACE_ID", "ws_test"),
+            patch(
+                "handlers.monitoring._polylane_seen_issues_path",
+                return_value=seen_path,
+            ),
+            patch(
+                "handlers.monitoring._polylane_api_get",
+                return_value=api_payload,
+            ),
+            patch(
+                "handlers.monitoring.notify_admins_polylane_issue",
+                new=AsyncMock(),
+            ) as notify,
+        ):
+            # First poll seeds without notify (no seen file yet).
+            asyncio.run(poll_polylane_new_issues(ctx))
+            notify.assert_not_awaited()
+            assert seen_path.is_file()
+            # Clear in-memory seen so disk seed is what matters; id already on disk.
+            ctx.application.bot_data["_polylane_seen_issues"] = set(
+                json.loads(seen_path.read_text(encoding="utf-8"))
+            )
+            asyncio.run(poll_polylane_new_issues(ctx))
+            notify.assert_not_awaited()
+            # New id after seed → notify.
+            issue_new2 = dict(issue_new, id="iss_new2", title="Second")
+            api2 = {"success": True, "result": {"items": [issue_new2], "count": 1}}
+            with patch(
+                "handlers.monitoring._polylane_api_get",
+                return_value=api2,
+            ):
+                asyncio.run(poll_polylane_new_issues(ctx))
+            notify.assert_awaited_once()
+            payload = notify.await_args.args[1]
+            assert payload["fingerprint"] == "iss_new2"
+            assert payload["status"] == "new"
+            assert payload["severity"] == "high"
 
 
 def _check_broadcast_feedback_refresh() -> None:

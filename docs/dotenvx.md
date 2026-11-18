@@ -110,12 +110,25 @@ dotenvx decrypt   # local one-shot plaintext — do not commit
 
 Never copy `.env.keys` into the Docker image (`.dockerignore` blocks `.env` / `.env.keys`).
 
-## Protect commits
+## Protect commits (required)
+
+**`dotenvx` is mandatory** on every developer PC. Without it: do not edit `.env`, do not commit. Install from [dotenvx.com](https://dotenvx.com) (macOS brew / winget / releases).
+
+**Pre-commit hook must be installed** (not optional):
+
+```bash
+cp scripts/pre-commit-gitleaks.sh .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+The hook runs gitleaks, then **`dotenvx protect`** (fails if dotenvx is missing), blocks `.env.keys`, then omerta. Do not use `git commit --no-verify` to bypass it.
+
+Manual check:
 
 ```bash
 dotenvx protect
 ```
 
-CI: gitleaks + omerta (omerta temporarily hides tracked ciphertext `.env` — it is not a plaintext value source). Local hook: `scripts/pre-commit-gitleaks.sh` (calls `dotenvx protect` when available). Optional local leak values: `.env.local` (gitignored).
+CI: gitleaks + omerta (omerta temporarily hides tracked ciphertext `.env` — it is not a plaintext value source). Optional local leak values: `.env.local` (gitignored).
 
-`python -m self_check` and GitHub Actions set `DOTENV_OPTIONAL` / `CI` so imports skip decrypt without Bitwarden. Running `python main.py` without a key still fails closed.
+`python -m self_check` and GitHub Actions set `DOTENV_OPTIONAL` / `CI` so imports skip decrypt without Bitwarden. That does **not** relax the local commit gate. Running `python main.py` without a key still fails closed.

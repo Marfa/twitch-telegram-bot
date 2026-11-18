@@ -722,6 +722,8 @@
   "posthog_issue_reopened": "🔄 Issue riaperta",
   "posthog_report_created": "📋 Nuovo Inbox Report",
   "posthog_issue_body": "{title}\n\n<b>{name}</b>\n{description}{link}",
+  "polylane_issue_created": "🟠 Nuova Issue Polylane",
+  "polylane_issue_body": "{title}\n\n{severity}<b>{name}</b>\n{description}{link}",
   "broadcast_footer": "—\n{type}. Puoi disattivarle in Impostazioni.",
   "group_not_found": "Gruppo non trovato. Aggiungi il bot e controlla il link.",
   "dest_not_found_channel": "Canale non trovato. Controlla l'@username.",

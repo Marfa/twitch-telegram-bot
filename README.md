@@ -43,7 +43,7 @@ English: [README.en.md](README.en.md)
 | Премиум | Триал / Stars месяц·год·lifetime / à la carte / саб Twitch / премиум-канал / **подарок** — см. [Premium](#premium) |
 | Партнёрка | Реферальная ссылка, 10% от Stars Premium приглашённых, заявки на вывод (вручную) |
 | Админка | Рассылка в фоне; отложенная; статистика; DeepL; выводы; демо; **ежедневный дайджест новых Premium-оплат** (источник из аналитики) |
-| Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, Logs (WARNING+), ежедневный `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` для pg-backup и Aiven DR) |
+| Аналитика | [PostHog](https://posthog.com): usage-события, Error tracking, Logs (WARNING+), ежедневный `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` для pg-backup и Aiven DR). [Polylane](https://polylane.com): polling новых issues → DM админам |
 | Команды | Menu: `/start`, `/new`, `/etc`, `/chat`, `/help`, `/settings`; также `/cancel`, `/schedule`, `/when`, `/day`, `/week`, `/feedback` |
 | Deploy | VPS (Docker) |
 
@@ -360,6 +360,8 @@ python main.py
 | `POSTHOG_HOST` | Ingestion host (по умолчанию `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Секрет Bearer для `POST /hooks/posthog-issues` (Issue + Inbox Report → админам) |
 | `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) для polling Inbox Reports. Пусто = polling выкл |
+| `POLYLANE_API_KEY` | Polylane API key (`sk_…`) — polling новых issues (`status=new`) → DM админам раз в 5 мин. Пусто = выкл |
+| `POLYLANE_WORKSPACE_ID` | Опционально; иначе берётся первый workspace ключа |
 
 
 ### PostHog
@@ -393,6 +395,10 @@ Funnel: `premium_opened` → `premium_pay_started` → `premium_purchased` (brea
 Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …), опционально `alert_type` / `dest_type`, плюс контекст из БД (`active_subs`, `total_subs`, `has_demo_sub`, `last_alert_channel` / `last_alert_age_hours`, …); успешная DM-доставка — `alert_sent` (тот же `alert_type`). Обнаружение уже недоступных при sync Menu Button — отдельно `bot_unreachable_detected` (`source=stream_chat_menu`), не смешивать с churn. В Trends: path `alert_sent` → `bot_blocked` или breakdown `bot_blocked` by `source`. Пауза из алерта: callback `alert_pause:{sub_id}` (старые сообщения — deep link `?start=pause_{sub_id}`) → событие `subscription_paused_from_alert`.
 
 Разовый снимок / приближённый backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (на VPS в контейнере bot).
+
+### Polylane
+
+Опционально. Исходящего webhook у Polylane нет — бот **polling** `GET /v1/issues/{workspace}?status=new` каждые 5 минут (`POLYLANE_API_KEY`). Первый проход только запоминает id (без спама); дальше новые `status=new` → DM админам (RU через DeepL). Reopen / confirmed не шлём.
 
 ## Архитектура
 

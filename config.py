@@ -145,6 +145,13 @@ POSTHOG_ISSUE_WEBHOOK_SECRET = os.getenv("POSTHOG_ISSUE_WEBHOOK_SECRET", "").str
 # Personal API key for polling Inbox reports API. Empty = polling off.
 POSTHOG_PERSONAL_API_KEY = os.getenv("POSTHOG_API_KEY_PERSONAL", "").strip()
 POSTHOG_PROJECT_ID = os.getenv("POSTHOG_PROJECT_ID", "554824").strip()
+# Optional: Polylane API key — poll new issues → admin Telegram DMs. Empty = polling off.
+POLYLANE_API_KEY = os.getenv("POLYLANE_API_KEY", "").strip()
+POLYLANE_API_HOST = (
+    os.getenv("POLYLANE_API_HOST", "").strip() or "https://api.polylane.com"
+).rstrip("/")
+# Optional override; empty = first workspace returned by GET /v1/workspaces.
+POLYLANE_WORKSPACE_ID = os.getenv("POLYLANE_WORKSPACE_ID", "").strip()
 # Optional: MAX Messenger bot token (platform-api2.max.ru). No UI yet — max_api.py only.
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "").strip()
 

@@ -741,6 +741,8 @@
   "posthog_issue_reopened": "🔄 Issue reopened",
   "posthog_report_created": "📋 New Inbox Report",
   "posthog_issue_body": "{title}\n\n<b>{name}</b>\n{description}{link}",
+  "polylane_issue_created": "🟠 New Polylane Issue",
+  "polylane_issue_body": "{title}\n\n{severity}<b>{name}</b>\n{description}{link}",
   "broadcast_footer": "—\n{type}. You can turn these off in Settings.",
   "group_not_found": "Group not found. Add the bot and check the link.",
   "dest_not_found_channel": "Channel not found. Check @username.",

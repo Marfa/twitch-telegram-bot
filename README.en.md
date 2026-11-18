@@ -43,7 +43,7 @@
 | Premium | Trial / Stars month·year·lifetime / à la carte / Twitch sub / premium channel / **gift** — see [Premium](#premium) |
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; demo; **daily digest of new Premium payments** (purchase source from analytics) |
-| Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` for pg-backup and Aiven DR) |
+| Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` for pg-backup and Aiven DR). [Polylane](https://polylane.com): poll new issues → admin DMs |
 | Commands | Menu: `/start`, `/new`, `/etc`, `/chat`, `/help`, `/settings`; also `/cancel`, `/schedule`, `/when`, `/day`, `/week`, `/feedback` |
 | Deploy | VPS (Docker) |
 
@@ -360,6 +360,8 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `POSTHOG_HOST` | Ingestion host (default `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Bearer secret for `POST /hooks/posthog-issues` (Issue + Inbox Report → admins) |
 | `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) for Inbox reports polling. Empty = polling off |
+| `POLYLANE_API_KEY` | Polylane API key (`sk_…`) — poll new issues (`status=new`) → admin DMs every 5 min. Empty = off |
+| `POLYLANE_WORKSPACE_ID` | Optional; otherwise the first workspace for the key |
 
 
 ### PostHog
@@ -393,6 +395,10 @@ Funnel: `premium_opened` → `premium_pay_started` → `premium_purchased` (brea
 Churn / blocks: `bot_blocked` with `source` (`my_chat_member`, `delivery`, `handler`, `system_dm`, `whisper`, …), optional `alert_type` / `dest_type`, plus DB context (`active_subs`, `total_subs`, `has_demo_sub`, `last_alert_channel` / `last_alert_age_hours`, …); successful DM delivery → `alert_sent` (same `alert_type`). Menu Button sync discovering already-unreachable users → separate `bot_unreachable_detected` (`source=stream_chat_menu`), not churn. In Trends: path `alert_sent` → `bot_blocked`, or break down `bot_blocked` by `source`. Pause from an alert: callback `alert_pause:{sub_id}` (older messages — deep link `?start=pause_{sub_id}`) → `subscription_paused_from_alert`.
 
 One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot.py [--backfill]` (on VPS inside the bot container).
+
+### Polylane
+
+Optional. Polylane has no outbound webhook to the bot — we **poll** `GET /v1/issues/{workspace}?status=new` every 5 minutes (`POLYLANE_API_KEY`). The first pass only seeds seen ids; later new `status=new` rows DM admins (RU via DeepL). Reopened / confirmed are ignored.
 
 ## Architecture
 
