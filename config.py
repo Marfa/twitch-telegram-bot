@@ -22,6 +22,16 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "")
@@ -145,6 +155,12 @@ POSTHOG_ISSUE_WEBHOOK_SECRET = os.getenv("POSTHOG_ISSUE_WEBHOOK_SECRET", "").str
 # Personal API key for polling Inbox reports API. Empty = polling off.
 POSTHOG_PERSONAL_API_KEY = os.getenv("POSTHOG_API_KEY_PERSONAL", "").strip()
 POSTHOG_PROJECT_ID = os.getenv("POSTHOG_PROJECT_ID", "554824").strip()
+# Traces: OTLP span export (same key/host as logs). Ratio 1.0 = every trace.
+TRACES_SAMPLE_RATIO = _env_float("TRACES_SAMPLE_RATIO", 1.0)
+# Empty = {POSTHOG_HOST}/i/v1/traces
+TRACES_OTLP_ENDPOINT = (
+    os.getenv("TRACES_OTLP_ENDPOINT", "").strip() or f"{POSTHOG_HOST}/i/v1/traces"
+)
 # Optional: Polylane API key — poll new issues → admin Telegram DMs. Empty = polling off.
 POLYLANE_API_KEY = os.getenv("POLYLANE_API_KEY", "").strip()
 POLYLANE_API_HOST = (

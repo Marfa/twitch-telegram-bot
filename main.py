@@ -6,6 +6,7 @@ from config import DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN, validate
 from db import open_database
 from health import start_health_server
 from log_format import install_logging
+from tracing import init_tracing, shutdown_tracing
 from twitch import TwitchClient
 
 install_logging()
@@ -16,6 +17,7 @@ def main() -> None:
     start_health_server()
     validate()
     init_analytics()
+    init_tracing()
     log = logging.getLogger(__name__)
     if DATABASE_URL:
         log.info("Using PostgreSQL (DATABASE_URL)")
@@ -41,6 +43,7 @@ def main() -> None:
         capture_exception(exc, properties={"stage": "run_polling"})
         raise
     finally:
+        shutdown_tracing()
         shutdown_analytics()
 
 

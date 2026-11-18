@@ -360,6 +360,8 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `POSTHOG_HOST` | Ingestion host (default `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Bearer secret for `POST /hooks/posthog-issues` (Issue + Inbox Report → admins) |
 | `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) for Inbox reports polling. Empty = polling off |
+| `TRACES_SAMPLE_RATIO` | Share of requests traced over OTLP (1.0 = all; needs `POSTHOG_API_KEY`) |
+| `TRACES_OTLP_ENDPOINT` | OTLP traces endpoint (default `POSTHOG_HOST` + `/i/v1/traces`) |
 | `POLYLANE_API_KEY` | Polylane API key (`sk_…`) — poll new issues (`status=new`) → admin DMs every 5 min. Empty = off |
 | `POLYLANE_WORKSPACE_ID` | Optional; otherwise the first workspace for the key |
 

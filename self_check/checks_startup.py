@@ -18,6 +18,8 @@ def _run_main_with(run_polling: MagicMock) -> MagicMock:
         patch.object(bot_main, "start_health_server"),
         patch.object(bot_main, "validate"),
         patch.object(bot_main, "init_analytics"),
+        patch.object(bot_main, "init_tracing"),
+        patch.object(bot_main, "shutdown_tracing"),
         patch.object(bot_main, "shutdown_analytics"),
         patch.object(bot_main, "open_database"),
         patch.object(bot_main, "TwitchClient"),

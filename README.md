@@ -360,6 +360,8 @@ python main.py
 | `POSTHOG_HOST` | Ingestion host (по умолчанию `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |
 | `POSTHOG_ISSUE_WEBHOOK_SECRET` | Секрет Bearer для `POST /hooks/posthog-issues` (Issue + Inbox Report → админам) |
 | `POSTHOG_API_KEY_PERSONAL` | Personal API key (`phx_…`) для polling Inbox Reports. Пусто = polling выкл |
+| `TRACES_SAMPLE_RATIO` | Доля трассируемых запросов для OTLP traces (1.0 = все; нужен `POSTHOG_API_KEY`) |
+| `TRACES_OTLP_ENDPOINT` | Endpoint OTLP traces (по умолчанию `POSTHOG_HOST` + `/i/v1/traces`) |
 | `POLYLANE_API_KEY` | Polylane API key (`sk_…`) — polling новых issues (`status=new`) → DM админам раз в 5 мин. Пусто = выкл |
 | `POLYLANE_WORKSPACE_ID` | Опционально; иначе берётся первый workspace ключа |
 
