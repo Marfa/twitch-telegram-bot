@@ -15,6 +15,7 @@ Official docs: [dotenvx](https://dotenvx.com/) · [Bitwarden custody](https://do
 | Encrypted `.env` (`encrypted:…` + `DOTENV_PUBLIC_KEY`) | `.env.keys`, plaintext secrets, `BW_SESSION` |
 | `.env.example` (template) | Bitwarden item with the private key |
 
+<!-- realitylint-ignore-next-line RL014 -->
 **Bitwarden item name:** dotenvx creates titles like `dotenvx (02A 49E)` (short public key). Do **not** rename to `DOTENV_PRIVATE_KEY` — that name is only the field inside `.env.keys` / process env. `bitwarden pull`/`run` use a local custody UUID reference, not the display name.
 
 **Trade-off:** with the private key, ciphertext from git history is decryptable. Keep Bitwarden locked down; rotate after any leak.
