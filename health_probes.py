@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 # Paid / quota APIs: reuse last result so PingZen @60s does not burn limits.
 _CACHE_TTL_SEC = 300.0
 _CACHE_LOCAL_TTL_SEC = 15.0
+# Keyless probes spend no quota, so re-measure a failure at the next poll
+# instead of reporting one transient error as a 5 minute outage.
+# An entry is stamped when the probe returns, so at the next 60 s poll its
+# age is 60 s minus the probe duration. The slowest probe is
+# _probe_donationalerts: two 12 s attempts, 24 s, which leaves 36 s. Keep
+# this below 36 s so that poll always measures again.
+_CACHE_FAIL_TTL_SEC = 30.0
 _HTTP_TIMEOUT = 12
 
 # 48h: daily job + long multi-endpoint dump sync can exceed 36h mid-run.
@@ -41,6 +48,11 @@ COMPONENT_NAMES = frozenset(
         "donationalerts",
         "clips_oauth",
     }
+)
+
+# Probes with no API key and no quota: their failures are cheap to re-check.
+_QUOTA_FREE_COMPONENTS = frozenset(
+    {"telegram", "gamerpower", "twitchdrops", "donationalerts"}
 )
 
 _CACHE_LOCK = threading.Lock()
@@ -85,21 +97,28 @@ def clear_probe_cache_for_tests() -> None:
         _CACHE.clear()
 
 
+def _cache_ttl(key: str, status: int) -> float:
+    """Seconds a stored probe result for ``key`` stays valid."""
+    ttl = (
+        _CACHE_LOCAL_TTL_SEC
+        if key in {"db", "twitch", "igdb"}
+        else _CACHE_TTL_SEC
+    )
+    if status >= 500 and key in _QUOTA_FREE_COMPONENTS:
+        return _CACHE_FAIL_TTL_SEC
+    return ttl
+
+
 def evaluate_component(name: str) -> tuple[int, bytes]:
     """Return (HTTP status, body) for /health/c/<name>."""
     key = (name or "").strip().lower()
     if key not in COMPONENT_NAMES:
         return 404, b"unknown"
 
-    ttl = (
-        _CACHE_LOCAL_TTL_SEC
-        if key in {"db", "twitch", "igdb"}
-        else _CACHE_TTL_SEC
-    )
     now = time.monotonic()
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
-        if hit is not None and (now - hit[0]) < ttl:
+        if hit is not None and (now - hit[0]) < _cache_ttl(key, hit[1]):
             return hit[1], hit[2]
 
     try:
@@ -448,14 +467,23 @@ def _probe_donationalerts() -> tuple[int, bytes]:
     if not da.configured():
         return _na()
     # Unauthenticated call: 401/403 means API is up and requiring auth.
-    try:
-        r = _SESSION.get(
-            f"{da.API_BASE}/user/oauth",
-            timeout=_HTTP_TIMEOUT,
-        )
-    except Exception:
-        logger.exception("health probe donationalerts failed")
-        return _fail(b"net")
+    # Connects from this host drop intermittently, so a read is repeated once
+    # before the drop counts as a dependency failure.
+    for attempt in (1, 2):
+        try:
+            r = _SESSION.get(
+                f"{da.API_BASE}/user/oauth",
+                timeout=_HTTP_TIMEOUT,
+            )
+            break
+        except Exception as exc:
+            if attempt == 2:
+                logger.exception("health probe donationalerts failed")
+                return _fail(b"net")
+            logger.warning(
+                "health probe donationalerts retrying after %s",
+                type(exc).__name__,
+            )
     if r.status_code in (401, 403):
         return _ok()
     if r.status_code == 200:

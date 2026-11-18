@@ -2201,6 +2201,88 @@ def check_core() -> None:
         st, body = probes_mod.evaluate_component("clips_oauth")
         assert st == 200 and body == b"n/a"
 
+    # A keyless probe re-measures a failure at the next monitor poll, while a
+    # paid quota probe keeps the long failure cache. Success keeps it for both.
+    calls: list[int] = []
+
+    def _failing_probe() -> tuple[int, bytes]:
+        calls.append(1)
+        return 503, b"net"
+
+    def _age_cache_entry(
+        name: str, status: int, body: bytes, age: float = 61.0
+    ) -> None:
+        with probes_mod._CACHE_LOCK:
+            probes_mod._CACHE[name] = (
+                probes_mod.time.monotonic() - age,
+                status,
+                body,
+            )
+
+    clear_probe_cache_for_tests()
+    with patch.object(probes_mod, "_probe_donationalerts", _failing_probe):
+        assert evaluate_component_health("donationalerts") == (503, b"net")
+        assert evaluate_component_health("donationalerts") == (503, b"net")
+        assert len(calls) == 1, "result must be reused inside the poll interval"
+        # The entry is stamped when the probe returns, so the next 60 s poll
+        # sees 60 s minus the probe duration: the slowest probe, two 12 s
+        # connect attempts, leaves 36 s, which must still be stale.
+        _age_cache_entry("donationalerts", 503, b"net", 36.0)
+        assert evaluate_component_health("donationalerts") == (503, b"net")
+        assert len(calls) == 2, "keyless failure must not survive to the next poll"
+    clear_probe_cache_for_tests()
+    calls.clear()
+    with patch.object(probes_mod, "_probe_itad", _failing_probe):
+        assert evaluate_component_health("itad") == (503, b"net")
+        _age_cache_entry("itad", 503, b"net")
+        assert evaluate_component_health("itad") == (503, b"net")
+        assert len(calls) == 1, "quota API failure must keep the 300s cache"
+    clear_probe_cache_for_tests()
+    calls.clear()
+
+    def _ok_probe() -> tuple[int, bytes]:
+        calls.append(1)
+        return 200, b"ok"
+
+    with patch.object(probes_mod, "_probe_donationalerts", _ok_probe):
+        assert evaluate_component_health("donationalerts") == (200, b"ok")
+        _age_cache_entry("donationalerts", 200, b"ok")
+        assert evaluate_component_health("donationalerts") == (200, b"ok")
+        assert len(calls) == 1, "keyless success keeps the 300s cache"
+
+    # A single dropped connect is retried before the probe reports failure.
+    class _Resp:
+        status_code = 401
+        text = ""
+
+    class _FakeSession:
+        def __init__(self, failures):
+            self.failures = failures
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls <= self.failures:
+                raise TimeoutError("connect timeout")
+            return _Resp()
+
+    import donationalerts as da_mod
+
+    with (
+        patch.object(da_mod, "configured", lambda: True),
+        patch.object(probes_mod, "_SESSION", _FakeSession(1)),
+    ):
+        assert probes_mod._probe_donationalerts() == (200, b"ok")
+
+    flaky = _FakeSession(2)
+    with (
+        patch.object(da_mod, "configured", lambda: True),
+        patch.object(probes_mod, "_SESSION", flaky),
+    ):
+        assert probes_mod._probe_donationalerts() == (503, b"net")
+        assert flaky.calls == 2
+    clear_probe_cache_for_tests()
+
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
     httpd.daemon_threads = True
     port = httpd.server_address[1]
