@@ -112,6 +112,9 @@ def init_analytics() -> None:
     _enabled = True
     logger.info("PostHog enabled host=%s version=%s", POSTHOG_HOST, BOT_VERSION)
     _init_logs()
+    from metrics import init_metrics
+
+    init_metrics()
 
 
 def _init_logs() -> None:
@@ -161,6 +164,9 @@ def _init_logs() -> None:
 
 def shutdown_analytics() -> None:
     global _client, _enabled, _logger_provider, _logs_handler
+    from metrics import shutdown_metrics
+
+    shutdown_metrics()
     if _logs_handler is not None:
         root = logging.getLogger()
         try:

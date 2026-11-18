@@ -92,6 +92,64 @@ from telegram import LinkPreviewOptions, Message
 
 
 
+def _check_metrics() -> None:
+    import asyncio
+
+    import metrics as metrics_mod
+
+    assert metrics_mod.is_enabled() is False
+    # While disabled every recorder is a no-op, not an error.
+    metrics_mod.record_update("message", 0.01)
+    metrics_mod.record_update_error("telegram_error_handler", "RuntimeError")
+    metrics_mod.record_alert_delivery(
+        alert_type="live", dest_type="dm", outcome="sent"
+    )
+    metrics_mod.record_job("check_job", "ok", 0.01)
+    metrics_mod.record_job_skip("check_job", "misfire")
+
+    async def _ok(_context):
+        return None
+
+    assert metrics_mod.instrument_job("check_job", _ok) is _ok
+    assert metrics_mod.instrument_update_loop is not None
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.points: list[tuple[object, dict]] = []
+
+        def add(self, value, attributes=None) -> None:
+            self.points.append((value, dict(attributes or {})))
+
+        def record(self, value, attributes=None) -> None:
+            self.points.append((value, dict(attributes or {})))
+
+    async def _boom(_context):
+        raise RuntimeError("job failed")
+
+    counter, histogram = _Recorder(), _Recorder()
+    saved = (metrics_mod._enabled, metrics_mod._job_counter, metrics_mod._job_duration)
+    metrics_mod._enabled = True
+    metrics_mod._job_counter = counter
+    metrics_mod._job_duration = histogram
+    try:
+        asyncio.run(metrics_mod.instrument_job("check_job", _ok)(None))
+        assert counter.points == [(1, {"job_id": "check_job", "outcome": "ok"})]
+        assert histogram.points[0][1]["job_id"] == "check_job"
+        try:
+            asyncio.run(metrics_mod.instrument_job("check_job", _boom)(None))
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("instrument_job must re-raise job errors")
+        assert counter.points[-1][1]["outcome"] == "error"
+    finally:
+        (
+            metrics_mod._enabled,
+            metrics_mod._job_counter,
+            metrics_mod._job_duration,
+        ) = saved
+
+
 def check_core() -> None:
     import analytics as analytics_mod
 
@@ -99,6 +157,7 @@ def check_core() -> None:
     assert analytics_mod.distinct_id(1) != analytics_mod.distinct_id(2)
     analytics_mod.capture(1, "self_check_noop")
     analytics_mod.capture_exception(RuntimeError("self_check"), user_id=1)
+    _check_metrics()
 
     from ai_clips import (
         CHAT_LAG_SEC,
