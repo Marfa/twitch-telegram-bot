@@ -10,6 +10,8 @@ from typing import Any
 
 import requests
 
+import request_context
+
 logger = logging.getLogger(__name__)
 
 _SERVICE_NAME = "twitch-telegram-bot"
@@ -206,6 +208,13 @@ def distinct_id(user_id: int) -> str:
     return f"tg_{digest[:32]}"
 
 
+def _add_request_id(props: dict[str, Any]) -> None:
+    """Join the event to the handler run that produced it."""
+    request_id = request_context.current_request_id()
+    if request_id is not None:
+        props.setdefault("request_id", request_id)
+
+
 def capture(
     user_id: int | None,
     event: str,
@@ -220,6 +229,7 @@ def capture(
     props = dict(properties or {})
     props.setdefault("bot_version", BOT_VERSION)
     props.setdefault("$process_person_profile", True)
+    _add_request_id(props)
     try:
         kwargs: dict[str, Any] = {"properties": props}
         if user_id is not None:
@@ -244,6 +254,7 @@ def capture_exception(
 
     props = dict(properties or {})
     props.setdefault("bot_version", BOT_VERSION)
+    _add_request_id(props)
     try:
         kwargs: dict[str, Any] = {"properties": props}
         if user_id is not None:

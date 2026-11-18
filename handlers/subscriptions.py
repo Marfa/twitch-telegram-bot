@@ -20,6 +20,7 @@ import analytics
 import beta as beta_features
 import demo_mode
 import premium as prem
+import request_context
 from bot_helpers import (
     _inline_btn_label,
     _menu,
@@ -957,6 +958,7 @@ async def on_alert_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             pass
         return
     user_id = query.from_user.id
+    request_context.annotate(subscription_id=sub_id)
     db: Database = context.application.bot_data["db"]
     lang = db.get_user_locale(user_id) or DEFAULT_LOCALE
     status, channel, sub = _pause_subscription_from_alert(db, user_id, sub_id)
