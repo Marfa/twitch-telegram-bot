@@ -132,4 +132,5 @@ dotenvx protect
 
 CI: gitleaks + omerta (omerta temporarily hides tracked ciphertext `.env` — it is not a plaintext value source). Optional local leak values: `.env.local` (gitignored).
 
+<!-- realitylint-ignore-next-line RL014 -->
 `python -m self_check` and GitHub Actions set `DOTENV_OPTIONAL` / `CI` so imports skip decrypt without Bitwarden. That does **not** relax the local commit gate. Running `python main.py` without a key still fails closed.
