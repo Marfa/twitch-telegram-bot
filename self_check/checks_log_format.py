@@ -66,8 +66,48 @@ def _check_traceback_redacted() -> None:
     assert "[redacted]" in payload["exc"]
 
 
+def _check_delivery_record_fields() -> None:
+    from types import SimpleNamespace
+
+    from handlers.delivery import _delivery_log_extra
+
+    sub = SimpleNamespace(id=17, owner_id=555, chat_id=-100123, dest_type="channel")
+    record = logging.LogRecord(
+        "handlers.delivery",
+        logging.WARNING,
+        __file__,
+        1,
+        "Cannot send to %s: %s",
+        (sub.chat_id, "Forbidden: bot was kicked"),
+        None,
+    )
+    record.__dict__.update(
+        _delivery_log_extra(
+            sub,
+            alert_type="live",
+            outcome="failed",
+            stream_id="44112233",
+            duration_ms=812,
+        )
+    )
+    payload = _payload(record)
+    expected = {
+        "sub_id": 17,
+        "user_id": 555,
+        "chat_id": -100123,
+        "dest_type": "channel",
+        "alert_type": "live",
+        "outcome": "failed",
+        "stream_id": "44112233",
+        "duration_ms": 812,
+    }
+    for key, value in expected.items():
+        assert payload[key] == value, key
+
+
 def run() -> None:
     _check_extra_fields_become_json()
     _check_secrets_redacted()
     _check_traceback_redacted()
+    _check_delivery_record_fields()
     install_logging()  # repeated setup must not raise
