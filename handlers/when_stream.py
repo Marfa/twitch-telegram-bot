@@ -20,6 +20,7 @@ from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 
+import request_context
 from bot_helpers import clear_group_reply_keyboard, reply_lang
 from db import Database
 from ephemeral import (
@@ -553,6 +554,7 @@ async def _schedule_query_command(
     streamers = unique_streamers_for_chat(
         db.get_enabled_subscriptions_by_chat_id(chat_id)
     )
+    request_context.annotate(schedule_mode=mode, streamer_count=len(streamers))
     if not streamers:
         return
 
