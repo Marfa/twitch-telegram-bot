@@ -1,8 +1,8 @@
 """OpenTelemetry traces to PostHog (no-op when POSTHOG_API_KEY is unset).
 
-One span per Telegram update, one per Telegram Bot API call, and one per
-requests call. Calls to the trace exporter host are skipped, so the exporter
-never traces itself.
+One span per Telegram update, one per scheduled job run, one per Telegram Bot
+API call, and one per requests call. Calls to the trace exporter host are
+skipped, so the exporter never traces itself.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ _tracer: Any | None = None
 _skip_hosts: frozenset[str] = frozenset()
 _requests_patched = False
 _bot_patched = False
+_jobs_patched = False
 
 
 def _host_of(url: str) -> str:
@@ -80,6 +81,15 @@ def _update_attributes(update: object) -> dict[str, Any]:
     if chat is not None:
         attributes["telegram.chat_type"] = getattr(chat.type, "value", str(chat.type))
     return attributes
+
+
+def _job_attributes(job: object) -> dict[str, Any]:
+    """Callback name only: a job name can carry a Telegram user or subscription id."""
+    callback = getattr(job, "callback", None)
+    if isinstance(callback, functools.partial):
+        callback = callback.func
+    name = getattr(callback, "__name__", None) or type(callback).__name__
+    return {"telegram.job.callback": str(name)}
 
 
 def init_tracing() -> None:
@@ -137,6 +147,7 @@ def init_tracing() -> None:
     )
     instrument_requests()
     instrument_telegram()
+    instrument_jobs()
     logger.info(
         "Tracing enabled endpoint=%s sample_ratio=%s", endpoint, TRACES_SAMPLE_RATIO
     )
@@ -208,6 +219,38 @@ def instrument_telegram() -> None:
 
     Bot._do_post = _do_post  # type: ignore[method-assign]
     _bot_patched = True
+
+
+def instrument_jobs() -> None:
+    """Span every scheduled job run at the single Job._run funnel."""
+    global _jobs_patched
+    if _jobs_patched:
+        return
+    from opentelemetry.trace import SpanKind
+    from telegram.ext import Job
+
+    original = Job._run
+
+    @functools.wraps(original)
+    async def _run(self, application, *args, **kwargs):
+        tracer = _tracer
+        if tracer is None:
+            return await original(self, application, *args, **kwargs)
+        with tracer.start_as_current_span(
+            "telegram.job",
+            attributes=_job_attributes(self),
+            kind=SpanKind.INTERNAL,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            try:
+                return await original(self, application, *args, **kwargs)
+            except Exception as exc:
+                _mark_error(span, exc)
+                raise
+
+    Job._run = _run  # type: ignore[method-assign]
+    _jobs_patched = True
 
 
 def traced_application_class() -> type:
