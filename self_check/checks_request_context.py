@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
+import logging
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -12,6 +16,7 @@ from telegram.ext import filters
 
 import analytics
 import request_context
+from log_format import RequestIdFilter, install_logging
 
 
 class _FakeApp:
@@ -124,7 +129,65 @@ def check_request_context_conversation() -> None:
     assert getattr(type_handler.callback, "_request_context", False)
 
 
+def _installed_log_payload(message: str) -> dict:
+    """Log `message` through the handler `install_logging` builds and return its JSON payload."""
+    root = logging.getLogger()
+    log = logging.getLogger("self_check.request_context")
+    saved_handlers, saved_root_level, saved_level = root.handlers[:], root.level, log.level
+    saved_stdout, saved_stderr = sys.stdout, sys.stderr
+    stream = io.StringIO()
+    root.handlers.clear()
+    sys.stdout, sys.stderr = stream, stream
+    try:
+        install_logging(level=logging.INFO)
+        log.setLevel(logging.NOTSET)
+        log.info(message)
+    finally:
+        root.handlers.clear()
+        root.handlers.extend(saved_handlers)
+        root.setLevel(saved_root_level)
+        log.setLevel(saved_level)
+        sys.stdout, sys.stderr = saved_stdout, saved_stderr
+
+    payloads = [
+        json.loads(line) for line in stream.getvalue().splitlines() if line.startswith("{")
+    ]
+    matching = [payload for payload in payloads if payload.get("msg") == message]
+    assert matching, payloads
+    return matching[-1]
+
+
+def check_request_context_log_join() -> None:
+    payloads: list[dict] = []
+
+    async def logging_handler(update, context) -> None:
+        # Goes through install_logging, so a missing filter on the real handler fails here.
+        payloads.append(_installed_log_payload("inside run"))
+
+    handler = MessageHandler(filters.ALL, logging_handler)
+    app = _FakeApp({0: [handler]})
+    request_context.instrument(app)
+
+    client = MagicMock()
+    saved_enabled, saved_client = analytics._enabled, analytics._client
+    analytics._enabled, analytics._client = True, client
+    try:
+        _run([handler.callback], _update())
+    finally:
+        analytics._enabled, analytics._client = saved_enabled, saved_client
+
+    assert payloads[0].get("request_id") == "u4242", payloads[0]
+
+    # A record written outside a handler run must not gain the field.
+    outside = logging.LogRecord(
+        "self_check.request_context", logging.INFO, __file__, 1, "outside run", (), None
+    )
+    RequestIdFilter().filter(outside)
+    assert not hasattr(outside, "request_id"), outside.__dict__
+
+
 def run() -> None:
     check_request_context_record()
     check_request_context_outcomes()
     check_request_context_conversation()
+    check_request_context_log_join()

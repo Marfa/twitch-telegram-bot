@@ -17,6 +17,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 import analytics
 import demo_mode
 import premium as prem
+import request_context
 from bot_helpers import (
     _menu,
     _settings_kb,
@@ -4654,6 +4655,14 @@ async def _finish_subscription(
         )
         context.user_data.clear()
         return ConversationHandler.END
+
+    request_context.annotate(
+        subscription_id=int(sub_id),
+        subscription_action="update" if edit_sub_id else "create",
+        alert_type=alert_type or "live",
+        twitch_username=str(data.get("twitch_username") or ""),
+        dest_type=dest_type,
+    )
 
     if as_draft and edit_sub_id:
         saved_edit = db.get_subscription(int(edit_sub_id), owner_id)
