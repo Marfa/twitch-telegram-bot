@@ -305,6 +305,42 @@ def _chat_send_allowed(user_id: int) -> bool:
     )
 
 
+# The read endpoints spend Helix points from the shared app-token bucket that
+# stream polling also uses: api_online costs 5 without the full plan (2 with
+# it), api_resolve costs 2. Bound them per Telegram user and across all Mini App
+# users, so one client loop cannot stall alert polling. Both shed before any
+# Helix call.
+_CHAT_READ_LIMIT = 20
+_CHAT_READ_WINDOW_SEC = 60.0
+_CHAT_READ_GLOBAL_LIMIT = 60
+_CHAT_READ_GLOBAL_WINDOW_SEC = 60.0
+
+
+def _chat_read_allowed(user_id: int, *, path: str) -> bool:
+    """Record one Mini App read; False when its user or the shared window is full."""
+    from health import _http_rate_limits_admit, _note_http_rate_limited
+
+    rejected = _http_rate_limits_admit(
+        [
+            (f"chat_read:{int(user_id)}", _CHAT_READ_LIMIT, _CHAT_READ_WINDOW_SEC),
+            (
+                "chat_read:shared",
+                _CHAT_READ_GLOBAL_LIMIT,
+                _CHAT_READ_GLOBAL_WINDOW_SEC,
+            ),
+        ]
+    )
+    if rejected is None:
+        return True
+    if rejected == "chat_read:shared":
+        _note_http_rate_limited(
+            "chat_read_shared", path, _CHAT_READ_GLOBAL_WINDOW_SEC
+        )
+    else:
+        _note_http_rate_limited("chat_read", path, _CHAT_READ_WINDOW_SEC)
+    return False
+
+
 def _profile_image_url(profile: dict[str, Any] | None) -> str:
     if not profile:
         return ""
@@ -412,6 +448,10 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
     if _twitch is None:
         return _err(503, "unavailable")
     user_id = int(user["id"])
+    if not _chat_read_allowed(user_id, path="/app/chat/api/online"):
+        code, payload = _err(429, "rate_limited")
+        payload["retry_after"] = int(_CHAT_READ_WINDOW_SEC)
+        return code, payload
     import demo_mode
 
     try:
@@ -453,6 +493,10 @@ def api_resolve(
         return _err(code, err or "unauthorized")
     if _twitch is None:
         return _err(503, "unavailable")
+    if not _chat_read_allowed(int(user["id"]), path="/app/chat/api/resolve"):
+        code, payload = _err(429, "rate_limited")
+        payload["retry_after"] = int(_CHAT_READ_WINDOW_SEC)
+        return code, payload
     login = _twitch.parse_username(query or "")
     if not login:
         return _err(400, "bad_query")

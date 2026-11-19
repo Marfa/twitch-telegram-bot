@@ -2509,6 +2509,91 @@ def check_handlers() -> None:
             assert send_twitch.resolved == cw._CHAT_SEND_LIMIT
         reset_http_rate_limits_for_tests()
 
+        # Mini App reads spend Helix points from the app-token bucket that stream
+        # polling also uses; they shed per Telegram user and across all users,
+        # before any Helix call.
+        class _CountingTwitch:
+            def __init__(self):
+                self.helix_calls = 0
+
+            def parse_username(self, raw):
+                return (raw or "").strip().lower().lstrip("@")
+
+            def get_users_by_login(self, logins):
+                self.helix_calls += 1
+                return {
+                    login: {"id": "100", "login": login, "profile_image_url": ""}
+                    for login in logins
+                    if login == "marfapr"
+                }
+
+            def get_live_streams(self, uids):
+                self.helix_calls += 1
+                return {
+                    str(uid): {
+                        "user_id": str(uid),
+                        "user_login": "marfapr",
+                        "user_name": "marfapr",
+                        "title": "live",
+                        "game_name": "Game",
+                        "viewer_count": 1,
+                    }
+                    for uid in uids
+                }
+
+            def get_user(self, login):
+                self.helix_calls += 1
+                return {"id": "100", "login": login, "profile_image_url": ""}
+
+        cdb.set_beta_enrollment(779, "stream-chat", True)
+        reset_http_rate_limits_for_tests()
+        read_twitch = _CountingTwitch()
+        with patch.object(
+            cw, "TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK"
+        ), patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", read_twitch):
+            read_token = cw.make_webapp_token(779)
+            status, body = cw.api_online(token=read_token)
+            assert status == 200 and body["ok"] is True
+            per_call = read_twitch.helix_calls
+            assert per_call >= 2
+            for _ in range(cw._CHAT_READ_LIMIT - 1):
+                status, body = cw.api_online(token=read_token)
+                assert status == 200 and body["ok"] is True
+            # A response cache shortens the spend, so the cap and the zero spend
+            # of the shed call are what this case asserts.
+            spent = read_twitch.helix_calls
+            assert per_call <= spent <= cw._CHAT_READ_LIMIT * per_call
+            status, body = cw.api_online(token=read_token)
+            assert status == 429 and body["error"] == "rate_limited"
+            assert body["retry_after"] == int(cw._CHAT_READ_WINDOW_SEC)
+            assert read_twitch.helix_calls == spent
+            # api_resolve shares the same per-user window and sheds too.
+            status, body = cw.api_resolve(token=read_token, query="marfapr")
+            assert status == 429 and body["error"] == "rate_limited"
+            assert read_twitch.helix_calls == spent
+        # The shared window caps the read traffic of every Mini App user.
+        reset_http_rate_limits_for_tests()
+        assert all(
+            cw._chat_read_allowed(5000 + i, path="/app/chat/api/online")
+            for i in range(cw._CHAT_READ_GLOBAL_LIMIT)
+        )
+        assert not cw._chat_read_allowed(5000, path="/app/chat/api/online")
+        # A read that the shared window sheds spends none of that user'''s own
+        # quota: fill the shared window from other users, shed one user through
+        # it, drain the shared window, and the user is admitted at once.
+        reset_http_rate_limits_for_tests()
+        assert all(
+            cw._chat_read_allowed(6000 + i, path="/app/chat/api/online")
+            for i in range(cw._CHAT_READ_GLOBAL_LIMIT)
+        )
+        for _ in range(cw._CHAT_READ_LIMIT):
+            assert not cw._chat_read_allowed(779, path="/app/chat/api/online")
+        with patch.object(
+            cw, "_CHAT_READ_GLOBAL_LIMIT", cw._CHAT_READ_GLOBAL_LIMIT * 4
+        ):
+            assert cw._chat_read_allowed(779, path="/app/chat/api/online")
+        reset_http_rate_limits_for_tests()
+
     # Free user cannot enable a non-live alert without alert_types.
     import asyncio
     from types import SimpleNamespace

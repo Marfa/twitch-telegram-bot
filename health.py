@@ -57,6 +57,26 @@ def _http_client_ip(handler: BaseHTTPRequestHandler) -> str:
     return handler.client_address[0] if handler.client_address else "unknown"
 
 
+def _http_rate_limit_trim(hits: list[float], cutoff: float) -> None:
+    """Drop the timestamps that left the window, oldest first."""
+    drop = 0
+    for ts in hits:
+        if ts >= cutoff:
+            break
+        drop += 1
+    if drop:
+        del hits[:drop]
+
+
+def _http_rate_limit_sweep(cutoff: float) -> None:
+    """Forget idle buckets when the key count passes the cap."""
+    if len(_HTTP_RL_HITS) <= _HTTP_RL_MAX_KEYS:
+        return
+    stale = [k for k, v in _HTTP_RL_HITS.items() if not v or v[-1] < cutoff]
+    for k in stale[: _HTTP_RL_MAX_KEYS // 2]:
+        _HTTP_RL_HITS.pop(k, None)
+
+
 def _http_rate_limit_allow(
     bucket_key: str, *, limit: int, window_sec: float
 ) -> bool:
@@ -64,30 +84,34 @@ def _http_rate_limit_allow(
     now = time.monotonic()
     cutoff = now - window_sec
     with _HTTP_RL_LOCK:
-        hits = _HTTP_RL_HITS.get(bucket_key)
-        if hits is None:
-            hits = []
-            _HTTP_RL_HITS[bucket_key] = hits
-        # Drop expired timestamps from the front.
-        drop = 0
-        for ts in hits:
-            if ts >= cutoff:
-                break
-            drop += 1
-        if drop:
-            del hits[:drop]
+        hits = _HTTP_RL_HITS.setdefault(bucket_key, [])
+        _http_rate_limit_trim(hits, cutoff)
         if len(hits) >= limit:
             return False
         hits.append(now)
-        if len(_HTTP_RL_HITS) > _HTTP_RL_MAX_KEYS:
-            stale = [
-                k
-                for k, v in _HTTP_RL_HITS.items()
-                if not v or v[-1] < cutoff
-            ]
-            for k in stale[: _HTTP_RL_MAX_KEYS // 2]:
-                _HTTP_RL_HITS.pop(k, None)
+        _http_rate_limit_sweep(cutoff)
         return True
+
+
+def _http_rate_limits_admit(buckets: list[tuple[str, int, float]]) -> str | None:
+    """Admit one request through several buckets as a whole.
+
+    Returns None when every bucket admits it, with one recorded hit in each,
+    otherwise the key of the first bucket that rejects it. A rejected request
+    spends no quota in any bucket, so a window that sheds it cannot extend the
+    lockout of the others.
+    """
+    now = time.monotonic()
+    with _HTTP_RL_LOCK:
+        for bucket_key, limit, window_sec in buckets:
+            hits = _HTTP_RL_HITS.setdefault(bucket_key, [])
+            _http_rate_limit_trim(hits, now - window_sec)
+            if len(hits) >= limit:
+                return bucket_key
+        for bucket_key, _limit, _window_sec in buckets:
+            _HTTP_RL_HITS[bucket_key].append(now)
+        _http_rate_limit_sweep(now - max(window_sec for _, _, window_sec in buckets))
+        return None
 
 
 def reset_http_rate_limits_for_tests() -> None:
