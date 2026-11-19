@@ -4451,16 +4451,26 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         name=JOB_STREAM_PREVIEWS,
         job_kwargs=_stream_job_kwargs(JOB_STREAM_PREVIEWS, misfire_grace=180),
     )
-    # Same grace/coalesce as stream jobs — default 1s grace misfires when
-    # check_streams (or another long tick) blocks the loop for a few seconds.
-    app.job_queue.run_repeating(
+    # IGDB release unix dates are midnight UTC; tick at that boundary.
+    # Startup run_once catches overdue alerts after deploy/restart.
+    app.job_queue.run_daily(
         check_release_watch_alerts,
-        interval=24 * 3600,
-        first=120,
+        time=time(0, 0, tzinfo=timezone.utc),
         name="check_release_watch_alerts",
         job_kwargs=_stream_job_kwargs(
             "check_release_watch_alerts", misfire_grace=24 * 3600
         ),
+    )
+    app.job_queue.run_once(
+        check_release_watch_alerts,
+        when=120,
+        name="check_release_watch_alerts_startup",
+        job_kwargs={
+            "id": "check_release_watch_alerts_startup",
+            "replace_existing": True,
+            "max_instances": 1,
+            "misfire_grace_time": 600,
+        },
     )
     app.job_queue.run_repeating(
         announce_new_beta_features,
