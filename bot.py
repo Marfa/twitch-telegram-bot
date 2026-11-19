@@ -42,6 +42,7 @@ from telegram.ext import (
 import premium as prem
 import demo_mode
 import analytics
+import request_context
 import beta as beta_features
 import metrics
 from db import (
@@ -4655,4 +4656,5 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             "daily_premium_purchases_report", misfire_grace=24 * 3600
         ),
     )
+    request_context.instrument(app)
     return app
