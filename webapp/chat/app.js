@@ -36,6 +36,7 @@
       quota: "{n} messages left today",
       unlimited: "Unlimited sends",
       limitHit: "Daily limit reached. Premium unlocks unlimited chat.",
+      tooFast: "Too many messages. Wait a few seconds and send again.",
       needAuth: "Log in with Twitch to send messages.",
       oauthPrivacyHint:
         "OAuth grants the bot Twitch scopes you approve. Tokens are stored encrypted; we do not sell your data. Not affiliated with Twitch.",
@@ -77,6 +78,7 @@
       quota: "Осталось сообщений сегодня: {n}",
       unlimited: "Безлимитная отправка",
       limitHit: "Дневной лимит. Premium снимает ограничение.",
+      tooFast: "Слишком часто. Подождите несколько секунд и отправьте снова.",
       needAuth: "Войдите в Twitch, чтобы писать.",
       oauthPrivacyHint:
         "OAuth даёт боту выбранные права Twitch. Токены хранятся зашифрованно; данные не продаём. Не аффилированы с Twitch.",
@@ -118,6 +120,7 @@
       quota: "Залишилось повідомлень сьогодні: {n}",
       unlimited: "Безлімітне надсилання",
       limitHit: "Денний ліміт. Premium знімає обмеження.",
+      tooFast: "Занадто часто. Зачекайте кілька секунд і надішліть знову.",
       needAuth: "Увійдіть у Twitch, щоб писати.",
       oauthPrivacyHint:
         "OAuth дає боту обрані права Twitch. Токени зберігаються зашифровано; дані не продаємо. Не афілійовані з Twitch.",
@@ -159,6 +162,7 @@
       quota: "{n} messaggi rimasti oggi",
       unlimited: "Invii illimitati",
       limitHit: "Limite giornaliero raggiunto. Premium sblocca la chat illimitata.",
+      tooFast: "Troppi messaggi. Attendi qualche secondo e invia di nuovo.",
       needAuth: "Accedi con Twitch per inviare messaggi.",
       oauthPrivacyHint:
         "OAuth concede al bot gli ambiti Twitch che approvi. I token sono memorizzati crittografati; non vendiamo i tuoi dati. Non affiliati a Twitch.",
@@ -905,6 +909,7 @@
     });
     if (!body.ok) {
       if (body.error === "daily_limit") notifySend(t.limitHit);
+      else if (body.error === "rate_limited") notifySend(t.tooFast);
       else if (body.error === "twitch_auth_required") notifySend(t.needAuth);
       else notifySend(t.sendFail);
       if (typeof body.remaining === "number") {

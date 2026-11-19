@@ -286,6 +286,25 @@ def _err(code: int, error: str) -> tuple[int, dict[str, Any]]:
     return code, {"ok": False, "error": error}
 
 
+# Twitch allows one account 20 chat messages per 30 s and restricts the account
+# for an hour above that. The relay keeps the same window, so one client loop
+# cannot push the linked account past Twitch's own limit or spend the shared
+# app-token bucket that stream polling uses.
+_CHAT_SEND_LIMIT = 20
+_CHAT_SEND_WINDOW_SEC = 30.0
+
+
+def _chat_send_allowed(user_id: int) -> bool:
+    """Record one relay send for the Telegram user; False when over the window."""
+    from health import _http_rate_limit_allow
+
+    return _http_rate_limit_allow(
+        f"chat_send:{int(user_id)}",
+        limit=_CHAT_SEND_LIMIT,
+        window_sec=_CHAT_SEND_WINDOW_SEC,
+    )
+
+
 def _profile_image_url(profile: dict[str, Any] | None) -> str:
     if not profile:
         return ""
@@ -512,6 +531,10 @@ def api_send(
     auth = _db.get_chat_auth(user_id)
     if not auth or not auth.refresh_token:
         return _err(401, "twitch_auth_required")
+    if not _chat_send_allowed(user_id):
+        code, payload = _err(429, "rate_limited")
+        payload["retry_after"] = int(_CHAT_SEND_WINDOW_SEC)
+        return code, payload
     broadcaster = _twitch.get_user(login)
     if not broadcaster:
         return _err(404, "not_found")
