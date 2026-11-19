@@ -558,6 +558,8 @@ def check_core() -> None:
     CHANNEL = "marfapr"
     t = TwitchClient()
     # 429 backoff: Retry-After respected once, then success.
+    import time
+
     from unittest.mock import MagicMock, patch
     from twitch import _install_rate_limit_backoff, _retry_after_seconds
 
@@ -637,6 +639,105 @@ def check_core() -> None:
         out = sess500.request("POST", "https://api.twitch.tv/helix/schedule/segment")
     assert out.status_code == 500 and len(s5_calls) == 1
     sleep_post.assert_not_called()
+
+    # A poll deadline that already passed fails before any attempt runs.
+    dl_calls = {"n": 0}
+
+    def _deadline_timeout(method, url, **kwargs):
+        dl_calls["n"] += 1
+        # The wrapper pops _deadline, so requests never sees the private kwarg.
+        assert "_deadline" not in kwargs
+        raise _requests.exceptions.ReadTimeout("read timed out")
+
+    sess_dl = MagicMock()
+    sess_dl.request = _deadline_timeout
+    _install_rate_limit_backoff(sess_dl)
+    with patch("twitch.time.sleep") as sleep_dl:
+        try:
+            sess_dl.request(
+                "GET",
+                "https://api.twitch.tv/helix/streams",
+                timeout=5,
+                _deadline=time.monotonic() - 1,
+            )
+            raise AssertionError("expected Timeout at the passed poll deadline")
+        except _requests.exceptions.Timeout:
+            pass
+    assert dl_calls["n"] == 0
+    sleep_dl.assert_not_called()
+
+    # An attempt's timeout is capped at the time left, and no wait may end
+    # past the deadline.
+    dl_timeouts: list = []
+
+    def _deadline_timeout_short(method, url, **kwargs):
+        dl_timeouts.append(kwargs["timeout"])
+        raise _requests.exceptions.ReadTimeout("read timed out")
+
+    sess_dl2 = MagicMock()
+    sess_dl2.request = _deadline_timeout_short
+    _install_rate_limit_backoff(sess_dl2)
+    with patch("twitch.time.sleep") as sleep_dl2:
+        try:
+            sess_dl2.request(
+                "GET",
+                "https://api.twitch.tv/helix/streams",
+                timeout=15,
+                _deadline=time.monotonic() + 2,
+            )
+            raise AssertionError("expected ReadTimeout inside the poll budget")
+        except _requests.exceptions.ReadTimeout:
+            pass
+    assert all(t <= 2.0 for t in dl_timeouts), dl_timeouts
+    slept = sum(call.args[0] for call in sleep_dl2.call_args_list)
+    assert slept < 2.0, slept
+
+    # A 429 whose Retry-After does not fit the budget gives up at once.
+    fake429_long = MagicMock()
+    fake429_long.status_code = 429
+    fake429_long.headers = {"Retry-After": "60"}
+    sess_dl429 = MagicMock()
+    sess_dl429.request = lambda method, url, **kwargs: fake429_long
+    _install_rate_limit_backoff(sess_dl429)
+    with patch("twitch.time.sleep") as sleep_dl429:
+        out = sess_dl429.request(
+            "GET",
+            "https://api.twitch.tv/helix/streams",
+            timeout=15,
+            _deadline=time.monotonic() + 30,
+        )
+    assert out.status_code == 429
+    sleep_dl429.assert_not_called()
+
+    # check_streams bounds the Helix poll so the tick fits CHECK_INTERVAL:
+    # an exhausted budget raises instead of returning partial live state.
+    budget_client = TwitchClient()
+    budget_client._headers = lambda: {}  # type: ignore[method-assign]
+    stream_calls: list = []
+
+    def _streams_get(url, **kwargs):
+        stream_calls.append(kwargs)
+        resp = MagicMock()
+        resp.json.return_value = {"data": [{"user_id": "1"}]}
+        return resp
+
+    budget_client._session.get = _streams_get  # type: ignore[method-assign]
+    try:
+        budget_client.get_live_streams(["1", "2"], budget_sec=0)
+        raise AssertionError("expected Timeout when the poll budget is spent")
+    except _requests.exceptions.Timeout:
+        pass
+    assert stream_calls == []
+    assert budget_client.get_live_streams(["1"], budget_sec=30) == {
+        "1": {"user_id": "1"}
+    }
+    assert stream_calls[0]["_deadline"] is not None
+    assert stream_calls[0]["timeout"] == 15
+    assert budget_client.get_live_streams(["1"]) == {"1": {"user_id": "1"}}
+    assert stream_calls[-1]["_deadline"] is None
+    stream_calls.clear()
+    budget_client.get_live_streams([str(i) for i in range(250)], budget_sec=30)
+    assert len(stream_calls) == 3
 
     # 401 rejected token: refresh headers once, then retry succeeds.
     fake401 = MagicMock()
