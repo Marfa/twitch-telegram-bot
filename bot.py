@@ -2691,9 +2691,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             name="group-schedule-ephemeral-commands",
         )
 
+    from tracing import traced_application_class
+
     app = (
         Application.builder()
         .token(token)
+        .application_class(traced_application_class())
         .post_init(post_init)
         .build()
     )
