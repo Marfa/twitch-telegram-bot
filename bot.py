@@ -43,6 +43,7 @@ import premium as prem
 import demo_mode
 import analytics
 import beta as beta_features
+import metrics
 from db import (
     AlertHistoryEntry,
     BotStats,
@@ -2578,6 +2579,10 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             logger.warning("User %s blocked the bot (or deactivated): %s", user_id, err)
             return
     logger.exception(t("unhandled_error", DEFAULT_LOCALE, err=err))
+    metrics.record_update_error(
+        handler="telegram_error_handler",
+        error_type=type(err).__name__ if isinstance(err, BaseException) else "unknown",
+    )
     analytics.capture_exception(
         err if isinstance(err, BaseException) else None,
         user_id=user_id,
@@ -2692,6 +2697,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         .post_init(post_init)
         .build()
     )
+    metrics.instrument_update_loop(app)
     from message_fx import install_message_fx
 
     install_message_fx(

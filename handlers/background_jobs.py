@@ -5,6 +5,7 @@ import logging
 
 from telegram.ext import JobQueue
 
+import metrics
 from db import Database
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,12 @@ def install_scheduler_visibility(job_queue: JobQueue | None) -> None:
                 "scheduler missed job=%s reason=misfire",
                 job_id,
             )
+        else:
+            return
+        metrics.record_job_skip(
+            job_id,
+            "max_instances" if code == EVENT_JOB_MAX_INSTANCES else "misfire",
+        )
 
     job_queue.scheduler.add_listener(
         _on_event, EVENT_JOB_MAX_INSTANCES | EVENT_JOB_MISSED
@@ -68,7 +75,7 @@ def ensure_repeating_job(
     if enabled and not existing:
         grace = max(30, int(interval))
         job_queue.run_repeating(
-            callback,
+            metrics.instrument_job(name, callback),
             interval=interval,
             first=first,
             name=name,

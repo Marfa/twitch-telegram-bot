@@ -14,6 +14,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
 import analytics
+import metrics
 from bot_helpers import _user_notifications_paused, delete_chat_message
 from db import Database, Subscription
 from handlers.alert_history import _vod_offset_seconds
@@ -1950,7 +1951,7 @@ async def _send_notification(
     if not sub.destination_ready():
         return True
     if sub.dest_type == "discord":
-        return await _send_discord_notification(
+        ok = await _send_discord_notification(
             bot,
             db,
             sub,
@@ -1965,8 +1966,14 @@ async def _send_notification(
             job_queue=job_queue,
             is_scheduled_repeat=is_scheduled_repeat,
         )
+        metrics.record_alert_delivery(
+            alert_type=alert_type,
+            dest_type="discord",
+            outcome="sent" if ok else "failed",
+        )
+        return ok
     if sub.dest_type == "webhook":
-        return await _send_outbound_webhook_notification(
+        ok = await _send_outbound_webhook_notification(
             bot,
             db,
             sub,
@@ -1981,9 +1988,21 @@ async def _send_notification(
             job_queue=job_queue,
             is_scheduled_repeat=is_scheduled_repeat,
         )
+        metrics.record_alert_delivery(
+            alert_type=alert_type,
+            dest_type="webhook",
+            outcome="sent" if ok else "failed",
+        )
+        return ok
     if sub.dest_type == "dm" and db.is_bot_blocked(sub.chat_id):
+        metrics.record_alert_delivery(
+            alert_type=alert_type, dest_type=sub.dest_type, outcome="blocked"
+        )
         return True
     if db.is_chat_unreachable(sub.chat_id):
+        metrics.record_alert_delivery(
+            alert_type=alert_type, dest_type=sub.dest_type, outcome="blocked"
+        )
         return True
     # Overlap block: skip new alerts while previous message for this sub still exists.
     # Scheduled repeats use block_repeat_when_last instead (checked by the job).
@@ -2188,15 +2207,24 @@ async def _send_notification(
             logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
             _mark_destination_unreachable(db, sub, retry_exc, alert_type=alert_type)
             await _maybe_notify_delivery_failure(bot, db, sub, retry_exc)
+            metrics.record_alert_delivery(
+                alert_type=alert_type, dest_type=sub.dest_type, outcome="rate_limited"
+            )
             # Keep captured MP4 pending until stream ends.
             return False
     except (BadRequest, Forbidden) as exc:
         logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
         _mark_destination_unreachable(db, sub, exc, alert_type=alert_type)
         await _maybe_notify_delivery_failure(bot, db, sub, exc)
+        metrics.record_alert_delivery(
+            alert_type=alert_type, dest_type=sub.dest_type, outcome="failed"
+        )
         # Keep captured MP4 pending until stream ends.
         return False
 
+    metrics.record_alert_delivery(
+        alert_type=alert_type, dest_type=sub.dest_type, outcome="sent"
+    )
     if sub.dest_type == "dm":
         from outbound_messages import note_outbound
 
