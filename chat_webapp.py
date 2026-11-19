@@ -262,7 +262,7 @@ def _subscription_uids(subs: list[Any]) -> dict[str, Any]:
         return by_uid
     logins = list({str(s.twitch_username).lower() for s in missing})
     try:
-        profiles = _twitch.get_users_by_login(logins)
+        profiles = _cached_users_by_login(logins)
     except Exception:
         logger.exception("chat resolve subscription logins failed")
         return by_uid
@@ -284,6 +284,96 @@ def _subscription_uids(subs: list[Any]) -> dict[str, Any]:
 
 def _err(code: int, error: str) -> tuple[int, dict[str, Any]]:
     return code, {"ok": False, "error": error}
+
+
+# One Mini App visit fetches /app/chat/api/online more than once: app.js calls it
+# on boot(), again on every return to the app (visibilitychange), and once more
+# when the player closes (closeChat()). Each call spends up to 5 Helix points
+# from the app-token bucket that stream polling also uses, so a read reuses the
+# answer of the previous one inside this window. Stream polling keeps its own
+# uncached calls.
+_READ_CACHE_TTL_SEC = 20.0
+_READ_CACHE_MAX_ENTRIES = 512
+_users_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_live_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+
+
+def _cache_get(cache: dict[str, Any], key: str) -> tuple[bool, Any]:
+    hit = cache.get(key)
+    if hit is None:
+        return False, None
+    if time.monotonic() >= hit[0]:
+        # Handlers run in parallel threads, so another read can drop the entry
+        # between the lookup above and this removal.
+        cache.pop(key, None)
+        return False, None
+    return True, hit[1]
+
+
+def _cache_put(cache: dict[str, Any], key: str, value: Any) -> None:
+    # A Mini App query is caller-controlled, so the cache keeps a fixed size.
+    if len(cache) >= _READ_CACHE_MAX_ENTRIES:
+        cache.clear()
+    cache[key] = (time.monotonic() + _READ_CACHE_TTL_SEC, value)
+
+
+def _cached_users_by_login(logins: list[str]) -> dict[str, dict[str, Any]]:
+    """`get_users_by_login` for a Mini App read, reused inside the cache window."""
+    wanted: list[str] = []
+    seen: set[str] = set()
+    for raw in logins:
+        login = (raw or "").strip().lower()
+        if login and login not in seen:
+            seen.add(login)
+            wanted.append(login)
+    if not wanted or _twitch is None:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
+    for login in wanted:
+        found, profile = _cache_get(_users_cache, login)
+        if found:
+            out[login] = dict(profile)
+        else:
+            missing.append(login)
+    if missing:
+        fetched = _twitch.get_users_by_login(missing)
+        for login in missing:
+            profile = fetched.get(login)
+            if not profile:
+                continue
+            out[login] = dict(profile)
+            _cache_put(_users_cache, login, dict(profile))
+    return out
+
+
+def _cached_live_streams(user_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """`get_live_streams` for a Mini App read; an offline answer is reused too."""
+    wanted: list[str] = []
+    seen: set[str] = set()
+    for raw in user_ids:
+        uid = str(raw or "").strip()
+        if uid and uid not in seen:
+            seen.add(uid)
+            wanted.append(uid)
+    if not wanted or _twitch is None:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
+    for uid in wanted:
+        found, stream = _cache_get(_live_cache, uid)
+        if not found:
+            missing.append(uid)
+        elif stream is not None:
+            out[uid] = dict(stream)
+    if missing:
+        live = _twitch.get_live_streams(missing)
+        for uid in missing:
+            stream = live.get(uid)
+            if stream is not None:
+                out[uid] = dict(stream)
+            _cache_put(_live_cache, uid, dict(stream) if stream is not None else None)
+    return out
 
 
 # Twitch allows one account 20 chat messages per 30 s and restricts the account
@@ -336,7 +426,7 @@ def _stream_cards_from_live(
                 "twitch_user_id": str(uid),
             }
         )
-    profiles = _twitch.get_users_by_login(logins) if logins and _twitch else {}
+    profiles = _cached_users_by_login(logins) if logins else {}
     for item in streams:
         profile = profiles.get(str(item.get("login") or "").lower())
         item["profile_image_url"] = _profile_image_url(profile)
@@ -361,7 +451,7 @@ def _other_promo_streams(user_id: int, *, sub_logins: set[str]) -> list[dict[str
     if not candidates:
         return []
     try:
-        profiles = _twitch.get_users_by_login(candidates)
+        profiles = _cached_users_by_login(candidates)
     except Exception:
         logger.exception("chat other promo resolve failed user=%s", user_id)
         return []
@@ -369,7 +459,7 @@ def _other_promo_streams(user_id: int, *, sub_logins: set[str]) -> list[dict[str
     if not uids:
         return []
     try:
-        live = _twitch.get_live_streams(uids)
+        live = _cached_live_streams(uids)
     except Exception:
         logger.exception("chat other promo live failed user=%s", user_id)
         return []
@@ -429,7 +519,7 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
             by_uid = _subscription_uids(subs)
             subscribed = len(by_uid)
             if by_uid:
-                live = _twitch.get_live_streams(list(by_uid.keys()))
+                live = _cached_live_streams(list(by_uid.keys()))
                 streams = _stream_cards_from_live(live, by_uid=by_uid)
         other_streams = _other_promo_streams(user_id, sub_logins=sub_logins)
         return 200, {
@@ -457,11 +547,11 @@ def api_resolve(
     if not login:
         return _err(400, "bad_query")
     try:
-        profile = _twitch.get_user(login)
+        profile = _cached_users_by_login([login]).get(login.lower())
         if not profile:
             return _err(404, "not_found")
         uid = str(profile["id"])
-        live_map = _twitch.get_live_streams([uid])
+        live_map = _cached_live_streams([uid])
         stream = live_map.get(uid)
         online = stream is not None
         return 200, {

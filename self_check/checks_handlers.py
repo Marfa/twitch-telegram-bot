@@ -2465,6 +2465,57 @@ def check_handlers() -> None:
         with patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", fake):
             assert cw._other_promo_streams(779, sub_logins=set()) == []
 
+        # A repeated Mini App read reuses the previous Helix answer, so page
+        # opens inside the window spend no further points of the app bucket.
+        class _FakeTwitchReadCache:
+            def __init__(self):
+                self.user_calls = 0
+                self.live_calls = 0
+
+            def get_users_by_login(self, logins):
+                self.user_calls += 1
+                return {
+                    login: {"id": "100", "login": login}
+                    for login in logins
+                    if login == "marfapr"
+                }
+
+            def get_live_streams(self, user_ids):
+                self.live_calls += 1
+                return {
+                    str(uid): {"user_id": str(uid), "user_login": "marfapr"}
+                    for uid in user_ids
+                    if str(uid) == "100"
+                }
+
+        read_cache_twitch = _FakeTwitchReadCache()
+        cw._users_cache.clear()
+        cw._live_cache.clear()
+        with patch.object(cw, "_twitch", read_cache_twitch):
+            assert cw._cached_users_by_login(["Marfapr", "marfapr"]).keys() == {
+                "marfapr"
+            }
+            assert read_cache_twitch.user_calls == 1
+            assert cw._cached_users_by_login(["marfapr"])["marfapr"]["id"] == "100"
+            assert read_cache_twitch.user_calls == 1
+            # An unknown login is not cached, so a corrected name is fetched.
+            assert cw._cached_users_by_login(["nobody"]) == {}
+            assert cw._cached_users_by_login(["nobody"]) == {}
+            assert read_cache_twitch.user_calls == 3
+            assert cw._cached_live_streams(["100"]).keys() == {"100"}
+            assert read_cache_twitch.live_calls == 1
+            assert cw._cached_live_streams(["100", "200"]).keys() == {"100"}
+            assert read_cache_twitch.live_calls == 2
+            # An offline answer is reused as well.
+            assert cw._cached_live_streams(["200"]) == {}
+            assert read_cache_twitch.live_calls == 2
+            # An entry past its window is fetched again.
+            cw._users_cache["marfapr"] = (0.0, {"id": "100", "login": "marfapr"})
+            assert cw._cached_users_by_login(["marfapr"])["marfapr"]["id"] == "100"
+            assert read_cache_twitch.user_calls == 4
+        cw._users_cache.clear()
+        cw._live_cache.clear()
+
         # Relay send is bounded per Telegram user at Twitch's own chat rate:
         # over the window the request stops before any Helix call.
         from health import reset_http_rate_limits_for_tests
