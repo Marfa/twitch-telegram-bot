@@ -2104,6 +2104,58 @@ async def _smoke_defedit_receive_template(db) -> None:
     assert "черновик" in sent.lower() or "draft" in sent.lower()
 
 
+async def _smoke_broadcast_metrics(db) -> None:
+    """A broadcast records sent and failed recipients as counter points."""
+    from datetime import datetime, timezone
+
+    import metrics as metrics_mod
+    from handlers.broadcast import _send_admin_broadcast
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.points: list[tuple[object, dict]] = []
+
+        def add(self, value, attributes=None) -> None:
+            self.points.append((value, dict(attributes or {})))
+
+    counter = _Recorder()
+    saved = (metrics_mod._enabled, metrics_mod._broadcast_counter)
+    metrics_mod._enabled = True
+    metrics_mod._broadcast_counter = counter
+    sent = failed = total = None
+    try:
+        application, _bot = _app(db)
+        ctx = _ctx(application)
+        broadcast_id = db.add_scheduled_broadcast(
+            "bot_update", "hi", datetime.now(timezone.utc).isoformat(), _ADMIN_UID
+        )
+        recipients = [_FREE_UID + 60, _FREE_UID + 61]
+        for uid in recipients:
+            db.upsert_user(uid)
+            db.set_user_locale(uid, "ru")
+        with patch(
+            "handlers.broadcast.build_translations", return_value={"ru": "hi"}
+        ):
+            with patch(
+                "handlers.broadcast._send_dm_html",
+                new=AsyncMock(side_effect=[("sent", 11), "failed"]),
+            ):
+                sent, failed, total = await _send_admin_broadcast(
+                    ctx,
+                    "bot_update",
+                    "hi",
+                    broadcast_id=broadcast_id,
+                    recipient_ids=recipients,
+                )
+    finally:
+        metrics_mod._enabled, metrics_mod._broadcast_counter = saved
+    assert (sent, failed, total) == (1, 1, 2)
+    assert counter.points == [
+        (1, {"msg_type": "bot_update", "outcome": "sent"}),
+        (1, {"msg_type": "bot_update", "outcome": "failed"}),
+    ]
+
+
 async def _run_smoke() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = open_database(Path(td) / "smoke.db")
@@ -2119,6 +2171,7 @@ async def _run_smoke() -> None:
         await _smoke_group_chat_replies(db)
         await _smoke_subscriptions(db)
         await _smoke_premium_and_menus(db)
+        await _smoke_broadcast_metrics(db)
         await _smoke_delivery_and_helpers(db)
         await _smoke_pause_sub_start(db)
         await _smoke_welcome_demo_locale(db)

@@ -104,6 +104,9 @@ def _check_metrics() -> None:
     metrics_mod.record_alert_delivery(
         alert_type="live", dest_type="dm", outcome="sent"
     )
+    metrics_mod.record_broadcast_delivery(
+        msg_type="bot_update", outcome="sent", count=1
+    )
     metrics_mod.record_job("check_job", "ok", 0.01)
     metrics_mod.record_job_skip("check_job", "misfire")
 
