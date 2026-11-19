@@ -2559,8 +2559,10 @@ def check_handlers() -> None:
             for _ in range(cw._CHAT_READ_LIMIT - 1):
                 status, body = cw.api_online(token=read_token)
                 assert status == 200 and body["ok"] is True
+            # A response cache shortens the spend, so the cap and the zero spend
+            # of the shed call are what this case asserts.
             spent = read_twitch.helix_calls
-            assert spent == cw._CHAT_READ_LIMIT * per_call
+            assert per_call <= spent <= cw._CHAT_READ_LIMIT * per_call
             status, body = cw.api_online(token=read_token)
             assert status == 429 and body["error"] == "rate_limited"
             assert body["retry_after"] == int(cw._CHAT_READ_WINDOW_SEC)
@@ -2576,6 +2578,20 @@ def check_handlers() -> None:
             for i in range(cw._CHAT_READ_GLOBAL_LIMIT)
         )
         assert not cw._chat_read_allowed(5000, path="/app/chat/api/online")
+        # A read that the shared window sheds spends none of that user'''s own
+        # quota: fill the shared window from other users, shed one user through
+        # it, drain the shared window, and the user is admitted at once.
+        reset_http_rate_limits_for_tests()
+        assert all(
+            cw._chat_read_allowed(6000 + i, path="/app/chat/api/online")
+            for i in range(cw._CHAT_READ_GLOBAL_LIMIT)
+        )
+        for _ in range(cw._CHAT_READ_LIMIT):
+            assert not cw._chat_read_allowed(779, path="/app/chat/api/online")
+        with patch.object(
+            cw, "_CHAT_READ_GLOBAL_LIMIT", cw._CHAT_READ_GLOBAL_LIMIT * 4
+        ):
+            assert cw._chat_read_allowed(779, path="/app/chat/api/online")
         reset_http_rate_limits_for_tests()
 
     # Free user cannot enable a non-live alert without alert_types.

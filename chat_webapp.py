@@ -318,23 +318,27 @@ _CHAT_READ_GLOBAL_WINDOW_SEC = 60.0
 
 def _chat_read_allowed(user_id: int, *, path: str) -> bool:
     """Record one Mini App read; False when its user or the shared window is full."""
-    from health import _http_rate_limit_allow, _note_http_rate_limited
+    from health import _http_rate_limits_admit, _note_http_rate_limited
 
-    if not _http_rate_limit_allow(
-        f"chat_read:{int(user_id)}",
-        limit=_CHAT_READ_LIMIT,
-        window_sec=_CHAT_READ_WINDOW_SEC,
-    ):
+    rejected = _http_rate_limits_admit(
+        [
+            (f"chat_read:{int(user_id)}", _CHAT_READ_LIMIT, _CHAT_READ_WINDOW_SEC),
+            (
+                "chat_read:shared",
+                _CHAT_READ_GLOBAL_LIMIT,
+                _CHAT_READ_GLOBAL_WINDOW_SEC,
+            ),
+        ]
+    )
+    if rejected is None:
+        return True
+    if rejected == "chat_read:shared":
+        _note_http_rate_limited(
+            "chat_read_shared", path, _CHAT_READ_GLOBAL_WINDOW_SEC
+        )
+    else:
         _note_http_rate_limited("chat_read", path, _CHAT_READ_WINDOW_SEC)
-        return False
-    if not _http_rate_limit_allow(
-        "chat_read:shared",
-        limit=_CHAT_READ_GLOBAL_LIMIT,
-        window_sec=_CHAT_READ_GLOBAL_WINDOW_SEC,
-    ):
-        _note_http_rate_limited("chat_read_shared", path, _CHAT_READ_GLOBAL_WINDOW_SEC)
-        return False
-    return True
+    return False
 
 
 def _profile_image_url(profile: dict[str, Any] | None) -> str:
