@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import max_api
@@ -64,16 +64,84 @@ def check_outbound_webhook_post_mock() -> None:
         twitch_login="x",
         text="ping",
     )
-    owh.post_webhook(url, secret=secret, payload=payload, session=session)
+    with patch.object(owh, "_resolve_addresses", return_value=["93.184.216.34"]):
+        owh.post_webhook(url, secret=secret, payload=payload, session=session)
     assert session.post.called
     args, kwargs = session.post.call_args
-    assert args[0] == url
+    assert args[0] == "https://93.184.216.34/alerts"
+    assert kwargs["allow_redirects"] is False
+    assert kwargs["headers"]["Host"] == "hooks.example.com"
     headers = kwargs["headers"]
     assert headers[owh.SIGNATURE_HEADER].startswith("sha256=")
     assert headers[owh.DELIVERY_ID_HEADER] == "abc"
     body = kwargs["data"]
     assert owh.verify_signature(body, secret, headers[owh.SIGNATURE_HEADER])
 
+
+def check_outbound_webhook_ssrf_send_path() -> None:
+    """Delivery dials the address checked at send time and follows no redirect."""
+    payload = owh.build_payload(
+        delivery_id="ssrf",
+        subscription_id=1,
+        owner_id=2,
+        alert_type="test",
+        twitch_login="x",
+        text="ping",
+    )
+    secret = owh.generate_secret()
+    url = "https://hooks.example.com/alerts"
+
+    # A host whose answer changed to loopback before the send must not be dialled.
+    session = MagicMock()
+    with patch.object(owh, "_resolve_addresses", return_value=["127.0.0.1"]):
+        try:
+            owh.post_webhook(url, secret=secret, payload=payload, session=session)
+        except owh.OutboundWebhookError as exc:
+            assert "invalid webhook url" in str(exc)
+        else:
+            raise AssertionError("loopback answer must not be sent to")
+    assert not session.post.called
+
+    # One blocked answer among the resolved addresses rejects the whole host.
+    mixed = ["93.184.216.34", "169.254.169.254"]
+    with patch.object(owh, "_resolve_addresses", return_value=mixed):
+        try:
+            owh.post_webhook(url, secret=secret, payload=payload, session=MagicMock())
+        except owh.OutboundWebhookError as exc:
+            assert "invalid webhook url" in str(exc)
+        else:
+            raise AssertionError("metadata address must be rejected")
+
+    # No answer at all: a delivery error, never a connection nobody checked.
+    with patch.object(owh, "_resolve_addresses", return_value=[]):
+        try:
+            owh.post_webhook(url, secret=secret, payload=payload, session=MagicMock())
+        except owh.OutboundWebhookError as exc:
+            assert "does not resolve" in str(exc)
+        else:
+            raise AssertionError("unresolvable host must fail delivery")
+
+    # A 3xx answer is a delivery failure, not a followed hop to an unchecked URL.
+    session = MagicMock()
+    session.post.return_value = MagicMock(status_code=302)
+    with patch.object(owh, "_resolve_addresses", return_value=["93.184.216.34"]):
+        try:
+            owh.post_webhook(url, secret=secret, payload=payload, session=session)
+        except owh.OutboundWebhookError as exc:
+            assert exc.status_code == 302
+        else:
+            raise AssertionError("a 302 answer must be a delivery failure")
+    assert session.post.call_args.kwargs["allow_redirects"] is False
+
+    # The connection carries the real host for the Host header and for TLS.
+    session = MagicMock()
+    session.post.return_value = MagicMock(status_code=204)
+    with patch.object(owh, "_resolve_addresses", return_value=["93.184.216.34"]):
+        owh.post_webhook(url + "?x=1", secret=secret, payload=payload, session=session)
+    args, kwargs = session.post.call_args
+    assert args[0] == "https://93.184.216.34/alerts?x=1"
+    assert kwargs["headers"]["Host"] == "hooks.example.com"
+    assert isinstance(session.mount.call_args.args[1], owh._PinnedHostAdapter)
 
 def check_outbound_webhook_subscription_roundtrip() -> None:
     import os
@@ -231,6 +299,7 @@ def check_web_site_locale_helpers() -> None:
 def run() -> None:
     check_outbound_webhook_validate_sign_ssrf()
     check_outbound_webhook_post_mock()
+    check_outbound_webhook_ssrf_send_path()
     check_outbound_webhook_subscription_roundtrip()
     check_outbound_webhook_docs_and_example_aligned()
     check_web_site_locale_helpers()

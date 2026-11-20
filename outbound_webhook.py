@@ -74,24 +74,72 @@ def normalize_webhook_url(raw: str) -> str | None:
     return f"https://{host}{path}{query}"
 
 
-def _is_blocked_host(host: str) -> bool:
-    if host in ("metadata.google.internal", "metadata"):
-        return True
-    if _HOST_IP_RE.match(host):
-        return _is_blocked_ip(host)
+def _resolve_addresses(host: str) -> list[str]:
+    """Every address ``host`` resolves to now; empty list when it does not resolve."""
     try:
         infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     except OSError:
-        # Unresolvable now — still allow save; delivery will fail later.
-        return False
+        return []
+    addresses: list[str] = []
     for info in infos:
         sockaddr = info[4]
-        if not sockaddr:
-            continue
-        ip = sockaddr[0]
-        if _is_blocked_ip(ip):
-            return True
-    return False
+        if sockaddr and sockaddr[0] not in addresses:
+            addresses.append(sockaddr[0])
+    return addresses
+
+
+def _is_blocked_host(host: str) -> bool:
+    if host in ("metadata.google.internal", "metadata"):
+        return True
+    if _HOST_IP_RE.match(host) or ":" in host:
+        return _is_blocked_ip(host)
+    addresses = _resolve_addresses(host)
+    if not addresses:
+        # Unresolvable now — still allow save; delivery resolves again and fails.
+        return False
+    return any(_is_blocked_ip(ip) for ip in addresses)
+
+
+def _pinned_address(host: str) -> str:
+    """Address to connect to for ``host``, checked at this moment.
+
+    The send path must not rely on the address a save-time check saw: ``requests``
+    looks the host up again when it connects, so an answer that changes between
+    the two lookups would reach a blocked address. This call resolves once and
+    rejects any blocked answer.
+    """
+    if _HOST_IP_RE.match(host) or ":" in host:
+        addresses = [host]
+    else:
+        addresses = _resolve_addresses(host)
+    if not addresses:
+        raise OutboundWebhookError("webhook host does not resolve")
+    if any(_is_blocked_ip(ip) for ip in addresses):
+        raise OutboundWebhookError("invalid webhook url")
+    # Prefer IPv4: a dual-stack host stays reachable when this container has no IPv6
+    # route, and the connection attempt is not repeated on another address.
+    for ip in addresses:
+        if ":" not in ip:
+            return ip
+    return addresses[0]
+
+
+def _url_host(address: str) -> str:
+    """Address in URL form (an IPv6 literal needs brackets)."""
+    return f"[{address}]" if ":" in address else address
+
+
+class _PinnedHostAdapter(requests.adapters.HTTPAdapter):
+    """Keep TLS SNI and certificate checks on ``host`` while dialling one fixed address."""
+
+    def __init__(self, host: str, **kwargs: Any) -> None:
+        self._host = host
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
+        kwargs["server_hostname"] = self._host
+        kwargs["assert_hostname"] = self._host
+        super().init_poolmanager(*args, **kwargs)
 
 
 def _is_blocked_ip(ip_str: str) -> bool:
@@ -210,9 +258,26 @@ def post_webhook(
     if delivery_id:
         headers[DELIVERY_ID_HEADER] = delivery_id
 
-    http = session or requests
+    parts = urlparse(url)
+    host = parts.hostname or ""
+    address = _pinned_address(host)
+    path = parts.path or "/"
+    send_url = f"https://{_url_host(address)}{path}"
+    if parts.query:
+        send_url += f"?{parts.query}"
+    headers["Host"] = host
+
+    http = session or requests.Session()
+    http.mount("https://", _PinnedHostAdapter(host))
     try:
-        resp = http.post(url, data=body, headers=headers, timeout=timeout)
+        # A followed redirect would leave the validated URL for a destination no check saw.
+        resp = http.post(
+            send_url,
+            data=body,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=False,
+        )
     except requests.RequestException as exc:
         raise OutboundWebhookError(str(exc)) from exc
 
