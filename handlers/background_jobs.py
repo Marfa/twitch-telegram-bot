@@ -1,7 +1,9 @@
 """Start/stop optional JobQueue timers when nobody needs them."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 from telegram.ext import JobQueue
 
@@ -9,6 +11,63 @@ import metrics
 from db import Database
 
 logger = logging.getLogger(__name__)
+
+# One second short of the interval: a pass that ends in time is never cut, and only
+# a pass that runs into its last second loses its tail instead of the next tick.
+JOB_BUDGET_MARGIN_SECONDS = 1.0
+
+
+def job_budget_seconds(interval_seconds: float) -> float:
+    """Wall-clock budget for one run of a job that repeats every interval_seconds."""
+    return float(interval_seconds) - JOB_BUDGET_MARGIN_SECONDS
+
+
+def run_job_with_budget(job_id: str, interval_seconds: float, callback):
+    """Wrap a job callback so one tick cannot outlive the interval that started it."""
+    budget = job_budget_seconds(interval_seconds)
+
+    def _log_run(outcome: str, started: float) -> None:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        cut = outcome == "timed_out"
+        logger.log(
+            logging.INFO if outcome == "ok" else logging.WARNING,
+            "job run job=%s outcome=%s elapsed_ms=%s budget_s=%.1f cut=%s",
+            job_id,
+            outcome,
+            elapsed_ms,
+            budget,
+            cut,
+            extra={
+                "job": job_id,
+                "outcome": outcome,
+                "elapsed_ms": elapsed_ms,
+                "budget_s": round(budget, 1),
+                "cut": cut,
+            },
+        )
+
+    async def _run(context) -> None:
+        started = time.perf_counter()
+        deadline = asyncio.timeout(budget)
+        try:
+            async with deadline:
+                await callback(context)
+        except TimeoutError:
+            # Only the deadline of this run is a cut; a timeout the job raised itself
+            # travels on to the caller as an error like any other.
+            if not deadline.expired():
+                _log_run("error", started)
+                raise
+            _log_run("timed_out", started)
+            metrics.record_job(job_id, "timed_out", time.perf_counter() - started)
+        except Exception:
+            _log_run("error", started)
+            raise
+        else:
+            _log_run("ok", started)
+
+    return _run
+
 
 JOB_TWITCH_SYNC = "twitch_follows_sync"
 JOB_PREMIUM_TWITCH = "premium_twitch_refresh"
@@ -75,7 +134,9 @@ def ensure_repeating_job(
     if enabled and not existing:
         grace = max(30, int(interval))
         job_queue.run_repeating(
-            metrics.instrument_job(name, callback),
+            run_job_with_budget(
+                name, interval, metrics.instrument_job(name, callback)
+            ),
             interval=interval,
             first=first,
             name=name,
