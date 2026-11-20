@@ -36,6 +36,8 @@ Pin and delete-previous are not available for this destination.
 
 Success: respond **`2xx` within ~20s**. Anything else is a delivery failure (bot may retry once on `429`; pauses destination on `401`/`403`/`404`/`410`).
 
+The bot does not follow redirects: a `3xx` answer is a delivery failure, so answer the request directly. It also resolves the host once, rejects any private, loopback, link-local or metadata address, and connects to that checked address.
+
 ### Signature
 
 ```text
