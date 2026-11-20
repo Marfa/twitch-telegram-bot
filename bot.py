@@ -4403,6 +4403,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         JOB_CHECK_STREAMS,
         JOB_STREAM_PREVIEWS,
         install_scheduler_visibility,
+        run_job_with_budget,
         sync_optional_jobs,
     )
     from handlers.drops import (
@@ -4442,7 +4443,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         }
 
     app.job_queue.run_repeating(
-        check_streams,
+        run_job_with_budget(JOB_CHECK_STREAMS, CHECK_INTERVAL, check_streams),
         interval=CHECK_INTERVAL,
         first=10,
         name=JOB_CHECK_STREAMS,
@@ -4455,7 +4456,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         min(300, max(60, int(STREAM_PREVIEW_REFRESH_SECONDS) // 6)),
     )
     app.job_queue.run_repeating(
-        check_stream_previews,
+        run_job_with_budget(JOB_STREAM_PREVIEWS, _preview_poll, check_stream_previews),
         interval=_preview_poll,
         first=25,
         name=JOB_STREAM_PREVIEWS,
@@ -4483,7 +4484,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         },
     )
     app.job_queue.run_repeating(
-        announce_new_beta_features,
+        run_job_with_budget(
+            "announce_new_beta_features",
+            3600,
+            announce_new_beta_features,
+        ),
         interval=3600,
         first=90,
         name="announce_new_beta_features",
@@ -4493,14 +4498,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     sync_optional_jobs(app.job_queue, db)
     app.job_queue.run_repeating(
-        process_scheduled_broadcasts,
+        run_job_with_budget(
+            "process_scheduled_broadcasts",
+            60,
+            process_scheduled_broadcasts,
+        ),
         interval=60,
         first=20,
         name="process_scheduled_broadcasts",
         job_kwargs=_stream_job_kwargs("process_scheduled_broadcasts", misfire_grace=60),
     )
     app.job_queue.run_repeating(
-        purge_old_broadcasts,
+        run_job_with_budget("purge_old_broadcasts", 24 * 3600, purge_old_broadcasts),
         interval=24 * 3600,
         first=300,
         name="purge_old_broadcasts",
@@ -4509,7 +4518,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        purge_expired_clip_compilations,
+        run_job_with_budget(
+            "purge_expired_clip_compilations",
+            3600,
+            purge_expired_clip_compilations,
+        ),
         interval=3600,
         first=240,
         name="purge_expired_clip_compilations",
@@ -4518,7 +4531,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        purge_stale_previous_messages,
+        run_job_with_budget(
+            "purge_stale_previous_messages",
+            3600,
+            purge_stale_previous_messages,
+        ),
         interval=3600,
         first=210,
         name="purge_stale_previous_messages",
@@ -4527,14 +4544,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        offer_due_welcome_demos,
+        run_job_with_budget("offer_due_welcome_demos", 900, offer_due_welcome_demos),
         interval=900,
         first=120,
         name="offer_due_welcome_demos",
         job_kwargs=_stream_job_kwargs("offer_due_welcome_demos", misfire_grace=900),
     )
     app.job_queue.run_repeating(
-        purge_expired_blocked_users,
+        run_job_with_budget(
+            "purge_expired_blocked_users",
+            24 * 3600,
+            purge_expired_blocked_users,
+        ),
         interval=24 * 3600,
         first=400,
         name="purge_expired_blocked_users",
@@ -4543,7 +4564,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        purge_inactive_users,
+        run_job_with_budget("purge_inactive_users", 24 * 3600, purge_inactive_users),
         interval=24 * 3600,
         first=420,
         name="purge_inactive_users",
@@ -4552,7 +4573,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        purge_stale_log_tables,
+        run_job_with_budget(
+            "purge_stale_log_tables",
+            24 * 3600,
+            purge_stale_log_tables,
+        ),
         interval=24 * 3600,
         first=450,
         name="purge_stale_log_tables",
@@ -4561,7 +4586,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        refresh_broadcast_feedback_keyboards,
+        run_job_with_budget(
+            "refresh_broadcast_feedback_keyboards",
+            3600,
+            refresh_broadcast_feedback_keyboards,
+        ),
         interval=3600,
         first=15,
         name="refresh_broadcast_feedback_keyboards",
@@ -4570,42 +4599,50 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        check_twitch_status,
+        run_job_with_budget("check_twitch_status", 120, check_twitch_status),
         interval=120,
         first=40,
         name="check_twitch_status",
         job_kwargs=_stream_job_kwargs("check_twitch_status", misfire_grace=120),
     )
     app.job_queue.run_repeating(
-        check_posthog_status,
+        run_job_with_budget("check_posthog_status", 120, check_posthog_status),
         interval=120,
         first=50,
         name="check_posthog_status",
         job_kwargs=_stream_job_kwargs("check_posthog_status", misfire_grace=120),
     )
     app.job_queue.run_repeating(
-        check_cursor_status,
+        run_job_with_budget("check_cursor_status", 120, check_cursor_status),
         interval=120,
         first=55,
         name="check_cursor_status",
         job_kwargs=_stream_job_kwargs("check_cursor_status", misfire_grace=120),
     )
     app.job_queue.run_repeating(
-        poll_posthog_inbox_reports,
+        run_job_with_budget(
+            "poll_posthog_inbox_reports",
+            300,
+            poll_posthog_inbox_reports,
+        ),
         interval=300,
         first=60,
         name="poll_posthog_inbox_reports",
         job_kwargs=_stream_job_kwargs("poll_posthog_inbox_reports", misfire_grace=300),
     )
     app.job_queue.run_repeating(
-        poll_polylane_new_issues,
+        run_job_with_budget("poll_polylane_new_issues", 300, poll_polylane_new_issues),
         interval=300,
         first=75,
         name="poll_polylane_new_issues",
         job_kwargs=_stream_job_kwargs("poll_polylane_new_issues", misfire_grace=300),
     )
     app.job_queue.run_repeating(
-        weekly_new_users_report,
+        run_job_with_budget(
+            "weekly_new_users_report",
+            7 * 24 * 3600,
+            weekly_new_users_report,
+        ),
         interval=7 * 24 * 3600,
         first=_seconds_until_next_weekly_report(),
         name="weekly_new_users_report",
@@ -4632,14 +4669,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        poll_ai_clips_auto,
+        run_job_with_budget("ai_clips_auto", 20 * 60, poll_ai_clips_auto),
         interval=20 * 60,
         first=180,
         name="ai_clips_auto",
         job_kwargs=_stream_job_kwargs("ai_clips_auto", misfire_grace=20 * 60),
     )
     app.job_queue.run_repeating(
-        daily_bot_stats_snapshot,
+        run_job_with_budget(
+            "daily_bot_stats_snapshot",
+            24 * 3600,
+            daily_bot_stats_snapshot,
+        ),
         interval=24 * 3600,
         first=_seconds_until_next_daily_stats(),
         name="daily_bot_stats_snapshot",
@@ -4648,7 +4689,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         ),
     )
     app.job_queue.run_repeating(
-        daily_premium_purchases_report,
+        run_job_with_budget(
+            "daily_premium_purchases_report",
+            24 * 3600,
+            daily_premium_purchases_report,
+        ),
         interval=24 * 3600,
         first=_seconds_until_next_premium_digest(),
         name="daily_premium_purchases_report",
