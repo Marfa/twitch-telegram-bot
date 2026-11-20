@@ -22,7 +22,8 @@ from bot_helpers import (
     reply_chat_id,
 )
 from db import Database
-from db.models import BROADCAST_RETENTION_DAYS, ScheduledBroadcast
+from db.models import BROADCAST_RETENTION_DAYS, ScheduledBroadcast, _parse_utc
+from handlers.monitoring import _is_unchanged_message_edit
 from i18n import (
     DEFAULT_LOCALE,
     SCHEDULE_TZ,
@@ -707,6 +708,8 @@ async def _send_admin_broadcast(
     metrics.record_broadcast_delivery(
         msg_type=msg_type, outcome="failed", count=failed
     )
+    if sent:
+        _feedback_pushed_counts[broadcast_id] = (up_count, down_count)
     return sent, failed, len(user_ids)
 
 
@@ -714,6 +717,11 @@ async def _send_admin_broadcast(
 _FEEDBACK_REFRESH_MAX_NETWORK_ERRORS = 3
 # Seconds before each retry of the deliveries that a network error left stale.
 _FEEDBACK_REFRESH_RETRY_DELAYS = (30, 120, 600)
+# Telegram refuses to edit a message older than ~48h; stop sweeping slightly
+# earlier so the last pass still lands (same limit as the alert delete purge).
+_BROADCAST_KEYBOARD_EDIT_WINDOW = timedelta(hours=47)
+# broadcast_id -> vote counts that reached the delivered keyboards.
+_feedback_pushed_counts: dict[int, tuple[int, int]] = {}
 
 
 async def _refresh_broadcast_feedback_keyboards(
@@ -724,10 +732,14 @@ async def _refresh_broadcast_feedback_keyboards(
     """Push current vote counts; return deliveries a network error left stale."""
     db: Database = context.application.bot_data["db"]
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
+    # A retry passes only the deliveries a network error left stale; the other
+    # deliveries of the broadcast keep their older counts.
+    full_pass = deliveries is None
     if deliveries is None:
         deliveries = db.get_broadcast_deliveries(broadcast_id)
     locales = db.get_user_locales([uid for uid, _ in deliveries])
     failed: list[tuple[int, int]] = []
+    refused = 0
     error_streak = 0
     last_error: NetworkError | None = None
     for index, (uid, message_id) in enumerate(deliveries):
@@ -745,8 +757,13 @@ async def _refresh_broadcast_feedback_keyboards(
                 reply_markup=markup,
             )
             error_streak = 0
-        except (BadRequest, Forbidden):
+        except BadRequest as exc:
             error_streak = 0
+            if not _is_unchanged_message_edit(exc):
+                refused += 1
+        except Forbidden:
+            error_streak = 0
+            refused += 1
         except NetworkError as exc:
             last_error = exc
             failed.append((uid, message_id))
@@ -764,6 +781,15 @@ async def _refresh_broadcast_feedback_keyboards(
             len(deliveries),
             last_error,
         )
+    if refused:
+        logger.warning(
+            "Broadcast %s feedback refresh: Telegram refused %s of %s deliveries",
+            broadcast_id,
+            refused,
+            len(deliveries),
+        )
+    if not failed and full_pass and context.application.running:
+        _feedback_pushed_counts[broadcast_id] = (up_count, down_count)
     return failed
 
 
@@ -813,10 +839,34 @@ async def refresh_broadcast_feedback_keyboards(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     db: Database = context.application.bot_data["db"]
+    now = datetime.now(timezone.utc)
+    pushed = current = expired = stale_total = 0
     for item in db.get_sent_broadcasts(retention_days=BROADCAST_RETENTION_DAYS):
+        sent_at = _parse_utc(item.sent_at)
+        # All deliveries went out before sent_at and Telegram stopped editing
+        # them ~48h later; a pass over them can only be refused.
+        if sent_at is None or now - sent_at > _BROADCAST_KEYBOARD_EDIT_WINDOW:
+            _feedback_pushed_counts.pop(item.id, None)
+            expired += 1
+            continue
+        if _feedback_pushed_counts.get(item.id) == db.get_broadcast_feedback_counts(
+            item.id
+        ):
+            current += 1
+            continue
         if not db.get_broadcast_deliveries(item.id):
             continue
-        await _refresh_broadcast_feedback_keyboards(context, item.id)
+        stale = await _refresh_broadcast_feedback_keyboards(context, item.id)
+        pushed += 1
+        stale_total += len(stale)
+    logger.info(
+        "Broadcast feedback refresh: %s broadcast(s) pushed, %s already current, "
+        "%s past Telegram's edit window, %s delivery(ies) stale",
+        pushed,
+        current,
+        expired,
+        stale_total,
+    )
 
 
 async def on_broadcast_feedback(
