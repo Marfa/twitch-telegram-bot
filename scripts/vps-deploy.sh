@@ -163,9 +163,12 @@ wait_db() {
 docker compose -f "$COMPOSE_FILE" up -d db
 wait_db
 
-# Snapshot the running bot image so a bad release can roll back.
+# Snapshot the running bot image under a stable name so a bad release can roll
+# back: `docker compose build bot` overwrites the single mutable :latest tag,
+# and a snapshot kept only by its bare image ID can be gone by rollback time.
 BOT_CTR="$(docker compose -f "$COMPOSE_FILE" ps -q bot 2>/dev/null || true)"
 PREV_IMAGE_ID=""
+PREV_IMAGE_REF=""
 BOT_IMAGE_REF="twitch-telegram-bot-bot:latest"
 if [[ -n "${BOT_CTR}" ]]; then
   PREV_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$BOT_CTR" 2>/dev/null || true)"
@@ -174,6 +177,24 @@ if [[ -n "${BOT_CTR}" ]]; then
     *:*) ;;
     *) BOT_IMAGE_REF="${BOT_IMAGE_REF}:latest" ;;
   esac
+fi
+
+if [[ -n "$PREV_IMAGE_ID" ]]; then
+  PREV_IMAGE_REF="${BOT_IMAGE_REF%:*}:previous"
+  if ! docker tag "$PREV_IMAGE_ID" "$PREV_IMAGE_REF" 2>/dev/null; then
+    # The running image is already untagged and removed; the only rollback
+    # candidate left is the tag an earlier deploy or a person left behind.
+    if docker image inspect "$PREV_IMAGE_REF" >/dev/null 2>&1; then
+      PREV_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "$PREV_IMAGE_REF" 2>/dev/null || true)"
+      echo "WARNING: running bot image is gone; using $PREV_IMAGE_REF from an earlier deploy as the rollback image" >&2
+    else
+      echo "ERROR: the running bot image $PREV_IMAGE_ID is gone and $PREV_IMAGE_REF is not tagged on this host" >&2
+      echo "ERROR: refusing to deploy without a rollback image; the running bot is unchanged" >&2
+      echo "ERROR: tag a known-good image as $PREV_IMAGE_REF, or recreate the bot from its current image, then re-run" >&2
+      exit 1
+    fi
+  fi
+  echo "deploy: rollback image $PREV_IMAGE_REF = $PREV_IMAGE_ID"
 fi
 
 docker compose -f "$COMPOSE_FILE" build bot
@@ -237,17 +258,21 @@ echo "WARNING: /health did not become ready in time" >&2
 docker compose -f "$COMPOSE_FILE" ps
 docker compose -f "$COMPOSE_FILE" logs --tail=80 bot || true
 
-if [[ -n "$PREV_IMAGE_ID" ]]; then
-  echo "ROLLBACK: restoring previous image $PREV_IMAGE_ID as $BOT_IMAGE_REF" >&2
-  docker tag "$PREV_IMAGE_ID" "$BOT_IMAGE_REF"
-  docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate bot
+if [[ -n "$PREV_IMAGE_REF" ]] && docker tag "$PREV_IMAGE_REF" "$BOT_IMAGE_REF" 2>/dev/null; then
+  echo "ROLLBACK: restoring previous image $PREV_IMAGE_REF as $BOT_IMAGE_REF" >&2
+  docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate bot || true
   if wait_bot_health; then
+    echo "health: ok (after rollback)" >&2
     echo "ROLLBACK: previous image is healthy again" >&2
     docker compose -f "$COMPOSE_FILE" ps
     exit 1
   fi
   echo "ROLLBACK: previous image also failed health" >&2
   docker compose -f "$COMPOSE_FILE" logs --tail=40 bot || true
+  exit 1
 fi
 
+echo "ROLLBACK: no rollback image available (${PREV_IMAGE_REF:-none}); the failing release is still live" >&2
+docker compose -f "$COMPOSE_FILE" ps
+docker compose -f "$COMPOSE_FILE" logs --tail=80 bot || true
 exit 1
