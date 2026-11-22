@@ -6,6 +6,7 @@ from config import DATABASE_PATH, DATABASE_URL, TELEGRAM_BOT_TOKEN, validate
 from db import open_database
 from health import start_health_server
 from log_format import install_logging
+from telegram_retry import install_telegram_retry_after
 from tracing import init_tracing, shutdown_tracing
 from twitch import TwitchClient
 
@@ -17,6 +18,8 @@ def main() -> None:
     start_health_server()
     validate()
     init_analytics()
+    # Before init_tracing so the span covers the waited retry, not just the 429.
+    install_telegram_retry_after()
     init_tracing()
     log = logging.getLogger(__name__)
     if DATABASE_URL:

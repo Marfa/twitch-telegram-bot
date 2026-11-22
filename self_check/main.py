@@ -197,6 +197,9 @@ def main() -> None:
     from .checks_tracing import run as check_tracing
 
     check_tracing()
+    from .checks_telegram_retry import run as check_telegram_retry
+
+    check_telegram_retry()
     from .checks_request_context import run as check_request_context
 
     check_request_context()

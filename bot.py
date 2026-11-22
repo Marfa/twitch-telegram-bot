@@ -2584,11 +2584,15 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         handler="telegram_error_handler",
         error_type=type(err).__name__ if isinstance(err, BaseException) else "unknown",
     )
+    # Name the caller behind a failed Bot API call: job errors carry no update,
+    # so without these the rejection cannot be traced to an endpoint or a job.
     analytics.capture_exception(
         err if isinstance(err, BaseException) else None,
         user_id=user_id,
         properties={
             "handler": "telegram_error_handler",
+            "telegram_endpoint": getattr(err, "telegram_endpoint", None),
+            "job": getattr(getattr(context, "job", None), "name", None),
             **(
                 chat_context_properties(update)
                 if isinstance(update, Update)
