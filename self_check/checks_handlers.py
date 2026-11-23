@@ -2942,6 +2942,7 @@ def check_handlers() -> None:
         _check_category_watch_digest_and_legacy()
     _check_broadcast_feedback_refresh()
     _check_broadcast_feedback_refresh_transient_failures()
+    _check_broadcast_feedback_refresh_skips_undeliverable()
     _check_posthog_inbox_poll_network_blip()
     _check_polylane_new_issue_poll()
 
@@ -3145,6 +3146,83 @@ def _check_broadcast_feedback_refresh_transient_failures() -> None:
     assert failed == deliveries[1:]
     assert _edited(flaky_bot) == [1, 2, 3, 4, 5, 6, 2, 4, 5]
     assert 16 not in broadcast._feedback_refresh_pending
+
+
+def _check_broadcast_feedback_refresh_skips_undeliverable() -> None:
+    """Hourly refresh: past the edit window and unchanged counts send no edit."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from telegram.error import BadRequest
+
+    import handlers.broadcast as broadcast
+
+    now = datetime.now(timezone.utc)
+    counts = {7: (1, 0), 8: (0, 0)}
+
+    class _Db:
+        def get_sent_broadcasts(self, retention_days=None):
+            return [
+                SimpleNamespace(id=7, sent_at=(now - timedelta(hours=1)).isoformat()),
+                SimpleNamespace(id=8, sent_at=(now - timedelta(hours=49)).isoformat()),
+            ]
+
+        def get_broadcast_feedback_counts(self, broadcast_id):
+            return counts[broadcast_id]
+
+        def get_broadcast_deliveries(self, broadcast_id):
+            return [(1, 10), (2, 20)] if broadcast_id == 7 else [(3, 30)]
+
+        def get_user_locales(self, user_ids):
+            return {uid: "ru" for uid in user_ids}
+
+    bot = AsyncMock()
+    app = SimpleNamespace(bot_data={"db": _Db()}, running=True)
+    ctx = SimpleNamespace(application=app, bot=bot)
+    edited = lambda: [c.kwargs["chat_id"] for c in bot.edit_message_reply_markup.await_args_list]
+
+    broadcast._feedback_pushed_counts.clear()
+    with patch("handlers.broadcast.asyncio.sleep", new_callable=AsyncMock):
+        asyncio.run(broadcast.refresh_broadcast_feedback_keyboards(ctx))
+        assert edited() == [1, 2], edited()
+        # Same counts again: nothing to push, and the 49h broadcast stays skipped.
+        asyncio.run(broadcast.refresh_broadcast_feedback_keyboards(ctx))
+        assert edited() == [1, 2], edited()
+        # A vote changes the counts; the pass pushes them again.
+        counts[7] = (2, 0)
+        asyncio.run(broadcast.refresh_broadcast_feedback_keyboards(ctx))
+        assert edited() == [1, 2, 1, 2], edited()
+        # An unchanged markup is not a failure; a real refusal is counted.
+        bot.edit_message_reply_markup.reset_mock()
+        bot.edit_message_reply_markup.side_effect = [
+            BadRequest("Message is not modified"),
+            BadRequest("Message can't be edited"),
+        ]
+        with patch.object(broadcast.logger, "warning") as warn:
+            stale = asyncio.run(
+                broadcast._refresh_broadcast_feedback_keyboards(ctx, 7)
+            )
+        # A retry of a stale subset leaves the other keyboards behind, so it
+        # must not mark the whole broadcast as current.
+        broadcast._feedback_pushed_counts.clear()
+        bot.edit_message_reply_markup.side_effect = None
+        with patch.object(broadcast.logger, "warning"):
+            asyncio.run(
+                broadcast._refresh_broadcast_feedback_keyboards(ctx, 7, [(1, 10)])
+            )
+        retry_recorded = 7 in broadcast._feedback_pushed_counts
+    assert stale == [], stale
+    assert warn.call_count == 1, warn.call_args_list
+    assert warn.call_args.args == (
+        "Broadcast %s feedback refresh: Telegram refused %s of %s deliveries",
+        7,
+        1,
+        2,
+    ), warn.call_args
+    assert retry_recorded is False, broadcast._feedback_pushed_counts
+    broadcast._feedback_pushed_counts.clear()
 
 
 def _check_category_watch_digest_and_legacy() -> None:
