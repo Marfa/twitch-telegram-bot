@@ -2492,7 +2492,9 @@ def check_handlers() -> None:
         send_twitch = _FakeTwitchSend()
         with patch.object(
             cw, "TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK"
-        ), patch.object(cw, "_db", cdb), patch.object(cw, "_twitch", send_twitch):
+        ), patch.object(cw, "_db", cdb), patch.object(
+            cw, "_twitch", send_twitch
+        ), patch.object(cw.logger, "warning") as warn_log:
             chat_token = cw.make_webapp_token(777)
             for _ in range(cw._CHAT_SEND_LIMIT):
                 status, body = cw.api_send(
@@ -2507,6 +2509,7 @@ def check_handlers() -> None:
             assert body["retry_after"] == int(cw._CHAT_SEND_WINDOW_SEC)
             assert send_twitch.sent == cw._CHAT_SEND_LIMIT
             assert send_twitch.resolved == cw._CHAT_SEND_LIMIT
+            assert warn_log.call_count == 1
         reset_http_rate_limits_for_tests()
 
     # Free user cannot enable a non-live alert without alert_types.

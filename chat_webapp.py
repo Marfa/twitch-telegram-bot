@@ -534,6 +534,16 @@ def api_send(
     if not _chat_send_allowed(user_id):
         code, payload = _err(429, "rate_limited")
         payload["retry_after"] = int(_CHAT_SEND_WINDOW_SEC)
+        from health import _http_rate_limit_allow
+
+        if _http_rate_limit_allow(
+            f"chat_send_log:{user_id}",
+            limit=1,
+            window_sec=_CHAT_SEND_WINDOW_SEC,
+        ):
+            logger.warning(
+                "chat send rate limited user=%s channel=%s", user_id, login
+            )
         return code, payload
     broadcaster = _twitch.get_user(login)
     if not broadcaster:
