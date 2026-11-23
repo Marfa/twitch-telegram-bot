@@ -1,0 +1,24 @@
+---
+description: Before merging PRs labeled polylane — explain impact and wait for user OK
+alwaysApply: true
+---
+
+# Polylane PR merge gate
+
+When a PR has the GitHub label **`polylane`** (check via `gh pr view <n> --json labels` / PR page), **do not merge** until the user explicitly agrees after the briefing below.
+
+## Before merge (required)
+
+In Russian, briefly cover all three points — no wall of text:
+
+1. **Суть** — в чём заключается PR (что меняется в коде / зависимостях / инфре).
+2. **Влияние на бота** — как это затронет работу бота в проде (рантайм, UX, деплой, риск регрессий).
+3. **Практическая необходимость** — зачем это реально нужно сейчас (не «потому что Dependabot/линтер сказал»), и что будет, если не мержить.
+
+Then **stop and wait** for an explicit yes / «мержи» / equivalent. Silence, «ок, понял», or review-only replies are **not** consent to merge.
+
+## Do not
+
+- Merge a `polylane` PR without that Russian briefing **and** explicit user approval
+- Treat auto-merge, squash-on-green, or «usual Dependabot merge» as a bypass
+- Skip the briefing because the change looks small or «safe»
