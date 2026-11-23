@@ -814,12 +814,22 @@ class PostgresDatabase:
                 "premium_attr_at BIGINT NOT NULL DEFAULT 0",
                 "advanced_mode INTEGER",
                 "message_draft INTEGER",
-                "topics_enabled BOOLEAN NOT NULL DEFAULT FALSE",
-                "topics_intro_sent BOOLEAN NOT NULL DEFAULT FALSE",
+                # New installs: default on. Existing DBs already have the column
+                # (false for legacy rows); default is flipped below.
+                "topics_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+                "topics_intro_sent BOOLEAN NOT NULL DEFAULT TRUE",
                 "notifications_paused_until BIGINT NOT NULL DEFAULT 0",
                 "template_typo_notice_sent BOOLEAN NOT NULL DEFAULT FALSE",
             ):
                 cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_sql}")
+            # Legacy rows keep topics_enabled=false; only the column default for
+            # inserts that omit the flag (and fresh ADD COLUMN) becomes on.
+            cur.execute(
+                "ALTER TABLE users ALTER COLUMN topics_enabled SET DEFAULT TRUE"
+            )
+            cur.execute(
+                "ALTER TABLE users ALTER COLUMN topics_intro_sent SET DEFAULT TRUE"
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS user_topic_threads (
@@ -2931,6 +2941,9 @@ owner_id, twitch_username, twitch_user_id,
 
         Intended callers: /start (and its deep links), successful Stars/OAuth
         apply paths, and tests/scripts. Pref setters must not insert.
+
+        New rows start with topics_enabled (and intro marked sent). Existing
+        users keep their flags — ON CONFLICT does not flip topics prefs.
         """
         now = int(datetime.now(timezone.utc).timestamp())
         with self._conn() as conn:
@@ -2938,9 +2951,10 @@ owner_id, twitch_username, twitch_user_id,
             cur.execute(
                 """
                 INSERT INTO users (
-                    user_id, bot_blocked, bot_blocked_at, last_interaction_at
+                    user_id, bot_blocked, bot_blocked_at, last_interaction_at,
+                    topics_enabled, topics_intro_sent
                 )
-                VALUES (%s, FALSE, NULL, %s)
+                VALUES (%s, FALSE, NULL, %s, TRUE, TRUE)
                 ON CONFLICT (user_id) DO UPDATE SET
                     bot_blocked = FALSE,
                     bot_blocked_at = NULL,
@@ -4431,6 +4445,18 @@ owner_id, twitch_username, twitch_user_id,
             )
             return bool(cur.rowcount)
 
+    def set_topics_intro_sent(self, user_id: int, sent: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users
+                SET topics_intro_sent = %s
+                WHERE user_id = %s
+                """,
+                (bool(sent), user_id),
+            )
+
     def get_global_ignore_keywords(self, user_id: int) -> str:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -4596,7 +4622,7 @@ owner_id, twitch_username, twitch_user_id,
             )
 
     def is_topics_enabled(self, user_id: int) -> bool:
-        """Private-chat alert topics; default off."""
+        """Private-chat alert topics; on for new users, opt-in for legacy."""
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(

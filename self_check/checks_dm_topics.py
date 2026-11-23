@@ -1,4 +1,4 @@
-"""Private DM alert topics — keys, defaults off, markup helpers."""
+"""Private DM alert topics — keys, new-user default on, markup helpers."""
 
 from __future__ import annotations
 
@@ -26,8 +26,44 @@ from dm_topics import (
 from i18n import btn, other_menu, topics_intro_keyboard, topics_support_keyboard, t
 
 
+def _check_new_user_topics_default_on() -> None:
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from db import open_database
+    import analytics
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "topics_default.db")
+        db.upsert_user(101)
+        assert db.is_topics_enabled(101) is True
+        # Intro already marked so legacy prompt is never offered.
+        assert db.mark_topics_intro_sent(101) is False
+        db.set_topics_enabled(101, False)
+        db.upsert_user(101)
+        assert db.is_topics_enabled(101) is False
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "topics_exp.db")
+        db.upsert_user(202)
+        with patch.object(analytics, "get_feature_flag", return_value="control"):
+            assert analytics.apply_topics_default_experiment(db, 202) == "control"
+        assert db.is_topics_enabled(202) is False
+        assert db.mark_topics_intro_sent(202) is True
+        db.upsert_user(203)
+        with patch.object(analytics, "get_feature_flag", return_value="test"):
+            assert analytics.apply_topics_default_experiment(db, 203) == "test"
+        assert db.is_topics_enabled(203) is True
+        with patch.object(analytics, "get_feature_flag", return_value=False):
+            db.upsert_user(204)
+            assert analytics.apply_topics_default_experiment(db, 204) is None
+        assert db.is_topics_enabled(204) is True
+
+
 def run() -> None:
     assert "live" in TOPIC_KEYS and "giveaway_watch" in TOPIC_KEYS
+    _check_new_user_topics_default_on()
     for key in TOPIC_KEYS:
         assert key in _TOPIC_ICON_COLOR
         assert key in _TOPIC_ICON_EMOJI and _TOPIC_ICON_EMOJI[key]

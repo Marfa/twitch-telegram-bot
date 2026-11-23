@@ -70,7 +70,8 @@ def topic_key_for_subscription(sub, alert_type: str) -> str | None:
 async def ensure_bot_topic_settings(bot) -> bool:
     """Bot-wide: topics on, users cannot create/edit/delete; sidebar on.
 
-    Product opt-in is per-user (users.topics_enabled, default off).
+    Product flag is per-user (users.topics_enabled: on for new users,
+    opt-in for legacy via settings / topics_intro).
     """
     global _bot_settings_ok
     if _bot_settings_ok is True:

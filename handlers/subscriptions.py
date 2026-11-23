@@ -1731,6 +1731,7 @@ async def _deliver_import_result(
             "empty": False,
             "free_active_limit": free_limit,
         },
+        send_feature_flags=imported > 0,
     )
     msg = await application.bot.send_message(
         owner_id,
@@ -6675,6 +6676,7 @@ async def _create_shared_subscription(
         user_id,
         "alert_share_accepted",
         {"sub_id": sub_id, "enabled": enabled, "channel": login, "kind": kind},
+        send_feature_flags=True,
     )
     sub_num = _owner_sub_number(db, user_id, sub_id)
     text = t("share_created", lang, sub_id=sub_num, username=display or login or "—")

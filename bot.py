@@ -1150,8 +1150,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = user.id
     is_first_start = not db.user_exists(user_id)
     db.upsert_user(user_id)
+    topics_variant: str | None = None
     lucky_nth: int | None = None
     if is_first_start:
+        topics_variant = analytics.apply_topics_default_experiment(db, user_id)
         from config import ENABLE_PREMIUM
         import premium_lucky as lucky
 
@@ -1167,16 +1169,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if start_arg:
         db.set_user_start_arg(user_id, start_arg)
     lang = db.get_user_locale(user_id)
-    analytics.capture(
-        user_id,
-        "bot_started",
-        {
-            "has_locale": bool(lang),
-            "has_start_arg": bool(context.args),
-            "start_arg": start_arg,
-            "is_first_start": is_first_start,
-        },
-    )
+    started_props = {
+        "has_locale": bool(lang),
+        "has_start_arg": bool(context.args),
+        "start_arg": start_arg,
+        "is_first_start": is_first_start,
+    }
+    if topics_variant is not None:
+        started_props["topics_default_variant"] = topics_variant
+    analytics.capture(user_id, "bot_started", started_props)
     if not lang:
         context.user_data["after_lang"] = "welcome"
         context.user_data["first_welcome"] = is_first_start

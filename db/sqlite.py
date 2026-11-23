@@ -564,8 +564,9 @@ class SqliteDatabase:
             ("premium_attr_at", "INTEGER NOT NULL DEFAULT 0"),
             ("advanced_mode", "INTEGER"),
             ("message_draft", "INTEGER"),
-            ("topics_enabled", "INTEGER NOT NULL DEFAULT 0"),
-            ("topics_intro_sent", "INTEGER NOT NULL DEFAULT 0"),
+            # New users get topics on via upsert_user INSERT; existing rows keep 0.
+            ("topics_enabled", "INTEGER NOT NULL DEFAULT 1"),
+            ("topics_intro_sent", "INTEGER NOT NULL DEFAULT 1"),
             ("notifications_paused_until", "INTEGER NOT NULL DEFAULT 0"),
             ("template_typo_notice_sent", "INTEGER NOT NULL DEFAULT 0"),
         ):
@@ -2651,15 +2652,19 @@ owner_id, twitch_username, twitch_user_id,
 
         Intended callers: /start (and its deep links), successful Stars/OAuth
         apply paths, and tests/scripts. Pref setters must not insert.
+
+        New rows start with topics_enabled (and intro marked sent). Existing
+        users keep their flags — ON CONFLICT does not flip topics prefs.
         """
         now = int(datetime.now(timezone.utc).timestamp())
         with self._conn() as conn:
             conn.execute(
                 """
                 INSERT INTO users (
-                    user_id, bot_blocked, bot_blocked_at, last_interaction_at
+                    user_id, bot_blocked, bot_blocked_at, last_interaction_at,
+                    topics_enabled, topics_intro_sent
                 )
-                VALUES (?, 0, NULL, ?)
+                VALUES (?, 0, NULL, ?, 1, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
                     bot_blocked = 0,
                     bot_blocked_at = NULL,
@@ -4042,6 +4047,17 @@ owner_id, twitch_username, twitch_user_id,
             )
             return bool(cur.rowcount)
 
+    def set_topics_intro_sent(self, user_id: int, sent: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users
+                SET topics_intro_sent = ?
+                WHERE user_id = ?
+                """,
+                (1 if sent else 0, user_id),
+            )
+
     def get_global_ignore_keywords(self, user_id: int) -> str:
         with self._conn() as conn:
             row = conn.execute(
@@ -4193,7 +4209,7 @@ owner_id, twitch_username, twitch_user_id,
             )
 
     def is_topics_enabled(self, user_id: int) -> bool:
-        """Private-chat alert topics; default off."""
+        """Private-chat alert topics; on for new users, opt-in for legacy."""
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT topics_enabled FROM users WHERE user_id = ?",

@@ -827,7 +827,10 @@ def _format_stored_typo_notice(
 
 
 async def _maybe_offer_topics_intro(bot, db: Database, owner_id: int) -> None:
-    """One-time DM after first successful alert: offer topic support (default off)."""
+    """One-time DM after first alert for legacy users who still have topics off.
+
+    New users get topics_enabled on insert — they never see this prompt.
+    """
     if db.is_topics_enabled(owner_id):
         return
     if db.is_bot_blocked(owner_id):

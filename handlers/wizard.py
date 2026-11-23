@@ -4741,6 +4741,7 @@ async def _finish_subscription(
             "live_addon": bool(live_addon),
             "as_draft": as_draft,
         },
+        send_feature_flags=not edit_sub_id,
     )
 
     if as_draft:

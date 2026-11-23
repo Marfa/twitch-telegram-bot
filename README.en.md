@@ -263,7 +263,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 🎲 What to watch? | Feeling lucky immediately; suggest again |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
 | ⚙️ Settings | Premium, sync, **🤖 Bot settings**, beta, system alerts, partner program |
-| ↳ 🤖 Bot settings | Ignored words (incl. IGDB), language, auth tokens, **🗂 Topic support** (checkbox off by default; alerts only → private topics, all other UI stays in General), **⚙️ Default settings** (stream-alert template/options) |
+| ↳ 🤖 Bot settings | Ignored words (incl. IGDB), language, auth tokens, **🗂 Topic support** (on by default for new users; PostHog A/B `topics-default-on`; legacy users get an opt-in after the first alert; alerts only → private topics, all other UI stays in General), **⚙️ Default settings** (stream-alert template/options) |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
 | ↳ 🔑 Auth tokens | Revoke Twitch or DonationAlerts (from Bot settings) |

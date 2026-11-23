@@ -199,6 +199,10 @@ def is_enabled() -> bool:
     return _enabled
 
 
+# Multivariate experiment: control = topics off, test = topics on (new users).
+TOPICS_DEFAULT_FLAG_KEY = "topics-default-on"
+
+
 def distinct_id(user_id: int) -> str:
     """Stable anonymized id — not the raw Telegram user id."""
     from config import TELEGRAM_BOT_TOKEN
@@ -215,12 +219,40 @@ def _add_request_id(props: dict[str, Any]) -> None:
         props.setdefault("request_id", request_id)
 
 
+def get_feature_flag(user_id: int, key: str) -> Any:
+    """Evaluate a PostHog flag (records exposure). None when analytics is off."""
+    if not _enabled or _client is None:
+        return None
+    try:
+        return _client.get_feature_flag(key, distinct_id(user_id))
+    except Exception:
+        logger.exception("PostHog get_feature_flag failed key=%s", key)
+        return None
+
+
+def apply_topics_default_experiment(db: Any, user_id: int) -> str | None:
+    """Assign topics for a brand-new user from topics-default-on.
+
+    Returns the variant key when the user is in the experiment; None keeps the
+    product default (topics on from upsert_user). Inactive / missing flag → None.
+    """
+    variant = get_feature_flag(user_id, TOPICS_DEFAULT_FLAG_KEY)
+    if variant == "control":
+        db.set_topics_enabled(user_id, False)
+        db.set_topics_intro_sent(user_id, False)
+        return "control"
+    if variant == "test":
+        return "test"
+    return None
+
+
 def capture(
     user_id: int | None,
     event: str,
     properties: dict[str, Any] | None = None,
     *,
     timestamp: Any | None = None,
+    send_feature_flags: bool = False,
 ) -> None:
     if not _enabled or _client is None:
         return
@@ -238,6 +270,8 @@ def capture(
             kwargs["distinct_id"] = "bot_system"
         if timestamp is not None:
             kwargs["timestamp"] = timestamp
+        if send_feature_flags:
+            kwargs["send_feature_flags"] = True
         _client.capture(event, **kwargs)
     except Exception:
         logger.exception("PostHog capture failed event=%s", event)
