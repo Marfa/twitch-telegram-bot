@@ -262,13 +262,13 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 📅 Manage schedule | Week text free; day / vacation / publish — Premium “Twitch schedule tools” |
 | ↳ 🎲 What to watch? | Feeling lucky immediately; suggest again |
 | ↳ 💬 Chat | Twitch stream chat Mini App |
-| ⚙️ Settings | Premium, sync, default stream-alert settings, ignored words (incl. IGDB categories), system alerts, language, auth tokens, partner program |
+| ⚙️ Settings | Premium, sync, **🤖 Bot settings**, beta, system alerts, default stream-alert settings, partner program |
+| ↳ 🤖 Bot settings | Ignored words (incl. IGDB), language, auth tokens, **Topic support** checkbox (off by default; alert types → private topics) |
 | ↳ ⭐ Premium | Stars or free via Twitch channel sub |
 | ↳ 🧪 Beta mode | Opt-in for new features before public release; Premium features are free during beta |
-| ↳ 🔑 Auth tokens | Separate buttons to revoke Twitch or DonationAlerts |
+| ↳ 🔑 Auth tokens | Revoke Twitch or DonationAlerts (from Bot settings) |
 | ↳ 🤝 Partner program | Stats, link, withdraw (≥ 500 Stars), your requests |
 | ↳ 🔔 System notifications | Bot update, availability (bot / Twitch status), other, promotions, sync, and new-beta alerts |
-| ↳ 🌐 Language | Russian / English / Ukrainian / Italian |
 | ⚙️ Admin | Broadcast, stats, withdrawals, demo mode (`ADMIN_USER_IDS` only) |
 | ↳ 📣 Broadcast | “Bot updates”, “Bot availability”, “Other”, or “Promotions” (non-Premium only); scheduled send (MSK default, per-user UTC offset when set); final stats after all UTC waves; footer with type and how to disable in Settings |
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |

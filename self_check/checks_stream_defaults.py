@@ -6,8 +6,18 @@ from pathlib import Path
 import tempfile
 
 from db import open_database
-from i18n import btn, edit_options_keyboard, settings_menu, t
+from i18n import (
+    advanced_options_keyboard,
+    btn,
+    disabled_inline_button,
+    edit_options_keyboard,
+    inline_markup_force_reply,
+    is_disabled_inline_button,
+    settings_menu,
+    t,
+)
 from stream_alert_defaults import (
+    LOCKED_ADVOPT_TOGGLES,
     apply_defaults_to_user_data,
     defaults_ready_to_apply,
     dump_stream_alert_defaults,
@@ -30,14 +40,21 @@ def run() -> None:
         texts = [b.text for row in kb for b in row]
         sync = btn("sync_subs", loc)
         defaults = btn("default_alert_settings", loc)
-        auth = btn("auth_tokens", loc)
-        assert sync in texts and defaults in texts
+        bot_set = btn("bot_settings", loc)
+        assert sync in texts and bot_set in texts
+        assert btn("auth_tokens", loc) not in texts  # moved under Bot settings
+        assert btn("language", loc) not in texts
+        assert btn("ignored_words", loc) not in texts
         from config import show_premium_ui
+        from i18n import bot_settings_menu
 
+        bot_kb = bot_settings_menu(loc).keyboard
+        bot_texts = [b.text for row in bot_kb for b in row]
+        assert btn("auth_tokens", loc) in bot_texts
+        assert btn("language", loc) in bot_texts
+        assert btn("ignored_words", loc) in bot_texts
         if show_premium_ui():
-            default_row = next(row for row in kb if defaults in [b.text for b in row])
-            assert len(default_row) == 2
-            assert auth in [b.text for b in default_row]
+            assert defaults in texts
         else:
             assert texts.index(defaults) == texts.index(sync) + 1
 
@@ -61,9 +78,11 @@ def run() -> None:
         strip_name_mentions=True,
     )
     locked_cbs = [b.callback_data for row in locked.inline_keyboard for b in row]
+    locked_btns = [b for row in locked.inline_keyboard for b in row]
     assert "edit_f:7:apply_defaults" in locked_cbs
     assert "edit_f:7:dest" in locked_cbs
-    assert any(c == "edit_f:7:defaults_locked" for c in locked_cbs)
+    assert any(is_disabled_inline_button(b) for b in locked_btns)
+    assert not any(c == "edit_f:7:defaults_locked" for c in locked_cbs)
     assert not any(
         c and c.startswith("edit_f:7:") and c.endswith(":strip") for c in locked_cbs
     )
@@ -167,3 +186,28 @@ def run() -> None:
         sub, sid = target
         assert sid == 0
         assert sub.message_template == "Hello {username}"
+
+    # Bot API 10.3: DisabledButton + force_reply helpers
+    stub = disabled_inline_button("locked")
+    assert is_disabled_inline_button(stub)
+    assert stub.to_dict() == {"text": "locked", "disabled": {}}
+    forced = inline_markup_force_reply(edit_options_keyboard(1, "en"))
+    assert forced.to_dict().get("force_reply") is True
+
+    assert LOCKED_ADVOPT_TOGGLES  # settings locked via DisabledButton, not advopt:locked
+    adv_locked = advanced_options_keyboard(
+        "en",
+        want_image=False,
+        want_strip=False,
+        want_ignore=False,
+        want_delay=False,
+        want_repeat=False,
+        want_delete=False,
+        want_pin=False,
+        want_chat=False,
+        want_apply_defaults=True,
+        show_delay=True,
+    )
+    adv_btns = [b for row in adv_locked.inline_keyboard for b in row]
+    assert any(is_disabled_inline_button(b) for b in adv_btns)
+    assert not any((b.callback_data or "") == "advopt:locked" for b in adv_btns)

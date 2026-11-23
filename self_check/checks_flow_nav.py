@@ -32,6 +32,7 @@ from i18n import (
     premium_gift_keyboard,
     premium_promo_keyboard,
     settings_menu,
+    bot_settings_menu,
     auth_tokens_menu,
     language_keyboard,
     stream_schedule_confirm_keyboard,
@@ -188,6 +189,7 @@ def _check_submenu_reply_keyboards() -> None:
             ("subscriptions_menu", subscriptions_menu(loc)),
             ("other_menu", other_menu(loc)),
             ("settings_menu", settings_menu(loc, beta_enrolled=0, beta_total=0)),
+            ("bot_settings_menu", bot_settings_menu(loc)),
             ("auth_tokens_menu", auth_tokens_menu(loc)),
             ("partner_menu", partner_menu(loc)),
             ("broadcast_menu", broadcast_menu(loc)),
@@ -212,6 +214,7 @@ def _check_inline_wizard_keyboards() -> None:
         broadcast_feedback_keyboard,
         dm_main_menu_keyboard,
         drops_catalog_keyboard,
+        topics_intro_keyboard,
     )
 
     for loc in SUPPORTED_LOCALES:
@@ -219,6 +222,7 @@ def _check_inline_wizard_keyboards() -> None:
             ("schedule_query_detail", schedule_detail_keyboard("week", loc)),
             ("broadcast_feedback", broadcast_feedback_keyboard(1, 0, 0, loc)),
             ("dm_main_menu", dm_main_menu_keyboard(loc)),
+            ("topics_intro", topics_intro_keyboard(loc)),
             ("alert_type_keyboard", alert_type_keyboard(loc, show_drops=True)),
             (
                 "alert_type_keyboard_giveaways",
@@ -4216,9 +4220,46 @@ async def _scenario_schedule_vacation(db) -> None:
     premium2.assert_awaited()
 
 
+async def _scenario_bot_settings_topics(db) -> None:
+    """§8 — Settings → Bot settings (topics checkbox + ignore/lang/tokens)."""
+    from handlers.settings import open_bot_settings_menu, open_settings_menu
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("settings", "ru"), cap)
+    ctx = _ctx(application)
+    await open_settings_menu(update, ctx)
+    cap.assert_turn("settings_open_for_bot_settings")
+
+    update = _msg_update(_FREE_UID, btn("bot_settings", "ru"), cap)
+    await open_bot_settings_menu(update, ctx)
+    inline_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "topics:toggle" in inline_cbs
+    reply_texts = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "keyboard", None)
+        for row in m.keyboard
+        for b in row
+    ]
+    assert btn("ignored_words", "ru") in reply_texts
+    assert btn("language", "ru") in reply_texts
+    assert btn("auth_tokens", "ru") in reply_texts
+    assert btn("back_settings", "ru") in reply_texts
+    cap.assert_turn("bot_settings_topics")
+
+
 async def _scenario_settings_extended(db) -> None:
     from bot import open_premium_from_settings
     from handlers.settings import (
+        open_bot_settings_menu,
         open_settings_menu,
         open_sys_notifications_menu,
         open_whisper_alerts_menu,
@@ -4238,8 +4279,11 @@ async def _scenario_settings_extended(db) -> None:
     application, bot = _app(db)
     cap = _BotCapture()
     cap.wrap(bot)
-    update = _msg_update(_FREE_UID, btn("language", "ru"), cap)
+    update = _msg_update(_FREE_UID, btn("bot_settings", "ru"), cap)
     ctx = _ctx(application)
+    await open_bot_settings_menu(update, ctx)
+    cap.assert_turn("settings_bot_settings_via_extended")
+    update = _msg_update(_FREE_UID, btn("language", "ru"), cap)
     await start_language_change(update, ctx)
     cap.assert_turn("settings_language")
 
@@ -5334,6 +5378,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_schedule_vacation(db)
         await _scenario_schedule_publish_chain(db)
         await _scenario_schedule_deferred_week(db)
+        await _scenario_bot_settings_topics(db)
         await _scenario_settings_extended(db)
         await _scenario_settings_stream_defaults(db)
         await _scenario_settings_stream_defaults_template(db)

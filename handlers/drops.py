@@ -387,13 +387,18 @@ async def send_drops_stream_alert(
         if category_watch_cooldown_minutes(sub) > 0:
             apply_category_watch_cooldown(db, sub)
     try:
-        await bot.send_message(
-            sub.chat_id,
-            text,
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-            message_thread_id=sub.thread_id,
-        )
+        from dm_topics import resolve_alert_thread_id
+
+        thread_id = await resolve_alert_thread_id(bot, db, sub, "drops")
+        send_kwargs: dict = {
+            "chat_id": sub.chat_id,
+            "text": text,
+            "parse_mode": ParseMode.HTML,
+            "disable_web_page_preview": True,
+        }
+        if thread_id:
+            send_kwargs["message_thread_id"] = thread_id
+        await bot.send_message(**send_kwargs)
     except Exception:
         logger.exception(
             "drops stream alert failed owner=%s sub=%s", sub.owner_id, sub.id

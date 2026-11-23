@@ -376,7 +376,9 @@ from handlers.settings import (
     open_auth_tokens_menu,
     on_auth_tokens_revoke_twitch,
     on_auth_tokens_revoke_donationalerts,
+    open_bot_settings_menu,
     open_settings_menu,
+    on_topics_toggle,
     open_stream_chat,
     open_sys_notifications_menu,
     open_whisper_alerts_menu,
@@ -1273,6 +1275,13 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             chat_id,
             t("menu_settings", lang),
             reply_markup=_settings_kb(lang, db, query.from_user.id),
+        )
+        return ConversationHandler.END
+    if after == "bot_settings":
+        from handlers.settings import _send_bot_settings_screen
+
+        await _send_bot_settings_screen(
+            context.bot, chat_id, db, query.from_user.id, lang
         )
         return ConversationHandler.END
     await _send_welcome_bundle(
@@ -2928,6 +2937,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         MessageHandler(_btn_filter("settings"), open_settings_menu),
+        MessageHandler(_btn_filter("bot_settings"), open_bot_settings_menu),
+        MessageHandler(_btn_filter("back_bot_settings"), open_bot_settings_menu),
         group=0,
     )
     app.add_handler(
@@ -3095,6 +3106,12 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(CallbackQueryHandler(on_sys_updates_toggle, pattern=r"^sys_updates:toggle$"), group=0)
+    app.add_handler(
+        CallbackQueryHandler(
+            on_topics_toggle, pattern=r"^topics:(intro_)?toggle$"
+        ),
+        group=0,
+    )
     app.add_handler(
         CallbackQueryHandler(on_sys_availability_toggle, pattern=r"^sys_availability:toggle$"),
         group=0,
@@ -4321,6 +4338,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("alert_history")
                 | _btn_filter("other")
                 | _btn_filter("settings")
+                | _btn_filter("bot_settings")
                 | _btn_filter("premium")
                 | _btn_filter("auth_tokens")
                 | _btn_filter("auth_tokens_revoke_twitch")
@@ -4331,6 +4349,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("partner_withdraw")
                 | _btn_filter("partner_withdrawals")
                 | _btn_filter("back_settings")
+                | _btn_filter("back_bot_settings")
                 | _btn_filter("admin_withdrawals")
                 | _btn_filter("new")
                 | _btn_filter("watch")

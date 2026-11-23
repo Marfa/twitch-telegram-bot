@@ -283,6 +283,87 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+async def _send_bot_settings_screen(
+    bot, chat_id: int, db: Database, user_id: int, lang: str
+) -> None:
+    from i18n import bot_settings_menu, topics_support_keyboard
+
+    enabled = db.is_topics_enabled(user_id)
+    await bot.send_message(
+        chat_id,
+        t("menu_bot_settings", lang),
+        reply_markup=bot_settings_menu(lang),
+    )
+    await bot.send_message(
+        chat_id,
+        t("topics_support_on" if enabled else "topics_support_off", lang),
+        reply_markup=topics_support_keyboard(lang, enabled=enabled),
+    )
+
+
+async def open_bot_settings_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    chat_id = reply_chat_id(update)
+    await _send_bot_settings_screen(context.bot, chat_id, db, user_id, lang)
+
+
+async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from bot_helpers import _pulse_reply_keyboard
+    from dm_topics import ensure_all_user_topics, ensure_bot_topic_settings
+    from i18n import bot_settings_menu, topics_support_keyboard
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    data = query.data or ""
+    from_intro = data.startswith("topics:intro")
+    cb = "topics:intro_toggle" if from_intro else "topics:toggle"
+    enabled = not db.is_topics_enabled(user_id)
+    if enabled:
+        await ensure_bot_topic_settings(context.bot)
+        created = await ensure_all_user_topics(
+            context.bot, db, user_id, lang=lang
+        )
+        if created == 0:
+            await query.edit_message_text(
+                t("topics_support_create_failed", lang),
+                reply_markup=topics_support_keyboard(
+                    lang,
+                    enabled=False,
+                    callback_data=cb,
+                    with_main_menu=from_intro,
+                ),
+            )
+            return
+        db.set_topics_enabled(user_id, True)
+        text = t("topics_support_on", lang)
+    else:
+        db.set_topics_enabled(user_id, False)
+        text = t("topics_support_off", lang)
+    await query.edit_message_text(
+        text,
+        reply_markup=topics_support_keyboard(
+            lang,
+            enabled=enabled,
+            callback_data=cb,
+            with_main_menu=from_intro,
+        ),
+    )
+    if from_intro:
+        return
+    # Refresh sticky reply keyboard without a lasting duplicate menu message.
+    chat_id = query.message.chat_id if query.message else user_id
+    await _pulse_reply_keyboard(context.bot, chat_id, bot_settings_menu(lang))
+
+
 async def open_auth_tokens_menu(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -373,7 +454,7 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def start_language_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    context.user_data["after_lang"] = "settings"
+    context.user_data["after_lang"] = "bot_settings"
     await update.effective_message.reply_text(
         t("lang_pick", lang),
         reply_markup=language_keyboard(lang),
@@ -555,9 +636,8 @@ async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TY
     db: Database = context.application.bot_data["db"]
     text = (update.effective_message.text or "").strip()
     if text in all_wizard_nav_buttons() or is_menu_button(text):
-        await update.effective_message.reply_text(
-            t("menu_settings", lang),
-            reply_markup=_settings_kb(lang, db, user_id),
+        await _send_bot_settings_screen(
+            context.bot, reply_chat_id(update), db, user_id, lang
         )
         context.user_data.clear()
         return ConversationHandler.END
@@ -567,9 +647,9 @@ async def receive_ignored_words(update: Update, context: ContextTypes.DEFAULT_TY
         return _global_ignore_state()
     keywords = merge_ignore_keywords(db.get_global_ignore_keywords(user_id), added)
     db.set_global_ignore_keywords(user_id, keywords)
-    await update.effective_message.reply_text(
-        t("ignored_words_saved", lang),
-        reply_markup=_settings_kb(lang, db, user_id),
+    await update.effective_message.reply_text(t("ignored_words_saved", lang))
+    await _send_bot_settings_screen(
+        context.bot, reply_chat_id(update), db, user_id, lang
     )
     context.user_data.clear()
     return ConversationHandler.END
@@ -584,11 +664,8 @@ async def receive_ignored_words_clear(
     db: Database = context.application.bot_data["db"]
     db.set_global_ignore_keywords(user_id, "")
     await query.edit_message_text("✓")
-    await context.bot.send_message(
-        user_id,
-        t("ignored_words_cleared", lang),
-        reply_markup=_settings_kb(lang, db, user_id),
-    )
+    await context.bot.send_message(user_id, t("ignored_words_cleared", lang))
+    await _send_bot_settings_screen(context.bot, user_id, db, user_id, lang)
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -601,11 +678,7 @@ async def receive_ignored_words_cancel(
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     await query.edit_message_text("✓")
-    await context.bot.send_message(
-        user_id,
-        t("menu_settings", lang),
-        reply_markup=_settings_kb(lang, db, user_id),
-    )
+    await _send_bot_settings_screen(context.bot, user_id, db, user_id, lang)
     context.user_data.clear()
     return ConversationHandler.END
 

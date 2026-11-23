@@ -564,11 +564,23 @@ class SqliteDatabase:
             ("premium_attr_at", "INTEGER NOT NULL DEFAULT 0"),
             ("advanced_mode", "INTEGER"),
             ("message_draft", "INTEGER"),
+            ("topics_enabled", "INTEGER NOT NULL DEFAULT 0"),
+            ("topics_intro_sent", "INTEGER NOT NULL DEFAULT 0"),
             ("notifications_paused_until", "INTEGER NOT NULL DEFAULT 0"),
             ("template_typo_notice_sent", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if col not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_topic_threads (
+                user_id INTEGER NOT NULL,
+                topic_key TEXT NOT NULL,
+                message_thread_id INTEGER NOT NULL,
+                PRIMARY KEY (user_id, topic_key)
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS referral_credits (
@@ -4016,6 +4028,20 @@ owner_id, twitch_username, twitch_user_id,
             )
             return bool(cur.rowcount)
 
+    def mark_topics_intro_sent(self, user_id: int) -> bool:
+        """Return True when this call newly marks the one-time topics intro."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE users
+                SET topics_intro_sent = 1
+                WHERE user_id = ?
+                  AND COALESCE(topics_intro_sent, 0) = 0
+                """,
+                (user_id,),
+            )
+            return bool(cur.rowcount)
+
     def get_global_ignore_keywords(self, user_id: int) -> str:
         with self._conn() as conn:
             row = conn.execute(
@@ -4164,6 +4190,62 @@ owner_id, twitch_username, twitch_user_id,
                 WHERE user_id = ?
                 """,
                 (1 if enabled else 0, user_id),
+            )
+
+    def is_topics_enabled(self, user_id: int) -> bool:
+        """Private-chat alert topics; default off."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT topics_enabled FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None or row["topics_enabled"] is None:
+            return False
+        return bool(row["topics_enabled"])
+
+    def set_topics_enabled(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE users SET
+                    topics_enabled = ?
+                WHERE user_id = ?
+                """,
+                (1 if enabled else 0, user_id),
+            )
+
+    def get_user_topic_thread(self, user_id: int, topic_key: str) -> int | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT message_thread_id FROM user_topic_threads
+                WHERE user_id = ? AND topic_key = ?
+                """,
+                (user_id, topic_key),
+            ).fetchone()
+        if row is None:
+            return None
+        return int(row["message_thread_id"])
+
+    def set_user_topic_thread(
+        self, user_id: int, topic_key: str, message_thread_id: int
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_topic_threads (user_id, topic_key, message_thread_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, topic_key) DO UPDATE SET
+                    message_thread_id = excluded.message_thread_id
+                """,
+                (user_id, topic_key, int(message_thread_id)),
+            )
+
+    def clear_user_topic_threads(self, user_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM user_topic_threads WHERE user_id = ?",
+                (user_id,),
             )
 
     def owner_has_advanced_subscription_options(self, owner_id: int) -> bool:

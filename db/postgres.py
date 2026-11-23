@@ -814,10 +814,22 @@ class PostgresDatabase:
                 "premium_attr_at BIGINT NOT NULL DEFAULT 0",
                 "advanced_mode INTEGER",
                 "message_draft INTEGER",
+                "topics_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+                "topics_intro_sent BOOLEAN NOT NULL DEFAULT FALSE",
                 "notifications_paused_until BIGINT NOT NULL DEFAULT 0",
                 "template_typo_notice_sent BOOLEAN NOT NULL DEFAULT FALSE",
             ):
                 cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_sql}")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_topic_threads (
+                    user_id BIGINT NOT NULL,
+                    topic_key TEXT NOT NULL,
+                    message_thread_id BIGINT NOT NULL,
+                    PRIMARY KEY (user_id, topic_key)
+                )
+                """
+            )
             if not had_premium:
                 cur.execute("UPDATE users SET premium_permanent = TRUE")
                 cur.execute(
@@ -4405,6 +4417,20 @@ owner_id, twitch_username, twitch_user_id,
             )
             return bool(cur.rowcount)
 
+    def mark_topics_intro_sent(self, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users
+                SET topics_intro_sent = TRUE
+                WHERE user_id = %s
+                  AND COALESCE(topics_intro_sent, FALSE) = FALSE
+                """,
+                (user_id,),
+            )
+            return bool(cur.rowcount)
+
     def get_global_ignore_keywords(self, user_id: int) -> str:
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -4567,6 +4593,69 @@ owner_id, twitch_username, twitch_user_id,
                 WHERE user_id = %s
                 """,
                 (1 if enabled else 0, user_id),
+            )
+
+    def is_topics_enabled(self, user_id: int) -> bool:
+        """Private-chat alert topics; default off."""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT topics_enabled FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if row is None or row["topics_enabled"] is None:
+            return False
+        return bool(row["topics_enabled"])
+
+    def set_topics_enabled(self, user_id: int, enabled: bool) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE users SET
+                    topics_enabled = %s
+                WHERE user_id = %s
+                """,
+                (bool(enabled), user_id),
+            )
+
+    def get_user_topic_thread(self, user_id: int, topic_key: str) -> int | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT message_thread_id FROM user_topic_threads
+                WHERE user_id = %s AND topic_key = %s
+                """,
+                (user_id, topic_key),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return int(row["message_thread_id"])
+
+    def set_user_topic_thread(
+        self, user_id: int, topic_key: str, message_thread_id: int
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO user_topic_threads (user_id, topic_key, message_thread_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, topic_key) DO UPDATE SET
+                    message_thread_id = EXCLUDED.message_thread_id
+                """,
+                (user_id, topic_key, int(message_thread_id)),
+            )
+
+    def clear_user_topic_threads(self, user_id: int) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "DELETE FROM user_topic_threads WHERE user_id = %s",
+                (user_id,),
             )
 
     def owner_has_advanced_subscription_options(self, owner_id: int) -> bool:

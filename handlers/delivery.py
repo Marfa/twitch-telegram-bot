@@ -817,6 +817,29 @@ def _format_stored_typo_notice(
     return t("stored_typo_notice_prompt", lang, typos=typos, subs=subs)
 
 
+async def _maybe_offer_topics_intro(bot, db: Database, owner_id: int) -> None:
+    """One-time DM after first successful alert: offer topic support (default off)."""
+    if db.is_topics_enabled(owner_id):
+        return
+    if db.is_bot_blocked(owner_id):
+        return
+    if not db.mark_topics_intro_sent(owner_id):
+        return
+    lang = db.get_user_locale(owner_id) or DEFAULT_LOCALE
+    from i18n import topics_intro_keyboard
+
+    try:
+        await bot.send_message(
+            owner_id,
+            t("topics_intro", lang),
+            reply_markup=topics_intro_keyboard(lang),
+        )
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot send topics intro to owner %s: %s", owner_id, exc
+        )
+
+
 async def _maybe_notify_stored_template_typos(
     bot,
     db: Database,
@@ -2019,6 +2042,10 @@ async def _send_notification(
             alert_type=alert_type, dest_type=sub.dest_type, outcome="blocked"
         )
         return True
+
+    from dm_topics import resolve_alert_thread_id
+
+    thread_id = await resolve_alert_thread_id(bot, db, sub, alert_type)
     # Overlap block: skip new alerts while previous message for this sub still exists.
     # Scheduled repeats use block_repeat_when_last instead (checked by the job).
     if (
@@ -2208,7 +2235,7 @@ async def _send_notification(
             bot,
             chat_id=sub.chat_id,
             text=text,
-            thread_id=sub.thread_id,
+            thread_id=thread_id,
             **_media_kwargs,
         )
     except RetryAfter as exc:
@@ -2222,7 +2249,7 @@ async def _send_notification(
                 bot,
                 chat_id=sub.chat_id,
                 text=text,
-                thread_id=sub.thread_id,
+                thread_id=thread_id,
                 image_file_id=(
                     None
                     if (photo_bytes or animation_bytes or video_bytes)
@@ -2374,7 +2401,7 @@ async def _send_notification(
                 dest_type=sub.dest_type,
                 chat_id=int(sub.chat_id),
                 message_id=int(mid) if mid is not None else None,
-                thread_id=sub.thread_id,
+                thread_id=thread_id,
                 twitch_username=sub.twitch_username,
                 alert_type=alert_type,
                 twitch_user_id=history_uid,
@@ -2384,6 +2411,14 @@ async def _send_notification(
             logger.exception(
                 "Failed to record alert delivery log for sub %s", sub.id
             )
+    try:
+        await _maybe_offer_topics_intro(bot, db, sub.owner_id)
+    except Exception:
+        logger.exception(
+            "topics intro failed after alert sub=%s owner=%s",
+            sub.id,
+            sub.owner_id,
+        )
     return True
 
 

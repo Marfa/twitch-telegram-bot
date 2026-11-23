@@ -173,6 +173,9 @@ def main() -> None:
     from .checks_stream_defaults import run as check_stream_defaults
 
     check_stream_defaults()
+    from .checks_dm_topics import run as check_dm_topics
+
+    check_dm_topics()
     from .checks_drops import run as check_drops
 
     check_drops()

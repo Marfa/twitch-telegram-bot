@@ -26,6 +26,50 @@ _LOCALE_DEFAULT_TZ = {
 }
 
 
+def disabled_inline_button(
+    text: str,
+    *,
+    style: str | None = None,
+    icon_custom_emoji_id: str | None = None,
+) -> InlineKeyboardButton:
+    """Bot API 10.3 DisabledButton — shown, does nothing (no callback)."""
+    kwargs: dict = {}
+    if style is not None:
+        kwargs["style"] = style
+    if icon_custom_emoji_id is not None:
+        kwargs["icon_custom_emoji_id"] = icon_custom_emoji_id
+    return InlineKeyboardButton(text, api_kwargs={"disabled": {}}, **kwargs)
+
+
+def is_disabled_inline_button(button: InlineKeyboardButton) -> bool:
+    return "disabled" in button.to_dict()
+
+
+def inline_markup_force_reply(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup:
+    """Bot API 10.3 force_reply on inline markup (opens reply UI).
+
+    Do not combine with the persistent private reply menu — conflicts with
+    reply-keyboard rules. Helper only until a safe call site is chosen.
+    """
+    return InlineKeyboardMarkup(
+        markup.inline_keyboard,
+        api_kwargs={"force_reply": True},
+    )
+
+
+def reply_markup_force_reply(markup: ReplyKeyboardMarkup) -> ReplyKeyboardMarkup:
+    """Bot API 10.3 force_reply on a reply keyboard (opens reply UI)."""
+    return ReplyKeyboardMarkup(
+        markup.keyboard,
+        resize_keyboard=markup.resize_keyboard,
+        one_time_keyboard=markup.one_time_keyboard,
+        selective=markup.selective,
+        input_field_placeholder=markup.input_field_placeholder,
+        is_persistent=markup.is_persistent,
+        api_kwargs={"force_reply": True},
+    )
+
+
 def default_utc_offset_minutes_for_locale(lang: str) -> int:
     """UTC offset (minutes) for the locale's default city, including current DST."""
     from zoneinfo import ZoneInfo
@@ -250,6 +294,7 @@ def all_menu_buttons() -> set[str]:
         "alert_history",
         "other",
         "settings",
+        "bot_settings",
         "language",
         "admin",
         "demo",
@@ -280,6 +325,7 @@ def all_menu_buttons() -> set[str]:
         "partner_withdraw",
         "partner_withdrawals",
         "back_settings",
+        "back_bot_settings",
         "admin_withdrawals",
         "watch",
         "chat",
@@ -395,54 +441,63 @@ def settings_menu(
                 KeyboardButton(btn("default_alert_settings", lang)),
             ]
         )
-    rows.extend(
+    mid: list[KeyboardButton] = [
+        KeyboardButton(btn("bot_settings", lang)),
+        KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
+        KeyboardButton(btn("sys_notifications", lang)),
+    ]
+    if show_premium_ui():
+        mid.append(KeyboardButton(btn("default_alert_settings", lang)))
+    if show_partner_ui():
+        mid.append(KeyboardButton(btn("partner", lang)))
+    mid.append(KeyboardButton(btn("back", lang)))
+    rows.extend(_pair_reply_rows(mid))
+    return _reply_keyboard(rows)
+
+
+def bot_settings_menu(lang: str) -> ReplyKeyboardMarkup:
+    """Language, ignore words, OAuth tokens — plus topics toggle on a separate inline msg."""
+    return _reply_keyboard(
         _pair_reply_rows(
             [
                 KeyboardButton(btn("ignored_words", lang)),
-                KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
-                KeyboardButton(btn("sys_notifications", lang)),
                 KeyboardButton(btn("language", lang)),
+                KeyboardButton(btn("auth_tokens", lang)),
+                KeyboardButton(btn("back_settings", lang)),
             ]
         )
     )
-    if show_partner_ui():
-        if show_premium_ui():
-            rows.append(
-                [
-                    KeyboardButton(btn("default_alert_settings", lang)),
-                    KeyboardButton(btn("auth_tokens", lang)),
-                ]
+
+
+def topics_support_keyboard(
+    lang: str,
+    *,
+    enabled: bool,
+    callback_data: str = "topics:toggle",
+    with_main_menu: bool = False,
+) -> InlineKeyboardMarkup:
+    mark = "✅ " if enabled else "⬜️ "
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                mark + t("topics_support_toggle", lang),
+                callback_data=callback_data,
             )
-            rows.append(
-                [
-                    KeyboardButton(btn("partner", lang)),
-                    KeyboardButton(btn("back", lang)),
-                ]
-            )
-        else:
-            rows.append(
-                [
-                    KeyboardButton(btn("auth_tokens", lang)),
-                    KeyboardButton(btn("partner", lang)),
-                ]
-            )
-            rows.append([KeyboardButton(btn("back", lang))])
-    elif show_premium_ui():
-        rows.append(
-            [
-                KeyboardButton(btn("default_alert_settings", lang)),
-                KeyboardButton(btn("auth_tokens", lang)),
-            ]
-        )
-        rows.append([KeyboardButton(btn("back", lang))])
-    else:
-        rows.append(
-            [
-                KeyboardButton(btn("auth_tokens", lang)),
-                KeyboardButton(btn("back", lang)),
-            ]
-        )
-    return _reply_keyboard(rows)
+        ]
+    ]
+    if with_main_menu:
+        rows.append([dm_main_menu_button(lang)])
+    return InlineKeyboardMarkup(rows)
+
+
+def topics_intro_keyboard(lang: str) -> InlineKeyboardMarkup:
+    """One-time offer after first alert — checkbox off by default."""
+    return topics_support_keyboard(
+        lang,
+        enabled=False,
+        callback_data="topics:intro_toggle",
+        with_main_menu=True,
+    )
 
 
 def auth_tokens_menu(lang: str) -> ReplyKeyboardMarkup:
@@ -450,7 +505,7 @@ def auth_tokens_menu(lang: str) -> ReplyKeyboardMarkup:
         [
             [KeyboardButton(btn("auth_tokens_revoke_twitch", lang))],
             [KeyboardButton(btn("auth_tokens_revoke_donationalerts", lang))],
-            [KeyboardButton(btn("back_settings", lang))],
+            [KeyboardButton(btn("back_bot_settings", lang))],
         ]
     )
 
@@ -1466,15 +1521,14 @@ def advanced_options_keyboard(
         label = t(label_key, lang)
         if toggle in locked and not flag:
             label = f"🔒 {label}"
-        cb = (
-            "advopt:locked"
-            if settings_locked and toggle in LOCKED_ADVOPT_TOGGLES
-            else f"advopt:toggle:{toggle}"
-        )
+        text = mark + label
+        # Defaults lock: DisabledButton (no tap). Premium 🔒 stays clickable → upsell.
+        if settings_locked and toggle in LOCKED_ADVOPT_TOGGLES:
+            return [disabled_inline_button(text)]
         return [
             InlineKeyboardButton(
-                mark + label,
-                callback_data=cb,
+                text,
+                callback_data=f"advopt:toggle:{toggle}",
             )
         ]
 
@@ -1488,16 +1542,16 @@ def advanced_options_keyboard(
         style_row: list[InlineKeyboardButton] = []
         for choice in BUTTON_STYLE_CHOICES:
             mark = "✅ " if choice == current else "⬜️ "
-            style_row.append(
-                InlineKeyboardButton(
-                    mark + t(BUTTON_STYLE_LABEL_KEYS[choice], lang),
-                    callback_data=(
-                        "advopt:locked"
-                        if settings_locked
-                        else f"advopt:style:{choice}"
-                    ),
+            style_label = mark + t(BUTTON_STYLE_LABEL_KEYS[choice], lang)
+            if settings_locked:
+                style_row.append(disabled_inline_button(style_label))
+            else:
+                style_row.append(
+                    InlineKeyboardButton(
+                        style_label,
+                        callback_data=f"advopt:style:{choice}",
+                    )
                 )
-            )
             if len(style_row) == 2:
                 rows.append(style_row)
                 style_row = []
@@ -3152,82 +3206,44 @@ def edit_options_keyboard(
 
     prefix = "defedit" if for_defaults_editor else "edit_f"
     locked = bool(use_stream_defaults) and not for_defaults_editor
+    _unlocked_fields = frozenset(
+        ("apply_defaults", "dest", "change_type", "copy", "copy_change")
+    )
 
-    def _cb(field: str) -> str:
-        if locked and field not in ("apply_defaults", "dest", "change_type", "copy", "copy_change"):
-            return f"edit_f:{sub_id}:defaults_locked"
-        return f"{prefix}:{sub_id}:{field}"
+    def _btn(text: str, field: str) -> InlineKeyboardButton:
+        # Defaults applied: DisabledButton instead of tap → alert.
+        if locked and field not in _unlocked_fields:
+            return disabled_inline_button(text)
+        return InlineKeyboardButton(text, callback_data=f"{prefix}:{sub_id}:{field}")
 
     rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(t("edit_template", lang), callback_data=_cb("template"))],
+        [_btn(t("edit_template", lang), "template")],
     ]
     for sid in ALERT_SETTING_ORDER:
         field = EDIT_FIELD[sid]
         if sid == "image":
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        t(ADVOPT_LABEL_KEY[sid], lang),
-                        callback_data=_cb(field),
-                    )
-                ]
-            )
+            rows.append([_btn(t(ADVOPT_LABEL_KEY[sid], lang), field)])
             if has_image:
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            t("edit_image_delete", lang),
-                            callback_data=_cb("image_del"),
-                        )
-                    ]
-                )
+                rows.append([_btn(t("edit_image_delete", lang), "image_del")])
             continue
         if sid == "strip":
             strip_mark = "✅ " if strip_name_mentions else "⬜️ "
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        strip_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                        callback_data=_cb(field),
-                    )
-                ]
-            )
+            rows.append([_btn(strip_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "ignore":
             if show_advanced:
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "categories":
             # Defaults editor shows categories; edit hides for upcoming/end.
             if show_advanced and (
                 for_defaults_editor or ((not is_upcoming) and not notify_on_end)
             ):
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "delay":
             if show_advanced and (for_defaults_editor or not is_upcoming):
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "repeat":
             if show_advanced and (
@@ -3239,14 +3255,7 @@ def edit_options_keyboard(
                 )
             ):
                 # Plain label like delay — opens minutes step, not an in-place toggle.
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "repeats":
             if show_advanced and show_repeats_overlap and (
@@ -3257,14 +3266,7 @@ def edit_options_keyboard(
                     and not notify_on_end
                 )
             ):
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "overlap":
             # Opens dedicated options screen (like cover) — plain label, not in-place toggle.
@@ -3283,84 +3285,41 @@ def edit_options_keyboard(
                     if (block_overlap or block_repeat_when_last)
                     else ""
                 )
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(mark + t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "delete":
             if show_advanced and (for_defaults_editor or dest_type != "dm"):
                 delete_mark = "✅ " if delete_previous else "⬜️ "
                 rows.append(
-                    [
-                        InlineKeyboardButton(
-                            delete_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
+                    [_btn(delete_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)]
                 )
             continue
         if sid == "pin":
             if show_advanced and (for_defaults_editor or dest_type != "dm"):
                 pin_mark = "✅ " if pin_message else "⬜️ "
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            pin_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(pin_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "buttons":
             if show_advanced and show_custom_buttons:
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "chat":
             if show_advanced:
                 chat_mark = "✅ " if attach_chat_button else "⬜️ "
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            chat_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(chat_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "live_remind":
             if show_advanced and show_live_remind:
                 remind_mark = "✅ " if attach_live_remind_button else "⬜️ "
                 rows.append(
-                    [
-                        InlineKeyboardButton(
-                            remind_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
+                    [_btn(remind_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)]
                 )
             continue
         if sid == "schedule_remind":
             if for_defaults_editor or schedule_reminder_configured:
                 remind_mark = "✅ " if schedule_reminder_minutes > 0 else "⬜️ "
                 rows.append(
-                    [
-                        InlineKeyboardButton(
-                            remind_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
+                    [_btn(remind_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)]
                 )
             continue
         if sid == "schedule_block_repeats":
@@ -3371,49 +3330,25 @@ def edit_options_keyboard(
             ):
                 block_mark = "✅ " if schedule_reminder_block_repeats else "⬜️ "
                 rows.append(
-                    [
-                        InlineKeyboardButton(
-                            block_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
+                    [_btn(block_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)]
                 )
             continue
         if sid == "schedule_cancel":
             if show_advanced and show_schedule_cancel:
                 cancel_mark = "✅ " if notify_on_schedule_cancel else "⬜️ "
                 rows.append(
-                    [
-                        InlineKeyboardButton(
-                            cancel_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
+                    [_btn(cancel_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)]
                 )
             continue
         if sid == "multistream":
             if show_advanced and show_multistream:
                 ms_mark = "✅ " if multistream_count > 0 else "⬜️ "
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            ms_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(ms_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "top_donations":
             if show_advanced and show_top_donations:
                 top_mark = "✅ " if top_donations else "⬜️ "
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            top_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
-                )
+                rows.append([_btn(top_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)])
             continue
         if sid == "preview":
             has_any_buttons = (
@@ -3432,23 +3367,13 @@ def edit_options_keyboard(
                     lang,
                 )
                 rows.append(
-                    [
-                        InlineKeyboardButton(
-                            t("edit_button_style", lang, style=style_label),
-                            callback_data=_cb("button_style"),
-                        )
-                    ]
+                    [_btn(t("edit_button_style", lang, style=style_label), "button_style")]
                 )
             if show_link_preview:
                 preview_on = not disable_link_preview
                 preview_mark = "✅ " if preview_on else "⬜️ "
                 rows.append(
-                    [
-                        InlineKeyboardButton(
-                            preview_mark + t(ADVOPT_LABEL_KEY[sid], lang),
-                            callback_data=_cb(field),
-                        )
-                    ]
+                    [_btn(preview_mark + t(ADVOPT_LABEL_KEY[sid], lang), field)]
                 )
             continue
     if for_defaults_editor:

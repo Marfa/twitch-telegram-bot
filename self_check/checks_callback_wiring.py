@@ -201,6 +201,8 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("defedit_template", "defedit:0:template"),
     ("advopt_apply_defaults", "advopt:toggle:apply_defaults"),
     ("advopt_locked", "advopt:locked"),
+    ("topics_toggle", "topics:toggle"),
+    ("topics_intro_toggle", "topics:intro_toggle"),
     ("edit_g_tags", f"edit_g:{_SAMPLE_SUB}:tags"),
     ("edit_g_mature", f"edit_g:{_SAMPLE_SUB}:mature"),
     ("edit_r_days", f"edit_r:{_SAMPLE_SUB}:days"),
