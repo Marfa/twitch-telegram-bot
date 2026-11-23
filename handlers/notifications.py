@@ -884,8 +884,14 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     live_streams: dict[str, dict] = {}
     helix_ok = True
     if user_ids:
+        # Half the interval, so the later phases still fit in the same tick.
+        from config import CHECK_INTERVAL
+
+        helix_budget_sec = max(10.0, float(CHECK_INTERVAL) / 2)
         try:
-            live_streams = await asyncio.to_thread(twitch.get_live_streams, user_ids)
+            live_streams = await asyncio.to_thread(
+                twitch.get_live_streams, user_ids, budget_sec=helix_budget_sec
+            )
         except Exception as exc:
             logger.exception("Twitch poll failed")
             import analytics

@@ -292,6 +292,11 @@ def _transient_backoff_seconds(attempt: int) -> float:
     return min(_RATE_LIMIT_MAX_WAIT_SEC, float(2 ** attempt))
 
 
+def _deadline_too_close(deadline: float | None, wait: float) -> bool:
+    """True when a retry after `wait` seconds would end past the deadline."""
+    return deadline is not None and time.monotonic() + wait >= deadline
+
+
 def _install_rate_limit_backoff(
     session: requests.Session,
     on_unauthorized: Any | None = None,
@@ -302,19 +307,37 @@ def _install_rate_limit_backoff(
 
     `on_unauthorized` takes the request headers and returns rebuilt headers to
     retry with (after refreshing the token), or None to leave the 401 as-is.
+    A caller that must finish by a fixed time passes `_deadline` (monotonic
+    seconds). Each attempt's timeout is capped at the time left, and a retry whose
+    wait would end past the deadline does not run.
     """
     orig = session.request
 
     def request(method: str, url: str, **kwargs: Any) -> requests.Response:
+        deadline: float | None = kwargs.pop("_deadline", None)
         last: requests.Response | None = None
         token_refreshed = False
         for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    if last is None:
+                        raise requests.exceptions.Timeout(
+                            f"deadline passed before the first attempt: {url}"
+                        )
+                    return last
+                timeout = kwargs.get("timeout")
+                if isinstance(timeout, (int, float)):
+                    kwargs["timeout"] = min(float(timeout), remaining)
             try:
                 last = orig(method, url, **kwargs)
             except _TRANSIENT_REQUEST_ERRORS as exc:
-                if attempt >= _RATE_LIMIT_MAX_RETRIES:
-                    raise
                 wait = _transient_backoff_seconds(attempt)
+                if (
+                    attempt >= _RATE_LIMIT_MAX_RETRIES
+                    or _deadline_too_close(deadline, wait)
+                ):
+                    raise
                 logger.warning(
                     "HTTP %s method=%s url=%s wait=%.1fs attempt=%s",
                     type(exc).__name__,
@@ -340,12 +363,13 @@ def _install_rate_limit_backoff(
                         url,
                     )
                     continue
+            wait = _transient_backoff_seconds(attempt)
             if (
                 last.status_code in _TRANSIENT_STATUS_CODES
                 and method.upper() == "GET"
                 and attempt < _RATE_LIMIT_MAX_RETRIES
+                and not _deadline_too_close(deadline, wait)
             ):
-                wait = _transient_backoff_seconds(attempt)
                 logger.warning(
                     "HTTP %s method=%s url=%s wait=%.1fs attempt=%s",
                     last.status_code,
@@ -356,9 +380,13 @@ def _install_rate_limit_backoff(
                 )
                 time.sleep(wait)
                 continue
-            if last.status_code != 429 or attempt >= _RATE_LIMIT_MAX_RETRIES:
-                return last
             wait = _retry_after_seconds(last, attempt)
+            if (
+                last.status_code != 429
+                or attempt >= _RATE_LIMIT_MAX_RETRIES
+                or _deadline_too_close(deadline, wait)
+            ):
+                return last
             logger.warning(
                 "HTTP 429 method=%s url=%s wait=%.1fs attempt=%s",
                 method,
@@ -553,20 +581,42 @@ class TwitchClient:
         """Public game page URL on twitchdrops.app (no HTML scrape)."""
         return twitchdrops_app_game_url(game_slug)
 
-    def get_live_streams(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
-        """Helix allows at most 100 user_id params per /streams request."""
+    def get_live_streams(
+        self, user_ids: list[str], *, budget_sec: float | None = None
+    ) -> dict[str, dict[str, Any]]:
+        """Helix allows at most 100 user_id params per /streams request.
+
+        `budget_sec` caps the whole poll, for a caller on a fixed schedule (the
+        60 s check_streams tick). Every chunk and its retry chain stop at that
+        deadline, and an exhausted budget raises instead of returning partial
+        data, so the caller keeps its previous live state for the next tick.
+        """
         if not user_ids:
             return {}
         out: dict[str, dict[str, Any]] = {}
         chunk_size = 100
+        deadline = None if budget_sec is None else time.monotonic() + budget_sec
         for i in range(0, len(user_ids), chunk_size):
             chunk = user_ids[i : i + chunk_size]
             params: list[tuple[str, str]] = [("user_id", uid) for uid in chunk]
+            remaining = None
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning(
+                        "Helix poll budget %.0fs hit; %s user(s) left for next tick",
+                        budget_sec,
+                        len(user_ids) - i,
+                    )
+                    raise requests.exceptions.Timeout(
+                        f"Helix poll budget of {budget_sec:.0f}s exhausted"
+                    )
             resp = self._session.get(
                 "https://api.twitch.tv/helix/streams",
                 headers=self._headers(),
                 params=params,
-                timeout=15,
+                timeout=15 if remaining is None else max(1.0, min(15.0, remaining)),
+                _deadline=deadline,
             )
             resp.raise_for_status()
             for stream in resp.json().get("data", []):
