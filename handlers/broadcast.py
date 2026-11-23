@@ -11,6 +11,7 @@ from telegram.error import BadRequest, Forbidden, NetworkError
 from telegram.ext import Application, ContextTypes, ConversationHandler
 
 import analytics
+import metrics
 from bot_helpers import (
     _BROADCAST_SEND_PAUSE,
     _can_use_admin_tools,
@@ -699,6 +700,13 @@ async def _send_admin_broadcast(
         else:
             failed += 1
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
+    # TZ waves discard the failure count; the metric keeps it observable.
+    metrics.record_broadcast_delivery(
+        msg_type=msg_type, outcome="sent", count=sent
+    )
+    metrics.record_broadcast_delivery(
+        msg_type=msg_type, outcome="failed", count=failed
+    )
     return sent, failed, len(user_ids)
 
 

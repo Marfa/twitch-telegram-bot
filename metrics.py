@@ -17,6 +17,7 @@ _update_counter = None
 _update_duration = None
 _update_error_counter = None
 _alert_counter = None
+_broadcast_counter = None
 _job_counter = None
 _job_duration = None
 _job_skip_counter = None
@@ -26,6 +27,7 @@ def init_metrics() -> None:
     """Create the OTLP metric reader from env. Safe to call once at startup."""
     global _enabled, _provider
     global _update_counter, _update_duration, _update_error_counter, _alert_counter
+    global _broadcast_counter
     global _job_counter, _job_duration, _job_skip_counter
     from config import BOT_VERSION, POSTHOG_API_KEY, POSTHOG_HOST
 
@@ -74,6 +76,9 @@ def init_metrics() -> None:
     )
     _alert_counter = meter.create_counter(
         "bot.alert.delivery", description="Alert delivery attempts"
+    )
+    _broadcast_counter = meter.create_counter(
+        "bot.broadcast.delivery", description="Admin broadcast deliveries"
     )
     _job_counter = meter.create_counter(
         "bot.job.run", description="Scheduled job runs"
@@ -145,6 +150,18 @@ def record_alert_delivery(*, alert_type: str, dest_type: str, outcome: str) -> N
             "dest_type": dest_type or "unknown",
             "outcome": outcome,
         },
+    )
+
+
+def record_broadcast_delivery(
+    *, msg_type: str, outcome: str, count: int = 1
+) -> None:
+    """Count sent or failed broadcast recipients in one add."""
+    if not _enabled or count <= 0:
+        return
+    _broadcast_counter.add(
+        count,
+        {"msg_type": msg_type or "unknown", "outcome": outcome},
     )
 
 
