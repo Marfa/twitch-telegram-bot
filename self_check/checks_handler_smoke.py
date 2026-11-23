@@ -1586,6 +1586,9 @@ async def _smoke_delivery_and_helpers(db) -> None:
     sched_uid = _FREE_UID + 40
     db.upsert_user(sched_uid)
     db.set_user_locale(sched_uid, "en")
+    # Topics intro is a one-shot DM after the first alert; mark it so this
+    # smoke asserts the reminder text, not the topics opt-in prompt.
+    db.mark_topics_intro_sent(sched_uid)
     remind_sub_id = db.add_subscription(
         sched_uid,
         "marfapr",
@@ -1642,6 +1645,7 @@ async def _smoke_delivery_and_helpers(db) -> None:
     title_only_uid = _FREE_UID + 41
     db.upsert_user(title_only_uid)
     db.set_user_locale(title_only_uid, "ru")
+    db.mark_topics_intro_sent(title_only_uid)
     title_sub_id = db.add_subscription(
         title_only_uid,
         "marfapr",
@@ -1700,6 +1704,7 @@ async def _smoke_delivery_and_helpers(db) -> None:
     block_uid = _FREE_UID + 43
     db.upsert_user(block_uid)
     db.set_user_locale(block_uid, "en")
+    db.mark_topics_intro_sent(block_uid)
     block_sub_id = db.add_subscription(
         block_uid,
         "marfapr",
