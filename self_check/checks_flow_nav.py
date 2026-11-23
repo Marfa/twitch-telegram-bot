@@ -184,6 +184,8 @@ def _cb_update(user_id: int, data: str, capture: _BotCapture | None = None):
 
 
 def _check_submenu_reply_keyboards() -> None:
+    from i18n import admin_menu_inline, other_menu_inline, settings_menu_inline
+
     for loc in SUPPORTED_LOCALES:
         cases = [
             ("subscriptions_menu", subscriptions_menu(loc)),
@@ -196,6 +198,12 @@ def _check_submenu_reply_keyboards() -> None:
             ("admin_menu", admin_menu(loc)),
             ("wizard_menu", wizard_menu(loc)),
             ("wizard_menu_no_back", wizard_menu(loc, back=False)),
+            ("other_menu_inline", other_menu_inline(loc)),
+            (
+                "settings_menu_inline",
+                settings_menu_inline(loc, beta_enrolled=0, beta_total=0),
+            ),
+            ("admin_menu_inline", admin_menu_inline(loc)),
         ]
         for name, markup in cases:
             assert markup_has_escape_hatch(markup), (
@@ -2035,11 +2043,13 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
     db.set_user_locale(_FREE_UID, "ru")
 
     with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"):
-        other = other_menu("ru")
+        from i18n import other_menu_inline
+
+        other = other_menu_inline("ru")
         assert markup_has_escape_hatch(other)
         other_chat = next(
             b
-            for row in other.keyboard
+            for row in other.inline_keyboard
             for b in row
             if b.text == btn("chat", "ru")
         )
@@ -2062,6 +2072,15 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
         update = _msg_update(_FREE_UID, btn("other", "ru"), cap)
         ctx = _ctx(application)
         await open_other_menu(update, ctx)
+        assert any(
+            getattr(m, "inline_keyboard", None)
+            and any(
+                getattr(b, "web_app", None) for row in m.inline_keyboard for b in row
+            )
+            for m in cap.markups
+        )
+        # Other is an inline panel — must not replace the main reply keyboard.
+        assert not any(getattr(m, "keyboard", None) for m in cap.markups)
         cap.assert_turn("other_menu_chat_webapp")
 
         application, bot = _app(db)

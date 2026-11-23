@@ -402,6 +402,7 @@ def subscriptions_menu(
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
+    """Legacy reply keyboard (feature exits / old clients). Prefer other_menu_inline."""
     from chat_webapp import stream_chat_reply_button
 
     keys = [
@@ -422,9 +423,50 @@ def other_menu(lang: str) -> ReplyKeyboardMarkup:
     return _reply_keyboard(_pair_reply_rows(buttons))
 
 
+def _pair_inline_rows(
+    buttons: list[InlineKeyboardButton],
+) -> list[list[InlineKeyboardButton]]:
+    rows: list[list[InlineKeyboardButton]] = []
+    i = 0
+    while i + 1 < len(buttons):
+        rows.append([buttons[i], buttons[i + 1]])
+        i += 2
+    if i < len(buttons):
+        rows.append([buttons[i]])
+    return rows
+
+
+def other_menu_inline(lang: str) -> InlineKeyboardMarkup:
+    """Other features as a message — does not replace the main reply keyboard."""
+    from chat_webapp import stream_chat_menu_inline_button
+
+    keys = [
+        "follow_monitor",
+        "ai_clips",
+        "whisper_alerts",
+        "create_schedule",
+        "watch",
+        "chat",
+        "game_info",
+        "channel_stats",
+    ]
+    buttons = [
+        stream_chat_menu_inline_button(lang, fallback_callback="menu_other:chat")
+        if k == "chat"
+        else InlineKeyboardButton(btn(k, lang), callback_data=f"menu_other:{k}")
+        for k in keys
+    ]
+    rows = _pair_inline_rows(buttons)
+    rows.append(
+        [InlineKeyboardButton(btn("back", lang), callback_data="menu_other:back")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
 def settings_menu(
     lang: str, *, beta_enrolled: int = 0, beta_total: int = 0
 ) -> ReplyKeyboardMarkup:
+    """Legacy reply keyboard. Prefer settings_menu_inline for Settings taps."""
     from config import show_partner_ui, show_premium_ui
 
     rows: list[list[KeyboardButton]] = []
@@ -447,6 +489,58 @@ def settings_menu(
     mid.append(KeyboardButton(btn("back", lang)))
     rows.extend(_pair_reply_rows(mid))
     return _reply_keyboard(rows)
+
+
+def settings_menu_inline(
+    lang: str, *, beta_enrolled: int = 0, beta_total: int = 0
+) -> InlineKeyboardMarkup:
+    """Settings as a message — keeps the main reply keyboard unchanged."""
+    from config import show_partner_ui, show_premium_ui
+
+    rows: list[list[InlineKeyboardButton]] = []
+    if show_premium_ui():
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("premium", lang), callback_data="menu_settings:premium"
+                ),
+                InlineKeyboardButton(
+                    btn("sync_subs", lang), callback_data="menu_settings:sync_subs"
+                ),
+            ]
+        )
+    else:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("sync_subs", lang), callback_data="menu_settings:sync_subs"
+                )
+            ]
+        )
+    mid: list[InlineKeyboardButton] = [
+        InlineKeyboardButton(
+            btn("bot_settings", lang), callback_data="menu_settings:bot_settings"
+        ),
+        InlineKeyboardButton(
+            beta_mode_btn(lang, beta_enrolled, beta_total),
+            callback_data="menu_settings:beta_mode",
+        ),
+        InlineKeyboardButton(
+            btn("sys_notifications", lang),
+            callback_data="menu_settings:sys_notifications",
+        ),
+    ]
+    if show_partner_ui():
+        mid.append(
+            InlineKeyboardButton(
+                btn("partner", lang), callback_data="menu_settings:partner"
+            )
+        )
+    mid.append(
+        InlineKeyboardButton(btn("back", lang), callback_data="menu_settings:back")
+    )
+    rows.extend(_pair_inline_rows(mid))
+    return InlineKeyboardMarkup(rows)
 
 
 def bot_settings_menu(lang: str) -> ReplyKeyboardMarkup:
@@ -804,6 +898,7 @@ def sync_settings_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 
 def admin_menu(lang: str) -> ReplyKeyboardMarkup:
+    """Legacy reply keyboard. Prefer admin_menu_inline for Admin taps."""
     from config import show_partner_ui
 
     buttons = [
@@ -817,6 +912,25 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
     rows = _pair_reply_rows(buttons)
     rows.append([KeyboardButton(btn("back", lang))])
     return _reply_keyboard(rows)
+
+
+def admin_menu_inline(lang: str) -> InlineKeyboardMarkup:
+    """Admin tools as a message — keeps the main reply keyboard unchanged."""
+    from config import show_partner_ui
+
+    keys = ["broadcast", "stats", "reload_locales"]
+    if show_partner_ui():
+        keys.append("admin_withdrawals")
+    keys.append("demo")
+    buttons = [
+        InlineKeyboardButton(btn(k, lang), callback_data=f"menu_admin:{k}")
+        for k in keys
+    ]
+    rows = _pair_inline_rows(buttons)
+    rows.append(
+        [InlineKeyboardButton(btn("back", lang), callback_data="menu_admin:back")]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def withdrawal_actions_keyboard(withdrawal_id: int, lang: str) -> InlineKeyboardMarkup:

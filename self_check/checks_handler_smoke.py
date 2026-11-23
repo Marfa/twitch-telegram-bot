@@ -679,7 +679,7 @@ async def _smoke_settings_oauth(db) -> None:
         ctx = _ctx(application)
         bot.send_message.reset_mock()
         await opener(update, ctx)
-        # Settings uses send_reply_keyboard_menu (General); others may reply_text.
+        # Settings uses send_message + inline panel; others may reply_text.
         assert (
             update.effective_message.reply_text.await_count
             + bot.send_message.await_count

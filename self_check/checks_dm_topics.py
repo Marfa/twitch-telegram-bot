@@ -12,7 +12,6 @@ from dm_topics import (
     TOPIC_KEYS,
     _TOPIC_ICON_COLOR,
     _TOPIC_ICON_EMOJI,
-    alert_topic_thread_id_from_message,
     ensure_all_user_topics,
     ensure_user_topic,
     icon_custom_emoji_id_for_topic,
@@ -142,7 +141,7 @@ async def _check_menu_keyboard_goes_to_general() -> None:
     assert "message_thread_id" not in menu_call.kwargs
     assert menu_call.kwargs.get("reply_markup") is kb
 
-    # Second menu tap from General must not post into topics again.
+    # Second menu tap must not post into topics again.
     bot.send_message.reset_mock()
     with patch(
         "bot_helpers.delete_chat_message", new=AsyncMock()
@@ -153,28 +152,6 @@ async def _check_menu_keyboard_goes_to_general() -> None:
     assert bot.send_message.await_count == 1
     assert "message_thread_id" not in bot.send_message.await_args.kwargs
     assert bot.send_message.await_args.kwargs.get("reply_markup") is kb
-
-    # Tap from Эфир always strips that thread (Android sticky keyboard).
-    from_live = SimpleNamespace(message_thread_id=50, is_topic_message=True)
-    assert alert_topic_thread_id_from_message(db, 7, from_live) == 50
-    bot.send_message.reset_mock()
-    with patch(
-        "bot_helpers.delete_chat_message", new=AsyncMock()
-    ), patch("asyncio.sleep", new=AsyncMock()):
-        await send_reply_keyboard_menu(
-            bot,
-            7,
-            "Прочее:",
-            kb,
-            db=db,
-            user_id=7,
-            from_message=from_live,
-        )
-    assert bot.send_message.await_count == 2
-    strip_call, menu_call = bot.send_message.await_args_list
-    assert strip_call.kwargs.get("message_thread_id") == 50
-    assert isinstance(strip_call.kwargs.get("reply_markup"), ReplyKeyboardRemove)
-    assert "message_thread_id" not in menu_call.kwargs
 
 
 def _check_private_ui_general_gate() -> None:

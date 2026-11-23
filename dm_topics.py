@@ -303,32 +303,6 @@ def user_alert_topic_thread_ids(db, user_id: int) -> list[int]:
     return out
 
 
-def alert_topic_thread_id_from_message(db, user_id: int, message) -> int | None:
-    """If message was sent from an alert topic (Эфир, …), return that thread id.
-
-    ReplyKeyboard state is largely per-client: desktop can look fixed while
-    Android still shows a sticky keyboard inside the topic.
-    """
-    if message is None:
-        return None
-    tid = getattr(message, "message_thread_id", None)
-    if tid is None:
-        return None
-    try:
-        tid_i = int(tid)
-    except (TypeError, ValueError):
-        return None
-    if tid_i == GENERAL_TOPIC_ID:
-        return None
-    if tid_i not in user_alert_topic_thread_ids(db, user_id):
-        return None
-    return tid_i
-
-
-# Android often ignores ReplyKeyboardRemove if the carrier is deleted too soon.
-_STRIP_KEYBOARD_SETTLE_SEC = 0.7
-
-
 async def strip_reply_keyboards_from_threads(
     bot, chat_id: int, thread_ids: list[int]
 ) -> None:
@@ -357,7 +331,7 @@ async def strip_reply_keyboards_from_threads(
                     message_thread_id=int(tid),
                     reply_markup=remove,
                 )
-                await asyncio.sleep(_STRIP_KEYBOARD_SETTLE_SEC)
+                await asyncio.sleep(0.2)
                 try:
                     await delete_chat_message(
                         bot, int(chat_id), msg.message_id, kind="bot_own"

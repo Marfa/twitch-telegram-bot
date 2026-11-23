@@ -153,15 +153,17 @@ def stream_chat_reply_button(lang: str) -> KeyboardButton:
     return KeyboardButton(label)
 
 
-def stream_chat_menu_inline_button(lang: str) -> InlineKeyboardButton:
-    """Inline Chat for wizards: WebApp when URL known, else callback fallback."""
+def stream_chat_menu_inline_button(
+    lang: str, *, fallback_callback: str = "new_sub_other:chat"
+) -> InlineKeyboardButton:
+    """Inline Chat for menus: WebApp when URL known, else callback fallback."""
     from i18n import btn
 
     label = btn("chat", lang)
     url = chat_webapp_url(lang=lang if lang in SUPPORTED_LOCALES else None)
     if url:
         return InlineKeyboardButton(label, web_app=WebAppInfo(url=url))
-    return InlineKeyboardButton(label, callback_data="new_sub_other:chat")
+    return InlineKeyboardButton(label, callback_data=fallback_callback)
 
 
 def embed_parent_host() -> str:

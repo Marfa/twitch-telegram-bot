@@ -374,6 +374,8 @@ from handlers.settings import (
     on_whisper_eventsub_revoked,
     open_beta_mode_menu,
     open_other_menu,
+    on_menu_other,
+    on_menu_settings,
     open_auth_tokens_menu,
     on_auth_tokens_revoke_twitch,
     on_auth_tokens_revoke_donationalerts,
@@ -1273,10 +1275,12 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return ConversationHandler.END
     if after == "settings":
+        from bot_helpers import _settings_inline
+
         await context.bot.send_message(
             chat_id,
             t("menu_settings", lang),
-            reply_markup=_settings_kb(lang, db, query.from_user.id),
+            reply_markup=_settings_inline(lang, db, query.from_user.id),
         )
         return ConversationHandler.END
     if after == "bot_settings":
@@ -2313,32 +2317,68 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from i18n import admin_menu_inline
+
     user_id = update.effective_user.id
     if not _is_admin(user_id):
         return
-    db: Database = context.application.bot_data["db"]
+    lang = _user_lang(context, user_id)
     if demo_mode.is_active(user_id):
-        lang = _user_lang(context, user_id)
-        await send_reply_keyboard_menu(
-            context.bot,
+        await context.bot.send_message(
             reply_chat_id(update),
             t("demo_on", lang),
-            _menu(lang, user_id),
-            db=db,
-            user_id=user_id,
-            from_message=update.effective_message,
+            reply_markup=_menu(lang, user_id),
         )
         return
-    lang = _user_lang(context, user_id)
-    await send_reply_keyboard_menu(
-        context.bot,
+    # Inline panel — do not replace the main reply keyboard.
+    await context.bot.send_message(
         reply_chat_id(update),
         t("menu_admin", lang),
-        admin_menu(lang),
-        db=db,
-        user_id=user_id,
-        from_message=update.effective_message,
+        reply_markup=admin_menu_inline(lang),
     )
+
+
+async def on_menu_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inline Admin panel actions."""
+    from handlers.admin_stats import admin_reload_locales, admin_show_stats
+    from handlers.broadcast import open_broadcast_menu
+    from handlers.partner import admin_show_withdrawals
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    user_id = query.from_user.id
+    if not _is_admin(user_id):
+        return
+    action = (query.data or "").split(":", 1)[-1]
+    if action == "back":
+        try:
+            await query.delete_message()
+        except BadRequest:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except BadRequest:
+                pass
+        return
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    if action == "broadcast":
+        await open_broadcast_menu(update, context)
+        return
+    if action == "stats":
+        await admin_show_stats(update, context)
+        return
+    if action == "reload_locales":
+        await admin_reload_locales(update, context)
+        return
+    if action == "admin_withdrawals":
+        await admin_show_withdrawals(update, context)
+        return
+    if action == "demo":
+        await toggle_demo_mode(update, context)
 
 
 async def toggle_demo_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2428,7 +2468,6 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         _menu(lang, user_id),
         db=db,
         user_id=user_id,
-        from_message=update.effective_message,
     )
 
 
@@ -3145,6 +3184,27 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_topics_toggle, pattern=r"^topics:(intro_)?toggle$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_menu_other,
+            pattern=r"^menu_other:(back|follow_monitor|ai_clips|whisper_alerts|create_schedule|watch|chat|game_info|channel_stats)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_menu_settings,
+            pattern=r"^menu_settings:(back|premium|sync_subs|bot_settings|beta_mode|sys_notifications|partner)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_menu_admin,
+            pattern=r"^menu_admin:(back|broadcast|stats|reload_locales|admin_withdrawals|demo)$",
         ),
         group=0,
     )

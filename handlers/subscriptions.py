@@ -1432,7 +1432,6 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
             _subs_kb(lang, db, user_id),
             db=db,
             user_id=user_id,
-            from_message=update.effective_message,
         )
         return
 
@@ -1447,7 +1446,6 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
         _subs_kb(lang, db, user_id),
         db=db,
         user_id=user_id,
-        from_message=update.effective_message,
     )
     types = _edit_present_types(subs)
     if len(types) > 1:

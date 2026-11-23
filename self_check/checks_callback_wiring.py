@@ -8,10 +8,13 @@ from typing import Any
 
 from handlers.drops import _digest_alert_keyboard
 from i18n import (
+    admin_menu_inline,
     admin_other_audience_keyboard,
     admin_type_keyboard,
     alert_type_keyboard,
     new_sub_other_keyboard,
+    other_menu_inline,
+    settings_menu_inline,
     advanced_options_keyboard,
     channel_dup_keyboard,
     chat_button_keyboard,
@@ -297,6 +300,13 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
             },
         ),
         ("new_sub_other", new_sub_other_keyboard, {"lang": loc}),
+        ("other_menu_inline", other_menu_inline, {"lang": loc}),
+        (
+            "settings_menu_inline",
+            settings_menu_inline,
+            {"lang": loc, "beta_enrolled": 0, "beta_total": 0},
+        ),
+        ("admin_menu_inline", admin_menu_inline, {"lang": loc}),
         (
             "drops_catalog",
             drops_catalog_keyboard,

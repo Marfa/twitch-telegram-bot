@@ -30,7 +30,6 @@ from bot_helpers import (
     _user_notifications_paused,
     is_private_chat,
     reply_chat_id,
-    send_reply_keyboard_menu,
     with_oauth_legal,
 )
 from db import Database
@@ -275,17 +274,16 @@ async def _show_ignored_words_screen(
     return _global_ignore_state()
 
 async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from bot_helpers import _settings_inline
+
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    await send_reply_keyboard_menu(
-        context.bot,
+    # Inline panel — do not replace the main reply keyboard.
+    await context.bot.send_message(
         reply_chat_id(update),
         t("menu_settings", lang),
-        _settings_kb(lang, db, user_id),
-        db=db,
-        user_id=user_id,
-        from_message=update.effective_message,
+        reply_markup=_settings_inline(lang, db, user_id),
     )
 
 
@@ -387,24 +385,13 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await strip_alert_topic_reply_keyboards(
             context.bot, db, user_id, force=True
         )
-    src = query.message
     if from_intro:
         await _pulse_reply_keyboard(
-            context.bot,
-            chat_id,
-            _menu(lang, user_id),
-            db=db,
-            user_id=user_id,
-            from_message=src,
+            context.bot, chat_id, _menu(lang, user_id), db=db, user_id=user_id
         )
         return
     await _pulse_reply_keyboard(
-        context.bot,
-        chat_id,
-        bot_settings_menu(lang),
-        db=db,
-        user_id=user_id,
-        from_message=src,
+        context.bot, chat_id, bot_settings_menu(lang), db=db, user_id=user_id
     )
 
 
@@ -457,18 +444,122 @@ async def on_auth_tokens_revoke_donationalerts(
 
 
 async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from i18n import other_menu_inline
+
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    await send_reply_keyboard_menu(
-        context.bot,
+    # Inline panel — do not replace the main reply keyboard.
+    await context.bot.send_message(
         reply_chat_id(update),
         t("menu_other", lang),
-        other_menu(lang),
-        db=db,
-        user_id=user_id,
-        from_message=update.effective_message,
+        reply_markup=other_menu_inline(lang),
     )
+
+
+async def on_menu_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inline Other panel actions (same features as reply other_menu)."""
+    from handlers.ai_clips import start_ai_clips
+    from handlers.channel_stats import start_channel_stats
+    from handlers.follow_monitor import open_follow_monitor_menu
+    from handlers.game_info import start_game_info
+    from handlers.stream_schedule import start_stream_schedule
+    from handlers.watch import start_watch_lucky
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    action = (query.data or "").split(":", 1)[-1]
+    if action == "back":
+        try:
+            await query.delete_message()
+        except BadRequest:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except BadRequest:
+                pass
+        return
+    if action not in (
+        "follow_monitor",
+        "ai_clips",
+        "whisper_alerts",
+        "create_schedule",
+        "watch",
+        "chat",
+        "game_info",
+        "channel_stats",
+    ):
+        return
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    context.user_data.clear()
+    if action == "follow_monitor":
+        await open_follow_monitor_menu(update, context)
+        return
+    if action == "ai_clips":
+        await start_ai_clips(update, context)
+        return
+    if action == "whisper_alerts":
+        await open_whisper_alerts_menu(update, context)
+        return
+    if action == "chat":
+        await open_stream_chat(update, context)
+        return
+    if action == "watch":
+        await start_watch_lucky(update, context)
+        return
+    if action == "game_info":
+        await start_game_info(update, context)
+        return
+    if action == "channel_stats":
+        await start_channel_stats(update, context)
+        return
+    await start_stream_schedule(update, context)
+
+
+async def on_menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inline Settings panel actions."""
+    from bot import open_premium_from_settings
+    from handlers.partner import open_partner_menu
+    from handlers.subscriptions import open_sync_settings
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    action = (query.data or "").split(":", 1)[-1]
+    if action == "back":
+        try:
+            await query.delete_message()
+        except BadRequest:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except BadRequest:
+                pass
+        return
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    if action == "premium":
+        await open_premium_from_settings(update, context)
+        return
+    if action == "sync_subs":
+        await open_sync_settings(update, context)
+        return
+    if action == "bot_settings":
+        await open_bot_settings_menu(update, context)
+        return
+    if action == "beta_mode":
+        await open_beta_mode_menu(update, context)
+        return
+    if action == "sys_notifications":
+        await open_sys_notifications_menu(update, context)
+        return
+    if action == "partner":
+        await open_partner_menu(update, context)
 
 async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/chat and plain-text Chat fallback — one inline WebApp button (no extra menu noise)."""
@@ -791,14 +882,12 @@ async def receive_ignore_igdb_text(
             return await _resume_after_ignore_igdb(
                 update, context, user_id=user_id, lang=lang, db=db
             )
-        await send_reply_keyboard_menu(
-            context.bot,
+        from bot_helpers import _settings_inline
+
+        await context.bot.send_message(
             reply_chat_id(update),
             t("menu_settings", lang),
-            _settings_kb(lang, db, user_id),
-            db=db,
-            user_id=user_id,
-            from_message=update.effective_message,
+            reply_markup=_settings_inline(lang, db, user_id),
         )
         context.user_data.clear()
         return ConversationHandler.END

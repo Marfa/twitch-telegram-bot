@@ -316,34 +316,6 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
     return wizard_menu(lang, back=back)
 
 
-async def _strip_topics_before_general_menu(
-    bot,
-    db: Database | None,
-    user_id: int,
-    *,
-    from_message=None,
-) -> None:
-    """Clear sticky keyboards out of alert topics before setting menu in General.
-
-    Desktop may already look fine while Android still shows a keyboard inside
-    Эфир — ReplyKeyboard is largely per-client. A tap from an alert topic
-    always strips that thread; otherwise strip all topics once per process.
-    """
-    if db is None or not db.is_topics_enabled(user_id):
-        return
-    from dm_topics import (
-        alert_topic_thread_id_from_message,
-        strip_alert_topic_reply_keyboards,
-        strip_reply_keyboards_from_threads,
-    )
-
-    src = alert_topic_thread_id_from_message(db, user_id, from_message)
-    if src is not None:
-        await strip_reply_keyboards_from_threads(bot, user_id, [src])
-        return
-    await strip_alert_topic_reply_keyboards(bot, db, user_id)
-
-
 async def send_reply_keyboard_menu(
     bot,
     chat_id: int,
@@ -353,17 +325,17 @@ async def send_reply_keyboard_menu(
     parse_mode: str | None = None,
     db: Database | None = None,
     user_id: int | None = None,
-    from_message=None,
 ) -> None:
     """Post a reply-keyboard menu into General (no message_thread_id).
 
-    Strips sticky ReplyKeyboard from alert topics first when topics are enabled.
-    Pass from_message when the user tapped a menu button (needed for Android).
+    Strips any sticky ReplyKeyboard from alert topics (Эфир, …) first when
+    topics are enabled — menu must not live there.
     """
     uid = int(user_id) if user_id is not None else int(chat_id)
-    await _strip_topics_before_general_menu(
-        bot, db, uid, from_message=from_message
-    )
+    if db is not None and db.is_topics_enabled(uid):
+        from dm_topics import strip_alert_topic_reply_keyboards
+
+        await strip_alert_topic_reply_keyboards(bot, db, uid)
     kwargs: dict = {"reply_markup": reply_markup}
     if parse_mode is not None:
         kwargs["parse_mode"] = parse_mode
@@ -377,26 +349,25 @@ async def _pulse_reply_keyboard(
     *,
     db: Database | None = None,
     user_id: int | None = None,
-    from_message=None,
 ) -> None:
     """Set reply keyboard in General without leaving a visible chat message."""
     from message_fx import message_fx_disabled
 
     uid = int(user_id) if user_id is not None else int(chat_id)
-    await _strip_topics_before_general_menu(
-        bot, db, uid, from_message=from_message
-    )
+    if db is not None and db.is_topics_enabled(uid):
+        from dm_topics import strip_alert_topic_reply_keyboards
+
+        await strip_alert_topic_reply_keyboards(bot, db, uid)
 
     # Draft/typing wrap can race with an immediate delete on some clients and
     # leave the reply keyboard collapsed after inline-only DMs (bot_update).
-    # No message_thread_id — General only. Android needs a longer settle than
-    # desktop before the carrier is deleted.
+    # No message_thread_id — General only.
     with message_fx_disabled():
         for attempt in range(3):
             try:
                 msg = await bot.send_message(chat_id, "·", reply_markup=reply_markup)
                 # Brief pause so the client applies ReplyKeyboard before delete.
-                await asyncio.sleep(0.55)
+                await asyncio.sleep(0.35)
                 try:
                     await delete_chat_message(
                         bot, chat_id, msg.message_id, kind="bot_own"
@@ -497,6 +468,7 @@ def group_setup_menu_filter():
 
 GROUP_SETUP_CALLBACK_PATTERN = (
     r"^(import_mode:|sync:|edit_f:|edit_g:|edit_set:|watch:|alert_type:|new_sub_other:|premium_gate:|"
+    r"menu_other:|menu_settings:|menu_admin:|"
     r"dup:|dest:|strip_name:|image_ask:|image_pos:|ignore_keywords:|"
     r"template_typo:|stored_typo_fix:|list_type:|delete_|enable_all|toggle:|sub_toggle:|alert_pause:|"
     r"sys_updates:|sys_availability:|sys_other:|sys_promo:|sys_sync:|sys_beta:|"
@@ -508,6 +480,13 @@ GROUP_SETUP_CALLBACK_PATTERN = (
 def _settings_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:
     enrolled, total = beta_features.enrollment_counts(db, user_id)
     return settings_menu(lang, beta_enrolled=enrolled, beta_total=total)
+
+
+def _settings_inline(lang: str, db: Database, user_id: int):
+    from i18n import settings_menu_inline
+
+    enrolled, total = beta_features.enrollment_counts(db, user_id)
+    return settings_menu_inline(lang, beta_enrolled=enrolled, beta_total=total)
 
 
 def _is_admin(user_id: int) -> bool:
