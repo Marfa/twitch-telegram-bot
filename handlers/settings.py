@@ -30,6 +30,7 @@ from bot_helpers import (
     _user_notifications_paused,
     is_private_chat,
     reply_chat_id,
+    send_reply_keyboard_menu,
     with_oauth_legal,
 )
 from db import Database
@@ -277,9 +278,11 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
-    await update.effective_message.reply_text(
+    await send_reply_keyboard_menu(
+        context.bot,
+        reply_chat_id(update),
         t("menu_settings", lang),
-        reply_markup=_settings_kb(lang, db, user_id),
+        _settings_kb(lang, db, user_id),
     )
 
 
@@ -424,9 +427,11 @@ async def on_auth_tokens_revoke_donationalerts(
 async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    await update.effective_message.reply_text(
+    await send_reply_keyboard_menu(
+        context.bot,
+        reply_chat_id(update),
         t("menu_other", lang),
-        reply_markup=other_menu(lang),
+        other_menu(lang),
     )
 
 async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -750,9 +755,11 @@ async def receive_ignore_igdb_text(
             return await _resume_after_ignore_igdb(
                 update, context, user_id=user_id, lang=lang, db=db
             )
-        await update.effective_message.reply_text(
+        await send_reply_keyboard_menu(
+            context.bot,
+            reply_chat_id(update),
             t("menu_settings", lang),
-            reply_markup=_settings_kb(lang, db, user_id),
+            _settings_kb(lang, db, user_id),
         )
         context.user_data.clear()
         return ConversationHandler.END

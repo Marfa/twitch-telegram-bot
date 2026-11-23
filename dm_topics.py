@@ -287,3 +287,126 @@ def reset_topic_icon_cache_for_tests() -> None:
     global _icon_stickers_by_emoji
     _icon_stickers_by_emoji = None
     _icons_applied.clear()
+
+
+# --- Private UI → General (alerts alone use message_thread_id) -----------------
+
+_private_ui_patched = False
+
+# Message.reply_* → Bot.send_* (content replies that would inherit a topic).
+_REPLY_SEND_MAP: tuple[tuple[str, str], ...] = (
+    ("reply_text", "send_message"),
+    ("reply_photo", "send_photo"),
+    ("reply_document", "send_document"),
+    ("reply_animation", "send_animation"),
+    ("reply_video", "send_video"),
+    ("reply_video_note", "send_video_note"),
+    ("reply_audio", "send_audio"),
+    ("reply_voice", "send_voice"),
+    ("reply_sticker", "send_sticker"),
+    ("reply_media_group", "send_media_group"),
+    ("reply_location", "send_location"),
+    ("reply_venue", "send_venue"),
+    ("reply_contact", "send_contact"),
+    ("reply_poll", "send_poll"),
+    ("reply_dice", "send_dice"),
+    ("reply_game", "send_game"),
+    ("reply_invoice", "send_invoice"),
+    ("reply_paid_media", "send_paid_media"),
+    ("reply_chat_action", "send_chat_action"),
+)
+
+_TOPIC_REPLY_STRIP = frozenset(
+    {
+        "message_thread_id",
+        "reply_to_message_id",
+        "reply_parameters",
+        "do_quote",
+        "quote",
+        "allow_sending_without_reply",
+    }
+)
+
+
+def private_ui_should_go_to_general(message) -> bool:
+    """True when a private Message.reply_* would otherwise land in a topic."""
+    from telegram.constants import ChatType
+
+    chat = getattr(message, "chat", None)
+    if chat is None or getattr(chat, "type", None) != ChatType.PRIVATE:
+        return False
+    if getattr(message, "is_topic_message", False):
+        return True
+    tid = getattr(message, "message_thread_id", None)
+    if tid is None:
+        return False
+    try:
+        return int(tid) != GENERAL_TOPIC_ID
+    except (TypeError, ValueError):
+        return False
+
+
+def _kwargs_for_general_send(kwargs: dict) -> dict:
+    return {k: v for k, v in kwargs.items() if k not in _TOPIC_REPLY_STRIP}
+
+
+def install_private_ui_to_general() -> None:
+    """Patch Message.reply_* so private topic replies go to General.
+
+    Product rule: only alerts use topics (``send_message(..., message_thread_id=)``).
+    Menus, wizards, settings, help, callbacks that ``reply_*`` to a message in
+    Эфир / other topics / «All messages» must post in General instead.
+    Idempotent — safe to call from ``build_application``.
+    """
+    global _private_ui_patched
+    if _private_ui_patched:
+        return
+
+    from telegram import Message
+    from telegram.constants import ParseMode
+
+    def _wrap(reply_name: str, send_name: str):
+        original = getattr(Message, reply_name)
+
+        async def wrapped(self, *args, **kwargs):
+            if not private_ui_should_go_to_general(self):
+                return await original(self, *args, **kwargs)
+            bot = self.get_bot()
+            send = getattr(bot, send_name)
+            return await send(self.chat_id, *args, **_kwargs_for_general_send(kwargs))
+
+        wrapped.__name__ = reply_name
+        wrapped.__qualname__ = f"Message.{reply_name}"
+        setattr(Message, reply_name, wrapped)
+
+    for reply_name, send_name in _REPLY_SEND_MAP:
+        if not hasattr(Message, reply_name):
+            continue
+        _wrap(reply_name, send_name)
+
+    # HTML / Markdown shortcuts → send_message with parse_mode (same General rule).
+    for reply_name, parse_mode in (
+        ("reply_html", ParseMode.HTML),
+        ("reply_markdown", ParseMode.MARKDOWN),
+        ("reply_markdown_v2", ParseMode.MARKDOWN_V2),
+    ):
+        if not hasattr(Message, reply_name):
+            continue
+        original = getattr(Message, reply_name)
+
+        async def wrapped(self, text, *args, _orig=original, _mode=parse_mode, **kwargs):
+            if not private_ui_should_go_to_general(self):
+                return await _orig(self, text, *args, **kwargs)
+            clean = _kwargs_for_general_send(kwargs)
+            clean.setdefault("parse_mode", _mode)
+            return await self.get_bot().send_message(self.chat_id, text, *args, **clean)
+
+        wrapped.__name__ = reply_name
+        wrapped.__qualname__ = f"Message.{reply_name}"
+        setattr(Message, reply_name, wrapped)
+
+    _private_ui_patched = True
+    logger.info(
+        "private UI replies patched to General "
+        "(topics reserved for alerts)"
+    )

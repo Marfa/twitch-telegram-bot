@@ -85,7 +85,7 @@
   "btn_back_settings": "◀️ Impostazioni",
   "menu_bot_settings": "Impostazioni bot:\n\nI topic (sotto) mettono ogni tipo di avviso in un thread separato in questa chat. Menu e altri messaggi restano in General. Gli utenti non possono creare o modificare i topic.",
   "topics_support_toggle": "Supporto topic",
-  "topics_support_on": "✅ Topic attivi. Gli avvisi per tipo vanno nei rispettivi topic; il menu resta in General.",
+  "topics_support_on": "✅ Topic attivi. Gli avvisi per tipo vanno nei rispettivi topic; tutto il resto del bot resta in General.",
   "topics_support_off": "⬜️ Topic disattivati. Gli avvisi tornano nella chat principale (le impostazioni dei topic sono conservate).",
   "topics_support_create_failed": "Impossibile creare i topic. Riprova più tardi.",
   "topics_intro": "Il bot ora supporta i topic. Gli avvisi sugli stream possono andare nel topic corrispondente.\n\nAttivare i topic ora? Puoi cambiarlo in Impostazioni → Impostazioni bot.",

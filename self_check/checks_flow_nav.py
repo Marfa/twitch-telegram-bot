@@ -4256,6 +4256,86 @@ async def _scenario_bot_settings_topics(db) -> None:
     cap.assert_turn("bot_settings_topics")
 
 
+async def _scenario_topics_menu_from_live_topic(db) -> None:
+    """§8 — Прочее / Настройки / Админка from Эфир must update keyboard in General."""
+    from datetime import datetime, timezone
+
+    from bot import open_admin_menu
+    from dm_topics import install_private_ui_to_general
+    from handlers.settings import open_other_menu, open_settings_menu
+    from telegram import Chat, Message, User
+    from telegram.constants import ChatType
+
+    install_private_ui_to_general()
+    db.upsert_user(_FREE_UID)
+    db.upsert_user(_ADMIN_UID)
+    db.set_user_locale(_FREE_UID, "ru")
+    db.set_user_locale(_ADMIN_UID, "ru")
+
+    def _assert_general_sends(bot: AsyncMock) -> None:
+        assert bot.send_message.await_count >= 1
+        for call in bot.send_message.await_args_list:
+            assert "message_thread_id" not in call.kwargs
+            assert call.kwargs.get("message_thread_id") is None
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("other", "ru"), cap)
+    update.effective_message.is_topic_message = True
+    update.effective_message.message_thread_id = 99
+    ctx = _ctx(application)
+    await open_other_menu(update, ctx)
+    _assert_general_sends(bot)
+    assert update.effective_message.reply_text.await_count == 0
+    cap.assert_turn("topics_other_from_live")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("settings", "ru"), cap)
+    update.effective_message.is_topic_message = True
+    update.effective_message.message_thread_id = 99
+    ctx = _ctx(application)
+    await open_settings_menu(update, ctx)
+    _assert_general_sends(bot)
+    assert update.effective_message.reply_text.await_count == 0
+    cap.assert_turn("topics_settings_from_live")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_ADMIN_UID, btn("admin", "ru"), cap)
+    update.effective_message.is_topic_message = True
+    update.effective_message.message_thread_id = 99
+    ctx = _ctx(application)
+    with patch("bot._is_admin", return_value=True), patch(
+        "bot.demo_mode.is_active", return_value=False
+    ):
+        await open_admin_menu(update, ctx)
+    _assert_general_sends(bot)
+    assert update.effective_message.reply_text.await_count == 0
+    cap.assert_turn("topics_admin_from_live")
+
+    # Safety net: raw reply_text from a topic message is rewritten to General.
+    bot = AsyncMock()
+    live_msg = Message(
+        message_id=10,
+        date=datetime.now(timezone.utc),
+        chat=Chat(id=_FREE_UID, type=ChatType.PRIVATE),
+        from_user=User(id=_FREE_UID, first_name="t", is_bot=False),
+        text=btn("other", "ru"),
+        is_topic_message=True,
+        message_thread_id=99,
+    )
+    live_msg.set_bot(bot)
+    await live_msg.reply_text(t("menu_other", "ru"), reply_markup=other_menu("ru"))
+    _assert_general_sends(bot)
+    assert markup_has_escape_hatch(
+        bot.send_message.await_args.kwargs.get("reply_markup")
+    )
+
+
 async def _scenario_settings_extended(db) -> None:
     from bot import open_premium_from_settings
     from handlers.settings import (
@@ -5379,6 +5459,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_schedule_publish_chain(db)
         await _scenario_schedule_deferred_week(db)
         await _scenario_bot_settings_topics(db)
+        await _scenario_topics_menu_from_live_topic(db)
         await _scenario_settings_extended(db)
         await _scenario_settings_stream_defaults(db)
         await _scenario_settings_stream_defaults_template(db)

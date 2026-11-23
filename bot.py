@@ -179,6 +179,7 @@ from bot_helpers import (
     message_text_for_template,
     reply_chat_id,
     reply_setup_private_only,
+    send_reply_keyboard_menu,
 )
 from handlers.admin_stats import admin_reload_locales, admin_show_stats, _format_stats
 from handlers.alert_history import (
@@ -2316,15 +2317,19 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if demo_mode.is_active(user_id):
         lang = _user_lang(context, user_id)
-        await update.effective_message.reply_text(
+        await send_reply_keyboard_menu(
+            context.bot,
+            reply_chat_id(update),
             t("demo_on", lang),
-            reply_markup=_menu(lang, user_id),
+            _menu(lang, user_id),
         )
         return
     lang = _user_lang(context, user_id)
-    await update.effective_message.reply_text(
+    await send_reply_keyboard_menu(
+        context.bot,
+        reply_chat_id(update),
         t("menu_admin", lang),
-        reply_markup=admin_menu(lang),
+        admin_menu(lang),
     )
 
 
@@ -2407,9 +2412,11 @@ async def _enter_demo_mode(
 async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    await update.effective_message.reply_text(
+    await send_reply_keyboard_menu(
+        context.bot,
+        reply_chat_id(update),
         t("menu_main", lang),
-        reply_markup=_menu(lang, user_id),
+        _menu(lang, user_id),
     )
 
 
@@ -2716,8 +2723,11 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         .build()
     )
     metrics.instrument_update_loop(app)
+    from dm_topics import install_private_ui_to_general
     from message_fx import install_message_fx
 
+    # Topics = alerts only; menus/wizards/settings always land in General.
+    install_private_ui_to_general()
     install_message_fx(
         app.bot,
         draft_enabled=lambda uid: db.is_message_draft_enabled(uid),

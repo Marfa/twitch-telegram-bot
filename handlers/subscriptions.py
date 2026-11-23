@@ -32,6 +32,7 @@ from bot_helpers import (
     _user_notifications_paused,
     _wizard,
     reply_chat_id,
+    send_reply_keyboard_menu,
     with_oauth_legal,
 )
 from db import (
@@ -1424,18 +1425,23 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db: Database = context.application.bot_data["db"]
     subs = _subs_for_owner(db, user_id)
     if not subs:
-        await update.effective_message.reply_text(
+        await send_reply_keyboard_menu(
+            context.bot,
+            reply_chat_id(update),
             t("no_subs", lang),
-            reply_markup=_subs_kb(lang, db, user_id),
+            _subs_kb(lang, db, user_id),
         )
         return
 
     # Reply keyboard must be a separate message (can't mix with inline).
     # Send it first so the last bubble near the input is the type picker / list —
     # otherwise mobile shows a huge empty gap under a trailing "Мои подписки:".
-    await update.effective_message.reply_text(
+    # General only — reply_text from Эфир / All messages would not update the keyboard.
+    await send_reply_keyboard_menu(
+        context.bot,
+        reply_chat_id(update),
         t("menu_subs", lang),
-        reply_markup=_subs_kb(lang, db, user_id),
+        _subs_kb(lang, db, user_id),
     )
     types = _edit_present_types(subs)
     if len(types) > 1:

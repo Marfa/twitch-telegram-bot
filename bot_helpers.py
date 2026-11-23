@@ -316,12 +316,34 @@ def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
     return wizard_menu(lang, back=back)
 
 
+async def send_reply_keyboard_menu(
+    bot,
+    chat_id: int,
+    text: str,
+    reply_markup: ReplyKeyboardMarkup,
+    *,
+    parse_mode: str | None = None,
+) -> None:
+    """Post a reply-keyboard menu into General (no message_thread_id).
+
+    Private topic mode: ``Message.reply_text`` inherits the user's topic
+    (Эфир, …) or «All messages» thread via ``is_topic_message``. Reply
+    keyboards only apply reliably in General — so menu navigation must
+    ``send_message`` without a thread id, not reply into the topic.
+    """
+    kwargs: dict = {"reply_markup": reply_markup}
+    if parse_mode is not None:
+        kwargs["parse_mode"] = parse_mode
+    await bot.send_message(int(chat_id), text, **kwargs)
+
+
 async def _pulse_reply_keyboard(bot, chat_id: int, reply_markup: ReplyKeyboardMarkup) -> None:
-    """Set reply keyboard without leaving a visible chat message."""
+    """Set reply keyboard in General without leaving a visible chat message."""
     from message_fx import message_fx_disabled
 
     # Draft/typing wrap can race with an immediate delete on some clients and
     # leave the reply keyboard collapsed after inline-only DMs (bot_update).
+    # No message_thread_id — same General rule as send_reply_keyboard_menu.
     with message_fx_disabled():
         for attempt in range(3):
             try:

@@ -6,18 +6,22 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from bot_helpers import send_reply_keyboard_menu
 from dm_topics import (
+    GENERAL_TOPIC_ID,
     TOPIC_KEYS,
     _TOPIC_ICON_COLOR,
     _TOPIC_ICON_EMOJI,
     ensure_all_user_topics,
     ensure_user_topic,
     icon_custom_emoji_id_for_topic,
+    install_private_ui_to_general,
+    private_ui_should_go_to_general,
     reset_topic_icon_cache_for_tests,
     sync_user_topic_icons,
     topic_key_for_subscription,
 )
-from i18n import btn, topics_intro_keyboard, topics_support_keyboard, t
+from i18n import btn, other_menu, topics_intro_keyboard, topics_support_keyboard, t
 
 
 def run() -> None:
@@ -79,6 +83,83 @@ def run() -> None:
     assert topic_key_for_subscription(upcoming, "schedule_cancel") == "upcoming"
 
     asyncio.run(_check_topic_icons())
+    asyncio.run(_check_menu_keyboard_goes_to_general())
+    _check_private_ui_general_gate()
+    asyncio.run(_check_reply_text_from_topic_goes_to_general())
+
+
+async def _check_menu_keyboard_goes_to_general() -> None:
+    """Reply-keyboard menus must not inherit Эфир / All-messages thread ids."""
+    bot = AsyncMock()
+    kb = other_menu("ru")
+    await send_reply_keyboard_menu(bot, 7, "Прочее:", kb)
+    assert bot.send_message.await_count == 1
+    args, kwargs = bot.send_message.await_args
+    assert args[0] == 7
+    assert args[1] == "Прочее:"
+    assert kwargs.get("reply_markup") is kb
+    assert "message_thread_id" not in kwargs
+    assert kwargs.get("message_thread_id") is None
+
+
+def _check_private_ui_general_gate() -> None:
+    from telegram import Chat
+    from telegram.constants import ChatType
+
+    topic = SimpleNamespace(
+        chat=Chat(id=7, type=ChatType.PRIVATE),
+        is_topic_message=True,
+        message_thread_id=99,
+    )
+    assert private_ui_should_go_to_general(topic) is True
+    general = SimpleNamespace(
+        chat=Chat(id=7, type=ChatType.PRIVATE),
+        is_topic_message=False,
+        message_thread_id=None,
+    )
+    assert private_ui_should_go_to_general(general) is False
+    general_id = SimpleNamespace(
+        chat=Chat(id=7, type=ChatType.PRIVATE),
+        is_topic_message=False,
+        message_thread_id=GENERAL_TOPIC_ID,
+    )
+    assert private_ui_should_go_to_general(general_id) is False
+    group = SimpleNamespace(
+        chat=Chat(id=-100, type=ChatType.SUPERGROUP),
+        is_topic_message=True,
+        message_thread_id=99,
+    )
+    assert private_ui_should_go_to_general(group) is False
+
+
+async def _check_reply_text_from_topic_goes_to_general() -> None:
+    """Patched Message.reply_text from Эфир must send_message without thread."""
+    from datetime import datetime, timezone
+
+    from telegram import Chat, Message, User
+    from telegram.constants import ChatType
+
+    install_private_ui_to_general()
+    bot = AsyncMock()
+    msg = Message(
+        message_id=10,
+        date=datetime.now(timezone.utc),
+        chat=Chat(id=7, type=ChatType.PRIVATE),
+        from_user=User(id=7, first_name="t", is_bot=False),
+        text="📦 Прочее",
+        is_topic_message=True,
+        message_thread_id=99,
+    )
+    msg.set_bot(bot)
+    kb = other_menu("ru")
+    await msg.reply_text("Прочее:", reply_markup=kb)
+    assert bot.send_message.await_count == 1
+    args, kwargs = bot.send_message.await_args
+    assert args[0] == 7
+    assert args[1] == "Прочее:"
+    assert kwargs.get("reply_markup") is kb
+    assert "message_thread_id" not in kwargs
+    assert "reply_parameters" not in kwargs
 
 
 async def _check_topic_icons() -> None:
