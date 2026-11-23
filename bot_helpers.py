@@ -429,6 +429,7 @@ def group_setup_menu_filter():
             | _btn_filter("auth_tokens")
             | _btn_filter("auth_tokens_revoke_twitch")
             | _btn_filter("auth_tokens_revoke_donationalerts")
+            | _btn_filter("topics_support")
             | _btn_filter("partner")
             | _btn_filter("partner_stats")
             | _btn_filter("partner_link")

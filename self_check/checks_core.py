@@ -2227,10 +2227,6 @@ def check_core() -> None:
         assert btn("message_draft", loc) not in [
             b.text for row in settings_kb for b in row
         ]
-        from i18n import beta_mode_btn
-
-        from config import show_premium_ui
-
         assert any(
             btn("bot_settings", loc) in [b.text for b in row] for row in settings_kb
         )
@@ -2239,25 +2235,13 @@ def check_core() -> None:
             for row in settings_kb
             if btn("partner", loc) in [b.text for b in row]
         )
-        if show_premium_ui():
-            assert [b.text for b in partner_row] == [
-                btn("partner", loc),
-                btn("back", loc),
-            ]
-            defaults_row = next(
-                row
-                for row in settings_kb
-                if btn("default_alert_settings", loc) in [b.text for b in row]
-            )
-            assert [b.text for b in defaults_row] == [
-                btn("sys_notifications", loc),
-                btn("default_alert_settings", loc),
-            ]
-        else:
-            assert [b.text for b in partner_row] == [
-                btn("sys_notifications", loc),
-                btn("partner", loc),
-            ]
+        assert [b.text for b in partner_row] == [
+            btn("sys_notifications", loc),
+            btn("partner", loc),
+        ]
+        assert btn("default_alert_settings", loc) not in [
+            b.text for row in settings_kb for b in row
+        ]
         assert any(
             btn("back", loc) in [b.text for b in row] for row in settings_kb
         )
@@ -2277,6 +2261,15 @@ def check_core() -> None:
         )
         assert {b.text for b in auth_row} == {
             btn("auth_tokens", loc),
+            btn("topics_support", loc),
+        }
+        defaults_row = next(
+            row
+            for row in bot_settings_kb
+            if btn("default_alert_settings", loc) in [b.text for b in row]
+        )
+        assert {b.text for b in defaults_row} == {
+            btn("default_alert_settings", loc),
             btn("back_settings", loc),
         }
         suggest_kb = watch_suggest_keyboard(loc, offer_create_alerts=True)

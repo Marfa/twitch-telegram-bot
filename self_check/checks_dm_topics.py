@@ -41,6 +41,7 @@ def run() -> None:
         }
     for loc in ("ru", "en", "uk", "it"):
         assert btn("bot_settings", loc)
+        assert btn("topics_support", loc)
         assert t("topics_support_toggle", loc)
         assert t("topics_intro", loc)
         for key in TOPIC_KEYS:

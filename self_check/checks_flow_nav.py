@@ -4221,8 +4221,12 @@ async def _scenario_schedule_vacation(db) -> None:
 
 
 async def _scenario_bot_settings_topics(db) -> None:
-    """§8 — Settings → Bot settings (topics checkbox + ignore/lang/tokens)."""
-    from handlers.settings import open_bot_settings_menu, open_settings_menu
+    """§8 — Settings → Bot settings → Topic support (checkbox on demand)."""
+    from handlers.settings import (
+        open_bot_settings_menu,
+        open_settings_menu,
+        open_topics_support_menu,
+    )
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -4241,7 +4245,7 @@ async def _scenario_bot_settings_topics(db) -> None:
         for row in m.inline_keyboard
         for b in row
     ]
-    assert "topics:toggle" in inline_cbs
+    assert "topics:toggle" not in inline_cbs
     reply_texts = [
         b.text
         for m in cap.markups
@@ -4252,7 +4256,21 @@ async def _scenario_bot_settings_topics(db) -> None:
     assert btn("ignored_words", "ru") in reply_texts
     assert btn("language", "ru") in reply_texts
     assert btn("auth_tokens", "ru") in reply_texts
+    assert btn("topics_support", "ru") in reply_texts
+    assert btn("default_alert_settings", "ru") in reply_texts
     assert btn("back_settings", "ru") in reply_texts
+    cap.assert_turn("bot_settings_menu")
+
+    update = _msg_update(_FREE_UID, btn("topics_support", "ru"), cap)
+    await open_topics_support_menu(update, ctx)
+    inline_cbs = [
+        b.callback_data or ""
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "topics:toggle" in inline_cbs
     cap.assert_turn("bot_settings_topics")
 
 
@@ -4399,8 +4417,8 @@ async def _scenario_settings_extended(db) -> None:
 
 
 async def _scenario_settings_stream_defaults(db) -> None:
-    """§8 — Settings → default stream alert editor (Save / Cancel)."""
-    from handlers.settings import open_settings_menu
+    """§8 — Bot settings → default stream alert editor (Save / Cancel)."""
+    from handlers.settings import open_bot_settings_menu, open_settings_menu
     from handlers.stream_defaults import on_defedit_callback, open_stream_defaults_editor
 
     application, bot = _app(db)
@@ -4410,6 +4428,18 @@ async def _scenario_settings_stream_defaults(db) -> None:
     ctx = _ctx(application)
     await open_settings_menu(update, ctx)
     cap.assert_turn("settings_open_for_defaults")
+
+    update = _msg_update(_FREE_UID, btn("bot_settings", "ru"), cap)
+    await open_bot_settings_menu(update, ctx)
+    reply_texts = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "keyboard", None)
+        for row in m.keyboard
+        for b in row
+    ]
+    assert btn("default_alert_settings", "ru") in reply_texts
+    cap.assert_turn("settings_bot_settings_for_defaults")
 
     update = _msg_update(_FREE_UID, btn("default_alert_settings", "ru"), cap)
     await open_stream_defaults_editor(update, ctx)
@@ -4428,6 +4458,15 @@ async def _scenario_settings_stream_defaults(db) -> None:
     update, query = _cb_update(_FREE_UID, "defedit:0:cancel", cap)
     query.answer = AsyncMock()
     await on_defedit_callback(update, ctx)
+    back_texts = [
+        b.text
+        for m in cap.markups
+        if getattr(m, "keyboard", None)
+        for row in m.keyboard
+        for b in row
+    ]
+    assert btn("back_settings", "ru") in back_texts
+    assert btn("default_alert_settings", "ru") in back_texts
     cap.assert_turn("settings_stream_defaults_cancel")
     assert "editing_defaults" not in ctx.user_data
 

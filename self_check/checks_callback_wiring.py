@@ -96,6 +96,7 @@ _MENU_BTN_KEYS = (
     "auth_tokens",
     "auth_tokens_revoke_twitch",
     "auth_tokens_revoke_donationalerts",
+    "topics_support",
     "partner_stats",
     "partner_link",
     "partner_withdraw",

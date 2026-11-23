@@ -319,6 +319,7 @@ def all_menu_buttons() -> set[str]:
         "auth_tokens",
         "auth_tokens_revoke_twitch",
         "auth_tokens_revoke_donationalerts",
+        "topics_support",
         "partner",
         "partner_stats",
         "partner_link",
@@ -435,19 +436,12 @@ def settings_menu(
             ]
         )
     else:
-        rows.append(
-            [
-                KeyboardButton(btn("sync_subs", lang)),
-                KeyboardButton(btn("default_alert_settings", lang)),
-            ]
-        )
+        rows.append([KeyboardButton(btn("sync_subs", lang))])
     mid: list[KeyboardButton] = [
         KeyboardButton(btn("bot_settings", lang)),
         KeyboardButton(beta_mode_btn(lang, beta_enrolled, beta_total)),
         KeyboardButton(btn("sys_notifications", lang)),
     ]
-    if show_premium_ui():
-        mid.append(KeyboardButton(btn("default_alert_settings", lang)))
     if show_partner_ui():
         mid.append(KeyboardButton(btn("partner", lang)))
     mid.append(KeyboardButton(btn("back", lang)))
@@ -456,13 +450,15 @@ def settings_menu(
 
 
 def bot_settings_menu(lang: str) -> ReplyKeyboardMarkup:
-    """Language, ignore words, OAuth tokens — plus topics toggle on a separate inline msg."""
+    """Language, ignore words, OAuth tokens, topics, default stream-alert settings."""
     return _reply_keyboard(
         _pair_reply_rows(
             [
                 KeyboardButton(btn("ignored_words", lang)),
                 KeyboardButton(btn("language", lang)),
                 KeyboardButton(btn("auth_tokens", lang)),
+                KeyboardButton(btn("topics_support", lang)),
+                KeyboardButton(btn("default_alert_settings", lang)),
                 KeyboardButton(btn("back_settings", lang)),
             ]
         )

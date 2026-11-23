@@ -291,18 +291,12 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _send_bot_settings_screen(
     bot, chat_id: int, db: Database, user_id: int, lang: str
 ) -> None:
-    from i18n import bot_settings_menu, topics_support_keyboard
+    from i18n import bot_settings_menu
 
-    enabled = db.is_topics_enabled(user_id)
     await bot.send_message(
         chat_id,
         t("menu_bot_settings", lang),
         reply_markup=bot_settings_menu(lang),
-    )
-    await bot.send_message(
-        chat_id,
-        t("topics_support_on" if enabled else "topics_support_off", lang),
-        reply_markup=topics_support_keyboard(lang, enabled=enabled),
     )
 
 
@@ -314,6 +308,28 @@ async def open_bot_settings_menu(
     db: Database = context.application.bot_data["db"]
     chat_id = reply_chat_id(update)
     await _send_bot_settings_screen(context.bot, chat_id, db, user_id, lang)
+
+
+async def open_topics_support_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    from bot_helpers import _pulse_reply_keyboard
+    from i18n import bot_settings_menu, topics_support_keyboard
+
+    user_id = update.effective_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    chat_id = reply_chat_id(update)
+    enabled = db.is_topics_enabled(user_id)
+    await context.bot.send_message(
+        chat_id,
+        t("topics_support_on" if enabled else "topics_support_off", lang),
+        reply_markup=topics_support_keyboard(lang, enabled=enabled),
+    )
+    # Keep bot-settings reply keyboard after an inline-only screen.
+    await _pulse_reply_keyboard(
+        context.bot, chat_id, bot_settings_menu(lang), db=db, user_id=user_id
+    )
 
 
 async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

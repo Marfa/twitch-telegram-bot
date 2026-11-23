@@ -42,10 +42,10 @@ def run() -> None:
         defaults = btn("default_alert_settings", loc)
         bot_set = btn("bot_settings", loc)
         assert sync in texts and bot_set in texts
-        assert btn("auth_tokens", loc) not in texts  # moved under Bot settings
+        assert defaults not in texts  # under Bot settings
+        assert btn("auth_tokens", loc) not in texts
         assert btn("language", loc) not in texts
         assert btn("ignored_words", loc) not in texts
-        from config import show_premium_ui
         from i18n import bot_settings_menu
 
         bot_kb = bot_settings_menu(loc).keyboard
@@ -53,10 +53,8 @@ def run() -> None:
         assert btn("auth_tokens", loc) in bot_texts
         assert btn("language", loc) in bot_texts
         assert btn("ignored_words", loc) in bot_texts
-        if show_premium_ui():
-            assert defaults in texts
-        else:
-            assert texts.index(defaults) == texts.index(sync) + 1
+        assert btn("topics_support", loc) in bot_texts
+        assert defaults in bot_texts
 
     kb = edit_options_keyboard(
         7,

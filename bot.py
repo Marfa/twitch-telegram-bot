@@ -379,6 +379,7 @@ from handlers.settings import (
     on_auth_tokens_revoke_donationalerts,
     open_bot_settings_menu,
     open_settings_menu,
+    open_topics_support_menu,
     on_topics_toggle,
     open_stream_chat,
     open_sys_notifications_menu,
@@ -2970,6 +2971,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        MessageHandler(_btn_filter("topics_support"), open_topics_support_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("other"), open_other_menu),
         group=0,
     )
@@ -4371,6 +4376,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 | _btn_filter("auth_tokens")
                 | _btn_filter("auth_tokens_revoke_twitch")
                 | _btn_filter("auth_tokens_revoke_donationalerts")
+                | _btn_filter("topics_support")
                 | _btn_filter("partner")
                 | _btn_filter("partner_stats")
                 | _btn_filter("partner_link")
