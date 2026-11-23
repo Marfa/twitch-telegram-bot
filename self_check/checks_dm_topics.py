@@ -119,6 +119,7 @@ async def _check_menu_keyboard_goes_to_general() -> None:
         assert isinstance(skw.get("reply_markup"), ReplyKeyboardRemove)
         del_bh.assert_awaited()
 
+    reset_topic_icon_cache_for_tests()
     db = MagicMock()
     db.is_topics_enabled = MagicMock(return_value=True)
     db.get_user_topic_thread = MagicMock(
@@ -138,6 +139,18 @@ async def _check_menu_keyboard_goes_to_general() -> None:
     assert isinstance(strip_call.kwargs.get("reply_markup"), ReplyKeyboardRemove)
     assert "message_thread_id" not in menu_call.kwargs
     assert menu_call.kwargs.get("reply_markup") is kb
+
+    # Second menu tap must not post into topics again.
+    bot.send_message.reset_mock()
+    with patch(
+        "bot_helpers.delete_chat_message", new=AsyncMock()
+    ), patch("asyncio.sleep", new=AsyncMock()):
+        await send_reply_keyboard_menu(
+            bot, 7, "Настройки:", kb, db=db, user_id=7
+        )
+    assert bot.send_message.await_count == 1
+    assert "message_thread_id" not in bot.send_message.await_args.kwargs
+    assert bot.send_message.await_args.kwargs.get("reply_markup") is kb
 
 
 def _check_private_ui_general_gate() -> None:

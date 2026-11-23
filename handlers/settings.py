@@ -291,18 +291,9 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _send_bot_settings_screen(
     bot, chat_id: int, db: Database, user_id: int, lang: str
 ) -> None:
-    from dm_topics import sync_user_topic_icons
     from i18n import bot_settings_menu, topics_support_keyboard
 
     enabled = db.is_topics_enabled(user_id)
-    if enabled:
-        # Best-effort: refresh emoji icons on already-created topics (once per open).
-        try:
-            await sync_user_topic_icons(bot, db, user_id)
-        except Exception:
-            logger.warning(
-                "sync_user_topic_icons failed user=%s", user_id, exc_info=True
-            )
     await bot.send_message(
         chat_id,
         t("menu_bot_settings", lang),
@@ -372,11 +363,13 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ),
     )
     chat_id = query.message.chat_id if query.message else user_id
-    # Strip ReplyKeyboard from Эфир / other alert topics; set menu in General.
+    # One-shot strip from Эфир / other alert topics; menu stays in General.
     from dm_topics import strip_alert_topic_reply_keyboards
 
     if enabled:
-        await strip_alert_topic_reply_keyboards(context.bot, db, user_id)
+        await strip_alert_topic_reply_keyboards(
+            context.bot, db, user_id, force=True
+        )
     if from_intro:
         await _pulse_reply_keyboard(
             context.bot, chat_id, _menu(lang, user_id), db=db, user_id=user_id
