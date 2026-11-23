@@ -677,8 +677,14 @@ async def _smoke_settings_oauth(db) -> None:
     ):
         update = _msg_update(_FREE_UID)
         ctx = _ctx(application)
+        bot.send_message.reset_mock()
         await opener(update, ctx)
-        update.effective_message.reply_text.assert_awaited()
+        # Settings uses send_reply_keyboard_menu (General); others may reply_text.
+        assert (
+            update.effective_message.reply_text.await_count
+            + bot.send_message.await_count
+            >= 1
+        ), opener.__name__
 
 
 async def _smoke_watch(db) -> None:
@@ -1018,13 +1024,23 @@ async def _smoke_subscriptions(db) -> None:
     application, bot = _app(db)
     update = _msg_update(_FREE_UID)
     ctx = _ctx(application)
+    bot.send_message.reset_mock()
     await open_subscriptions_menu(update, ctx)
-    update.effective_message.reply_text.assert_awaited()
+    assert (
+        update.effective_message.reply_text.await_count
+        + bot.send_message.await_count
+        >= 1
+    )
 
     update = _msg_update(_FREE_UID)
     ctx = _ctx(application)
+    bot.send_message.reset_mock()
     await list_subscriptions(update, ctx)
-    update.effective_message.reply_text.assert_awaited()
+    assert (
+        update.effective_message.reply_text.await_count
+        + bot.send_message.await_count
+        >= 1
+    )
 
     # Multi-type: reply keyboard header first, type picker last (avoids mobile gap).
     uid_mt = _FREE_UID + 31
@@ -1053,12 +1069,18 @@ async def _smoke_subscriptions(db) -> None:
     )
     update = _msg_update(uid_mt)
     ctx = _ctx(application)
+    bot.send_message.reset_mock()
     await list_subscriptions(update, ctx)
-    texts = [c.args[0] for c in update.effective_message.reply_text.await_args_list]
     from i18n import t as _t
 
-    assert texts[0] == _t("menu_subs", "ru")
-    assert texts[-1] == _t("list_type_pick", "ru")
+    # menu_subs reply keyboard → General via send_message; type picker still reply_text.
+    menu_texts = [
+        c.args[1] if len(c.args) > 1 else c.kwargs.get("text")
+        for c in bot.send_message.await_args_list
+    ]
+    assert _t("menu_subs", "ru") in menu_texts
+    reply_texts = [c.args[0] for c in update.effective_message.reply_text.await_args_list]
+    assert reply_texts and reply_texts[-1] == _t("list_type_pick", "ru")
 
     reply = MagicMock()
     reply.reply_text = AsyncMock()
