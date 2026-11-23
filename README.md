@@ -306,7 +306,7 @@ python main.py
 
 Репозиторий на сервере: `/opt/twitch-telegram-bot` (рядом лежит `.env`).
 
-При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: build образа при ещё работающем боте, recreate, проверка `/health`. Если health не поднялся — откат на предыдущий image id (workflow всё равно red, но старый бот снова отвечает). Также cron ночного pg-backup и (при `AIVEN_DATABASE_URL`) DR-sync live Postgres → Aiven в 03:15 UTC (без таблиц `igdb_*` — они пересобираются на VPS). Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+При пуше в `main` GitHub Actions по SSH делает `git fetch` + `reset --hard origin/main`, затем `scripts/vps-deploy.sh`: build образа при ещё работающем боте, recreate, проверка `/health`. Если health не поднялся — откат на образ, помеченный `twitch-telegram-bot-bot:previous` перед сборкой (workflow всё равно red, но старый бот снова отвечает). Если этого образа уже нет, деплой останавливается до сборки и работающий бот не меняется. Также cron ночного pg-backup и (при `AIVEN_DATABASE_URL`) DR-sync live Postgres → Aiven в 03:15 UTC (без таблиц `igdb_*` — они пересобираются на VPS). Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
 

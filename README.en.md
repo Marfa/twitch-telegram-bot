@@ -306,7 +306,7 @@ Category: {game}
 
 Server checkout: `/opt/twitch-telegram-bot` (with `.env` beside it).
 
-On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: build while the old bot still runs, recreate, `/health` check. If health fails, roll back to the previous image id (the workflow stays red, but the old bot answers again). Also nightly pg-backup cron, and (if `AIVEN_DATABASE_URL` is set) DR sync of live Postgres into Aiven at 03:15 UTC (`igdb_*` excluded — rebuilt on VPS). Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard origin/main`, then `scripts/vps-deploy.sh`: build while the old bot still runs, recreate, `/health` check. If health fails, roll back to the image tagged `twitch-telegram-bot-bot:previous` before the build (the workflow stays red, but the old bot answers again). If that image is already gone, the deploy stops before the build and leaves the running bot untouched. Also nightly pg-backup cron, and (if `AIVEN_DATABASE_URL` is set) DR sync of live Postgres into Aiven at 03:15 UTC (`igdb_*` excluded — rebuilt on VPS). Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
 
 Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
