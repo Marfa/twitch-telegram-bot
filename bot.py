@@ -4476,13 +4476,15 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         job_kwargs=_stream_job_kwargs(JOB_CHECK_STREAMS),
     )
     # Preview media refreshes every ~30 min; poll every few minutes, not every live tick.
-    # One MP4 capture can take ~30–45s — grace must cover that so deploys don't misfire.
+    # Video MP4/GIF capture often exceeds 60s (and can outlive _preview_poll); do not
+    # wrap with run_job_with_budget — cutting mid-capture leaves half-updated alerts.
+    # Grace must cover a long capture so deploys don't misfire.
     _preview_poll = max(
         int(CHECK_INTERVAL),
         min(300, max(60, int(STREAM_PREVIEW_REFRESH_SECONDS) // 6)),
     )
     app.job_queue.run_repeating(
-        run_job_with_budget(JOB_STREAM_PREVIEWS, _preview_poll, check_stream_previews),
+        check_stream_previews,
         interval=_preview_poll,
         first=25,
         name=JOB_STREAM_PREVIEWS,
