@@ -2326,6 +2326,7 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             _menu(lang, user_id),
             db=db,
             user_id=user_id,
+            from_message=update.effective_message,
         )
         return
     lang = _user_lang(context, user_id)
@@ -2336,6 +2337,7 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         admin_menu(lang),
         db=db,
         user_id=user_id,
+        from_message=update.effective_message,
     )
 
 
@@ -2426,6 +2428,7 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         _menu(lang, user_id),
         db=db,
         user_id=user_id,
+        from_message=update.effective_message,
     )
 
 

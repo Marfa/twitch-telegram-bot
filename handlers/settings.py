@@ -285,6 +285,7 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         _settings_kb(lang, db, user_id),
         db=db,
         user_id=user_id,
+        from_message=update.effective_message,
     )
 
 
@@ -386,13 +387,24 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await strip_alert_topic_reply_keyboards(
             context.bot, db, user_id, force=True
         )
+    src = query.message
     if from_intro:
         await _pulse_reply_keyboard(
-            context.bot, chat_id, _menu(lang, user_id), db=db, user_id=user_id
+            context.bot,
+            chat_id,
+            _menu(lang, user_id),
+            db=db,
+            user_id=user_id,
+            from_message=src,
         )
         return
     await _pulse_reply_keyboard(
-        context.bot, chat_id, bot_settings_menu(lang), db=db, user_id=user_id
+        context.bot,
+        chat_id,
+        bot_settings_menu(lang),
+        db=db,
+        user_id=user_id,
+        from_message=src,
     )
 
 
@@ -455,6 +467,7 @@ async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         other_menu(lang),
         db=db,
         user_id=user_id,
+        from_message=update.effective_message,
     )
 
 async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -785,6 +798,7 @@ async def receive_ignore_igdb_text(
             _settings_kb(lang, db, user_id),
             db=db,
             user_id=user_id,
+            from_message=update.effective_message,
         )
         context.user_data.clear()
         return ConversationHandler.END
