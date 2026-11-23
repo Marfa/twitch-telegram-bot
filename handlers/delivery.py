@@ -23,8 +23,10 @@ from twitch import (
     TwitchClient,
     find_placeholder_typos,
     fix_placeholder_typos,
+    game_cover_fallback_photo_bytes,
     is_ai_game_cover_image,
     is_dynamic_alert_image,
+    is_game_cover_image,
     is_stream_file_video_preview_image,
     is_stream_capture_preview_image,
     resolve_sub_image_photo,
@@ -1533,6 +1535,19 @@ async def _send_discord_notification(
 
             forget_and_unlink(captured.path)
 
+    if (
+        is_game_cover_image(sub.image_file_id)
+        and not photo_bytes
+        and not animation_bytes
+        and not video_bytes
+        and not image_photo
+    ):
+        photo_bytes = await asyncio.to_thread(game_cover_fallback_photo_bytes)
+        if photo_bytes:
+            logger.warning(
+                "game_cover unresolved for Discord sub %s; using fallback placeholder",
+                sub.id,
+            )
     if photo_bytes:
         file_bytes = photo_bytes
         filename = "cover.jpg"
@@ -2139,6 +2154,26 @@ async def _send_notification(
                 else:
                     animation_bytes = captured_preview.data
                 need_preview_upgrade = False
+        if (
+            is_game_cover_image(sub.image_file_id)
+            and not image_photo
+            and not photo_bytes
+            and not animation_bytes
+            and not video_bytes
+        ):
+            photo_bytes = await asyncio.to_thread(game_cover_fallback_photo_bytes)
+            if photo_bytes:
+                logger.warning(
+                    "game_cover unresolved for sub %s (alert_type=%s); using fallback placeholder",
+                    sub.id,
+                    alert_type,
+                )
+            else:
+                logger.warning(
+                    "game_cover unresolved for sub %s (alert_type=%s); fallback missing, text only",
+                    sub.id,
+                    alert_type,
+                )
         if (
             is_dynamic_alert_image(sub.image_file_id)
             and not image_photo

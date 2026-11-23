@@ -78,6 +78,10 @@ if ! grep -q 'BEGIN OPENSSH PRIVATE KEY\|BEGIN .*PRIVATE KEY' "$TMP"; then
   exit 1
 fi
 
+# Git OpenSSH rejects CRLF private keys; normalize to LF for cross-tool use.
+tr -d '\r' < "$TMP" > "${TMP}.lf"
+mv "${TMP}.lf" "$TMP"
+
 mv "$TMP" "$OUT_FILE"
 trap - EXIT
 chmod 600 "$OUT_FILE"

@@ -14,7 +14,7 @@
       "url": "https://mcp.aiven.live/mcp?read_only=true"
     },
     "vps-db": {
-      "command": "python3",
+      "command": "python",
       "args": ["scripts/mcp_vps_db.py"],
       "env": {
         "VPS_SSH_KEY": ".ssh/artalk_vps"

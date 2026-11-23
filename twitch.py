@@ -8,6 +8,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
@@ -91,6 +92,11 @@ BOX_ART_WIDTH = 1920
 BOX_ART_HEIGHT = 2560
 STREAM_THUMB_WIDTH = 1280
 STREAM_THUMB_HEIGHT = 720
+# Twitch-style placeholder when Helix never fills category for game_cover alerts.
+GAME_COVER_FALLBACK_PATH = (
+    Path(__file__).resolve().parent / "assets" / "game_cover_fallback.webp"
+)
+_GAME_COVER_FALLBACK_JPEG: bytes | None = None
 
 
 def is_game_cover_image(image_file_id: str | None) -> bool:
@@ -130,6 +136,31 @@ def is_dynamic_alert_image(image_file_id: str | None) -> bool:
         or is_stream_preview_image(image_file_id)
         or is_stream_capture_preview_image(image_file_id)
     )
+
+
+def game_cover_fallback_photo_bytes() -> bytes | None:
+    """JPEG bytes for Twitch's empty-category box-art placeholder, or None if missing."""
+    global _GAME_COVER_FALLBACK_JPEG
+    if _GAME_COVER_FALLBACK_JPEG is not None:
+        return _GAME_COVER_FALLBACK_JPEG
+    path = GAME_COVER_FALLBACK_PATH
+    if not path.is_file():
+        logger.warning("game cover fallback missing: %s", path)
+        return None
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(path) as img:
+            rgb = img.convert("RGB")
+            buf = BytesIO()
+            rgb.save(buf, format="JPEG", quality=90)
+            _GAME_COVER_FALLBACK_JPEG = buf.getvalue()
+    except Exception:
+        logger.exception("Failed to load game cover fallback from %s", path)
+        return None
+    return _GAME_COVER_FALLBACK_JPEG
 
 
 def format_stream_thumbnail_url(

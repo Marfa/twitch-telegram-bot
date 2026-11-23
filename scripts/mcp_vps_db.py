@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,81 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VPS_PSQL = REPO_ROOT / "scripts" / "vps-psql.sh"
 DEFAULT_VPS_SSH_KEY = REPO_ROOT / ".ssh" / "artalk_vps"
+_GIT_BASH_CANDIDATES = (
+    Path(r"C:\Program Files\Git\bin\bash.exe"),
+    Path(r"C:\Program Files\Git\usr\bin\bash.exe"),
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Git" / "bin" / "bash.exe",
+)
+
+
+def _windows_bash() -> str:
+    """Prefer Git Bash on Windows; avoid the WSL `bash.exe` stub in System32."""
+    for path in _GIT_BASH_CANDIDATES:
+        if path.is_file():
+            return str(path)
+    which = shutil.which("bash")
+    if which:
+        # System32\bash.exe is the WSL launcher and fails without a distro.
+        resolved = str(Path(which).resolve())
+        if "system32" in resolved.lower() and which.lower().endswith("bash.exe"):
+            raise FileNotFoundError(
+                "Git Bash not found (System32 bash is WSL-only). "
+                "Install Git for Windows or set PATH to Git\\bin\\bash.exe"
+            )
+        return which
+    raise FileNotFoundError(
+        "bash not found; install Git for Windows to run scripts/vps-psql.sh"
+    )
+
+
+def _posix_path_for_git_bash(path: Path) -> str:
+    """Convert a Windows path to a Git Bash /c/... form."""
+    resolved = path.resolve()
+    s = str(resolved)
+    if os.name != "nt":
+        return s
+    # C:\foo\bar → /c/foo/bar
+    if len(s) >= 2 and s[1] == ":":
+        drive = s[0].lower()
+        rest = s[2:].replace("\\", "/").lstrip("/")
+        return f"/{drive}/{rest}"
+    return s.replace("\\", "/")
+
+
+def _resolve_vps_ssh_key_file(env: dict[str, str]) -> Path | None:
+    """Absolute path to the private key file, or None."""
+    raw = (env.get("VPS_SSH_KEY") or "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        # Ignore POSIX-shaped values from a previous MCP hop; resolve against repo.
+        if raw.startswith("/c/") or raw.startswith("/C/"):
+            # /c/Users/... → C:/Users/...
+            path = Path(raw[1] + ":" + raw[2:].replace("/", "\\"))
+        elif not path.is_absolute():
+            path = REPO_ROOT / path
+        return path if path.is_file() else None
+    if DEFAULT_VPS_SSH_KEY.is_file():
+        return DEFAULT_VPS_SSH_KEY
+    return None
+
+
+def _lf_key_copy(src: Path) -> Path:
+    """Temp LF-only copy of an OpenSSH private key (Git ssh rejects CRLF)."""
+    import tempfile
+
+    data = src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    fd, name = tempfile.mkstemp(prefix="artalk_vps_", suffix=".key")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+    except Exception:
+        os.close(fd)
+        raise
+    try:
+        os.chmod(name, 0o600)
+    except OSError:
+        pass
+    return Path(name)
 
 
 def _ensure_vps_ssh_env(env: dict[str, str] | None = None) -> dict[str, str]:
@@ -24,16 +100,16 @@ def _ensure_vps_ssh_env(env: dict[str, str] | None = None) -> dict[str, str]:
 
     Relative paths resolve against the repo root (not the process cwd).
     If unset, default to <repo>/.ssh/artalk_vps when that file exists.
+    On Windows the value is a LF-normalized temp copy in POSIX form so Git
+    Bash + Git OpenSSH can load keys that were saved with CRLF.
     """
     out = dict(env if env is not None else os.environ)
-    raw = (out.get("VPS_SSH_KEY") or "").strip()
-    if raw:
-        path = Path(raw).expanduser()
-        if not path.is_absolute():
-            path = REPO_ROOT / path
-        out["VPS_SSH_KEY"] = str(path)
-    elif DEFAULT_VPS_SSH_KEY.is_file():
-        out["VPS_SSH_KEY"] = str(DEFAULT_VPS_SSH_KEY)
+    path = _resolve_vps_ssh_key_file(out)
+    if path is None:
+        return out
+    if os.name == "nt":
+        path = _lf_key_copy(path)
+    out["VPS_SSH_KEY"] = _posix_path_for_git_bash(path)
     return out
 SERVER_NAME = "vps-db"
 SERVER_VERSION = "1.0.0"
@@ -128,14 +204,17 @@ def build_cmd(
         )
     effective = "vps" if mutating and source == "auto" else source
 
-    cmd = [str(VPS_PSQL)]
+    script = [str(VPS_PSQL)]
     if effective in {"vps", "aiven"}:
-        cmd.append(f"--{effective}")
+        script.append(f"--{effective}")
     if fmt == "tuples":
-        cmd.extend(["-At", "-c", sql])
+        script.extend(["-At", "-c", sql])
     else:
-        cmd.extend(["-c", sql])
-    return cmd
+        script.extend(["-c", sql])
+    # On Windows the shebang is ignored; run via Git Bash (not WSL stub).
+    if os.name == "nt":
+        return [_windows_bash(), *script]
+    return script
 
 
 def run_sql(
@@ -153,16 +232,30 @@ def run_sql(
     if looks_mutating(sql) and source == "auto":
         note = "note: mutating SQL → forced --vps (no Aiven fallback)\n"
     cmd = build_cmd(sql, source=source, fmt=fmt)
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout_sec,
-        cwd=str(REPO_ROOT),
-        env=_ensure_vps_ssh_env(),
-    )
-    out = proc.stdout or ""
-    err = proc.stderr or ""
+    env = _ensure_vps_ssh_env()
+    lf_key = None
+    raw_key = (env.get("VPS_SSH_KEY") or "").strip()
+    if os.name == "nt" and len(raw_key) >= 3 and raw_key[0] == "/" and raw_key[2] == "/":
+        # Track temp LF key for cleanup (/c/... → Windows path).
+        lf_key = Path(raw_key[1] + ":" + raw_key[2:].replace("/", "\\"))
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            cwd=str(REPO_ROOT),
+            env=env,
+        )
+        out = proc.stdout or ""
+        err = proc.stderr or ""
+        code = proc.returncode
+    finally:
+        if lf_key is not None:
+            try:
+                lf_key.unlink(missing_ok=True)
+            except OSError:
+                pass
     # Never echo connection URLs; script already avoids logging Aiven URL.
     text = note
     if err.strip():
@@ -172,7 +265,7 @@ def run_sql(
     text += out
     if len(text) > MAX_OUTPUT_CHARS:
         text = text[:MAX_OUTPUT_CHARS] + f"\n… truncated ({len(text)} chars)\n"
-    return text, proc.returncode, note
+    return text, code, note
 
 
 TOOLS = [
@@ -292,8 +385,12 @@ def _self_check() -> None:
     assert looks_mutating("WITH c AS (SELECT 1) INSERT INTO t SELECT * FROM c") is True
     assert looks_mutating("SELECT 'UPDATE users' AS s") is False
     cmd = build_cmd("SELECT 1", source="auto", fmt="tuples")
-    assert cmd[0].endswith("vps-psql.sh")
+    assert any(str(p).endswith("vps-psql.sh") for p in cmd)
     assert "-At" in cmd and "-c" in cmd
+    if os.name == "nt":
+        assert cmd[0].lower().endswith("bash.exe") or cmd[0].endswith("bash")
+    else:
+        assert cmd[0].endswith("vps-psql.sh")
     w = build_cmd("DELETE FROM t WHERE false", source="auto", fmt="aligned")
     assert "--vps" in w
     try:

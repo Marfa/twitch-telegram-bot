@@ -31,6 +31,7 @@ from twitch import (
     TwitchClient,
     accumulate_viewer_stats,
     filter_streams_for_watch,
+    is_game_cover_image,
     render_template,
     should_ignore_igdb_categories,
     should_ignore_stream,
@@ -46,6 +47,8 @@ CATEGORY_WATCH_COOLDOWN_MINUTES = 60
 CATEGORY_WATCH_COOLDOWN_MINUTES_MAX = 24 * 60
 # Helix can omit category right after go-live; wait once, then send with whatever we get.
 LIVE_GAME_RECHECK_SECONDS = 20
+# game_cover: total waits (incl. first) before sending with fallback placeholder.
+LIVE_GAME_RECHECK_COVER_ATTEMPTS = 2
 # Multistream: if secondary platforms are offline, wait then send anyway.
 MULTISTREAM_WAIT_SECONDS = 15 * 60
 
@@ -488,6 +491,31 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     username = stream.get("user_login", stream.get("user_name", ""))
     game = stream.get("game_name", "")
     title = stream.get("title", "")
+    # game_cover: Helix often still has empty category after the first wait — retry once.
+    if (
+        bool(job_data.get("live_game_recheck"))
+        and needs_live_game_recheck(game, 0)
+        and is_game_cover_image(sub.image_file_id)
+    ):
+        attempt = int(job_data.get("live_game_attempt") or 1)
+        if attempt < LIVE_GAME_RECHECK_COVER_ATTEMPTS:
+            schedule_alert_run_once(
+                context.job_queue,
+                _send_delayed_notification,
+                when=LIVE_GAME_RECHECK_SECONDS,
+                data={
+                    "sub_id": sub.id,
+                    "silent_offline": True,
+                    "stream_id": str(job_data.get("stream_id") or ""),
+                    "live_game_recheck": True,
+                    "live_game_attempt": attempt + 1,
+                },
+                name=f"live_game_{sub.id}",
+                replace_existing=True,
+                db=db,
+                kind=ALERT_JOB_LIVE_GAME,
+            )
+            return
     if await _should_skip_ignored_alert(
         sub, db, twitch, game, title, stream.get("game_id")
     ):
@@ -1041,6 +1069,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                                 "sub_id": sub.id,
                                 "silent_offline": True,
                                 "stream_id": stream_id,
+                                "live_game_recheck": True,
+                                "live_game_attempt": 1,
                             },
                             name=f"live_game_{sub.id}",
                             replace_existing=True,

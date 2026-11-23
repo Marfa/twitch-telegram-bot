@@ -758,13 +758,16 @@ def check_core() -> None:
         resolve_sub_image_photo,
         strip_name_mentions_and_commands,
         template_has_game_placeholder,
+        game_cover_fallback_photo_bytes,
         AI_GAME_COVER_IMAGE_ID,
+        GAME_COVER_FALLBACK_PATH,
         GAME_COVER_IMAGE_ID,
         STREAM_PREVIEW_IMAGE_ID,
         STREAM_VIDEO_PREVIEW_IMAGE_ID,
         STREAM_FILE_VIDEO_PREVIEW_IMAGE_ID,
     )
 
+    assert GAME_COVER_FALLBACK_PATH.is_file()
     assert is_game_cover_image(GAME_COVER_IMAGE_ID)
     assert not is_game_cover_image("AgAC_test")
     assert is_ai_game_cover_image(AI_GAME_COVER_IMAGE_ID)
@@ -2671,6 +2674,11 @@ def check_core() -> None:
     assert needs_live_game_recheck("   ", 0) is True
     assert needs_live_game_recheck("Just Chatting", 0) is False
     assert needs_live_game_recheck("", 5) is False
+    from handlers.notifications import LIVE_GAME_RECHECK_COVER_ATTEMPTS
+
+    assert LIVE_GAME_RECHECK_COVER_ATTEMPTS >= 2
+    fallback = game_cover_fallback_photo_bytes()
+    assert fallback and fallback[:2] == b"\xff\xd8"
     assert SCHEDULE_CHECK_INTERVAL >= 60
 
     from db.models import (
