@@ -180,7 +180,7 @@ rg -n "edit_set:|has_feature.*delete_prev|delete_previous" handlers/subscription
 | E1 | **RISK** | Share clone resets pin/delete/dest but still copies delay/ignore/custom_buttons/etc. until edit resets advanced |
 | E2–E3 | PASS | Spot-checked; follow active-subscription-gate on future changes |
 | F1 | PASS | Health returns short status strings |
-| F2 | **RISK** | `0.0.0.0` + host `"8080:8080"` — harden if public without nginx |
+| F2 | **PASS** (hardened 2026-11-23) | Host bind `127.0.0.1:8080:8080` + nginx `limit_req` on `/app/` (see `deploy/nginx/`) |
 | F3–F4 | PASS | `security.yml` pip-audit + gitleaks + omerta |
 | G1–G2 | N/A this run | Re-check alerts before next push per pre-push rule |
 | H1 | PASS | EventSub HMAC + `compare_digest` |

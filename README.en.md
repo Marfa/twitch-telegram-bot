@@ -310,6 +310,8 @@ On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard orig
 
 Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
+Public HTTPS is terminated by **nginx** on the VPS (`bot.themarfa.name` → `127.0.0.1:8080`). `compose.vps.yml` publishes the bot port on localhost only (`127.0.0.1:8080:8080`); `:8080` is not reachable from the internet. nginx applies per-client `limit_req` on Mini App `/app/` and `/app/chat/api/` (sample: [`deploy/nginx/`](deploy/nginx/)); `/health` and `/health/c/` are unlimited (PingZen).
+
 VPS `.env` needs `POSTGRES_PASSWORD` (Postgres via `compose.vps.yml`), `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`), and `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (off by default in source). Optional `AIVEN_DATABASE_URL` — cold Postgres mirror on Aiven (the bot does not use it).
 
 ### Local / Docker
