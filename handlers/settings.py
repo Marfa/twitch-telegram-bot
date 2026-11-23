@@ -459,10 +459,6 @@ async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def on_menu_other_conv_entry(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Conversation entry for the Other panel actions that open a wizard.
-
-    Returns the wizard state so the conversation owns the next keyboard.
-    """
     from handlers.game_info import start_game_info
     from handlers.stream_schedule import start_stream_schedule
     from handlers.watch import start_watch_lucky
