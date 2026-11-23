@@ -2945,6 +2945,8 @@ def check_handlers() -> None:
     _check_broadcast_feedback_refresh_skips_undeliverable()
     _check_posthog_inbox_poll_network_blip()
     _check_polylane_new_issue_poll()
+    _check_posthog_admin_notify_transient_failure()
+    _check_admin_alert_poll_seen_after_delivery()
 
 
 def _check_posthog_inbox_poll_network_blip() -> None:
@@ -2976,7 +2978,8 @@ def _check_posthog_inbox_poll_network_blip() -> None:
             ),
             patch("urllib.request.urlopen", side_effect=[dns_error, ok_resp]),
             patch(
-                "handlers.monitoring.notify_admins_posthog_issue", new=AsyncMock()
+                "handlers.monitoring.notify_admins_posthog_issue",
+                new=AsyncMock(return_value=True),
             ) as notify,
             patch("handlers.monitoring.logger") as log,
         ):
@@ -3024,7 +3027,7 @@ def _check_polylane_new_issue_poll() -> None:
             ),
             patch(
                 "handlers.monitoring.notify_admins_polylane_issue",
-                new=AsyncMock(),
+                new=AsyncMock(return_value=True),
             ) as notify,
         ):
             # First poll seeds without notify (no seen file yet).
@@ -3050,6 +3053,83 @@ def _check_polylane_new_issue_poll() -> None:
             assert payload["fingerprint"] == "iss_new2"
             assert payload["status"] == "new"
             assert payload["severity"] == "high"
+
+
+def _check_posthog_admin_notify_transient_failure() -> None:
+    """One admin NetworkError/RetryAfter must not cancel later admin DMs."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from telegram.error import NetworkError, RetryAfter
+
+    from handlers.monitoring import notify_admins_posthog_issue
+
+    bot = AsyncMock()
+    bot.send_message.side_effect = [
+        NetworkError("Bad Gateway"),
+        RetryAfter(1),
+        None,
+    ]
+    db = MagicMock()
+    db.get_user_locale.return_value = "en"
+    app = SimpleNamespace(bot=bot, bot_data={"db": db})
+    payload = {
+        "kind": "created",
+        "name": "RetryAfter",
+        "description": "",
+        "url": "https://example.test/issue",
+        "fingerprint": "fp-transient",
+    }
+    with (
+        patch("config.ADMIN_USER_IDS", [1, 2, 3]),
+        patch(
+            "handlers.monitoring.should_notify_posthog_issue",
+            return_value=True,
+        ),
+        patch("handlers.monitoring.mark_posthog_issue_notified") as mark,
+        patch("translate.translate_text", side_effect=lambda s, **_: s),
+    ):
+        ok = asyncio.run(notify_admins_posthog_issue(app, payload))
+    assert ok is True
+    assert bot.send_message.await_count == 3
+    mark.assert_called_once_with(payload)
+
+
+def _check_admin_alert_poll_seen_after_delivery() -> None:
+    """Failed notify leaves the id unseen so the next poll retries."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from handlers.monitoring import poll_posthog_inbox_reports
+
+    with tempfile.TemporaryDirectory() as tmp:
+        seen_path = Path(tmp) / "posthog_seen_reports.json"
+        seen_path.write_text(json.dumps(["seeded"]), encoding="utf-8")
+        ctx = SimpleNamespace(application=SimpleNamespace(bot_data={}))
+        ok_resp = MagicMock()
+        ok_resp.read.return_value = json.dumps(
+            {"results": [{"id": "rid-1", "title": "Report"}]}
+        ).encode()
+        notify = AsyncMock(side_effect=[False, True])
+        with (
+            patch("config.POSTHOG_PERSONAL_API_KEY", "phx_test"),
+            patch(
+                "handlers.monitoring._posthog_seen_reports_path",
+                return_value=seen_path,
+            ),
+            patch("urllib.request.urlopen", return_value=ok_resp),
+            patch(
+                "handlers.monitoring.notify_admins_posthog_issue",
+                new=notify,
+            ),
+        ):
+            asyncio.run(poll_posthog_inbox_reports(ctx))
+            assert "rid-1" not in ctx.application.bot_data["_posthog_seen_reports"]
+            asyncio.run(poll_posthog_inbox_reports(ctx))
+            assert "rid-1" in ctx.application.bot_data["_posthog_seen_reports"]
+        assert notify.await_count == 2
 
 
 def _check_broadcast_feedback_refresh() -> None:

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
 from telegram.ext import Application, ContextTypes
 
 import analytics
@@ -1151,20 +1151,23 @@ def mark_posthog_issue_notified(
 
 async def notify_admins_posthog_issue(
     application: Application, payload: dict[str, str]
-) -> None:
-    """Telegram DM to ADMIN_USER_IDS for PostHog Issue created/reopened."""
+) -> bool:
+    """Telegram DM to ADMIN_USER_IDS for PostHog Issue created/reopened.
+
+    Returns True when no retry is needed (delivered, cooldown hit, or no admins).
+    """
     from config import ADMIN_USER_IDS
     from translate import markdown_to_telegram_html, translate_text
 
     if not ADMIN_USER_IDS:
-        return
+        return True
     if not should_notify_posthog_issue(payload):
         logger.info(
             "Skipping duplicate PostHog admin notify key=%s kind=%s",
             _posthog_issue_notify_key(payload),
             payload.get("kind"),
         )
-        return
+        return True
     db: Database = application.bot_data["db"]
     kind = payload.get("kind") or "created"
     name = (payload.get("name") or "Issue").strip()
@@ -1217,8 +1220,16 @@ async def notify_admins_posthog_issue(
             delivered = True
         except (BadRequest, Forbidden) as exc:
             logger.warning("Cannot send PostHog issue to admin %s: %s", admin_id, exc)
+        except (NetworkError, RetryAfter) as exc:
+            # Keep looping: one transient DM must not cancel the rest.
+            logger.warning(
+                "Transient Telegram error sending PostHog issue to admin %s: %s",
+                admin_id,
+                exc,
+            )
     if delivered:
         mark_posthog_issue_notified(payload)
+    return delivered
 
 
 _POSTHOG_SEEN_REPORTS_MAX = 200
@@ -1326,8 +1337,8 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
         rid = str(report.get("id") or "")
         if not rid or rid in seen:
             continue
-        seen.add(rid)
         if not seeded:
+            seen.add(rid)
             continue
         title = (report.get("title") or "").strip()
         if not title:
@@ -1346,7 +1357,9 @@ async def poll_posthog_inbox_reports(context: ContextTypes.DEFAULT_TYPE) -> None
             "fingerprint": rid,
             "status": status,
         }
-        await notify_admins_posthog_issue(context.application, payload)
+        # Record seen only after delivery (or cooldown), so a failed send retries.
+        if await notify_admins_posthog_issue(context.application, payload):
+            seen.add(rid)
 
     try:
         _save_posthog_seen_report_ids(path, seen)
@@ -1425,13 +1438,16 @@ def _resolve_polylane_workspace_id(
 
 async def notify_admins_polylane_issue(
     application: Application, payload: dict[str, str]
-) -> None:
-    """Telegram DM to ADMIN_USER_IDS for a new Polylane issue."""
+) -> bool:
+    """Telegram DM to ADMIN_USER_IDS for a new Polylane issue.
+
+    Returns True when at least one admin got the alert (or there are no admins).
+    """
     from config import ADMIN_USER_IDS
     from translate import markdown_to_telegram_html, translate_text
 
     if not ADMIN_USER_IDS:
-        return
+        return True
     db: Database = application.bot_data["db"]
     name = (payload.get("name") or "Issue").strip()
     description = (payload.get("description") or "").strip()
@@ -1457,6 +1473,7 @@ async def notify_admins_polylane_issue(
     sev_block = f"{html.escape(severity)} · " if severity else ""
     link_block = f"\n\n{html.escape(url)}" if url else ""
     desc_block = desc_ru + "\n" if desc_ru else ""
+    delivered = False
     for admin_id in ADMIN_USER_IDS:
         lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
         text = t(
@@ -1476,8 +1493,16 @@ async def notify_admins_polylane_issue(
                 disable_web_page_preview=True,
                 reply_markup=dm_main_menu_keyboard(lang),
             )
+            delivered = True
         except (BadRequest, Forbidden) as exc:
             logger.warning("Cannot send Polylane issue to admin %s: %s", admin_id, exc)
+        except (NetworkError, RetryAfter) as exc:
+            logger.warning(
+                "Transient Telegram error sending Polylane issue to admin %s: %s",
+                admin_id,
+                exc,
+            )
+    return delivered
 
 
 async def poll_polylane_new_issues(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1540,8 +1565,8 @@ async def poll_polylane_new_issues(context: ContextTypes.DEFAULT_TYPE) -> None:
         iid = str(issue.get("id") or "").strip()
         if not iid or iid in seen:
             continue
-        seen.add(iid)
         if not seeded:
+            seen.add(iid)
             continue
         # API already filters status=new; keep a hard gate for safety.
         if str(issue.get("status") or "").strip() != "new":
@@ -1565,7 +1590,8 @@ async def poll_polylane_new_issues(context: ContextTypes.DEFAULT_TYPE) -> None:
             "status": "new",
             "severity": str(issue.get("severity") or "").strip(),
         }
-        await notify_admins_polylane_issue(context.application, payload)
+        if await notify_admins_polylane_issue(context.application, payload):
+            seen.add(iid)
 
     try:
         _save_polylane_seen_issue_ids(path, seen)
