@@ -2941,7 +2941,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         MessageHandler(_btn_filter("settings"), open_settings_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("bot_settings"), open_bot_settings_menu),
+        group=0,
+    )
+    app.add_handler(
         MessageHandler(_btn_filter("back_bot_settings"), open_bot_settings_menu),
         group=0,
     )
