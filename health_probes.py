@@ -22,9 +22,9 @@ _CACHE_LOCAL_TTL_SEC = 15.0
 # Keyless probes spend no quota, so re-measure a failure at the next poll
 # instead of reporting one transient error as a 5 minute outage.
 # An entry is stamped when the probe returns, so at the next 60 s poll its
-# age is 60 s minus the probe duration. The slowest probe is
-# _probe_donationalerts: two 12 s attempts, 24 s, which leaves 36 s. Keep
-# this below 36 s so that poll always measures again.
+# age is 60 s minus the probe duration. The slowest probes are
+# _probe_telegram and _probe_donationalerts: two 12 s attempts, 24 s.
+# Keep this below 36 s so that poll always measures again.
 _CACHE_FAIL_TTL_SEC = 30.0
 _HTTP_TIMEOUT = 12
 
@@ -223,12 +223,22 @@ def _probe_telegram() -> tuple[int, bytes]:
     if not token:
         return _na()
     url = f"https://api.telegram.org/bot{token}/getMe"
-    try:
-        r = _SESSION.get(url, timeout=_HTTP_TIMEOUT)
-    except Exception as exc:
-        # requests puts the full URL (with the bot token) in the exception text.
-        logger.error("health probe telegram failed: %s", type(exc).__name__)
-        return _fail(b"net")
+    # api.telegram.org drops connects intermittently, and the bot's own
+    # transport retries the same class of error, so one drop is repeated
+    # before it counts as a dependency failure.
+    for attempt in (1, 2):
+        try:
+            r = _SESSION.get(url, timeout=_HTTP_TIMEOUT)
+            break
+        except Exception as exc:
+            if attempt == 2:
+                # requests puts the full URL (with the bot token) in the
+                # exception text, so log the type only and never exc_info.
+                logger.error("health probe telegram failed: %s", type(exc).__name__)
+                return _fail(b"net")
+            logger.warning(
+                "health probe telegram retrying after %s", type(exc).__name__
+            )
     if r.status_code != 200:
         return _fail(b"auth" if r.status_code in (401, 403) else b"http")
     try:
