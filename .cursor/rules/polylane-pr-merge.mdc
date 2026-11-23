@@ -1,5 +1,5 @@
 ---
-description: Before merging PRs labeled polylane — explain impact and wait for user OK
+description: Polylane PRs — briefing before merge; close source Issue when PR closes
 alwaysApply: true
 ---
 
@@ -17,8 +17,19 @@ In Russian, briefly cover all three points — no wall of text:
 
 Then **stop and wait** for an explicit yes / «мержи» / equivalent. Silence, «ок, понял», or review-only replies are **not** consent to merge.
 
+## After merge or close (required)
+
+When a `polylane` PR is **merged** or **closed without merge**, also close the **source Polylane Issue** that produced the PR. Do not leave the Issue open after the PR is done.
+
+1. **Find the Issue** — from the PR body / deliverable badge (`console.polylane.com/.../deliverables/...` or `console.polylane.com/issues/iss_…`), Polylane MCP, or the admin DM that announced the Issue. Also close any GitHub issues listed in `closingIssuesReferences` / `Fixes #N` if still open.
+2. **Close it** — via Polylane MCP if available; otherwise Console / documented API. Confirm status is no longer `new` / open.
+3. **Close without merge** — leave a short PR comment explaining why (Polylane reads it for the next fix), then close the source Issue the same way (wontfix / obsolete / duplicate — whatever matches).
+4. **Report** — tell the user the PR outcome and that the Issue is closed (with Issue URL/id). If the Issue cannot be closed (MCP/auth down), say so and ask them to close it in Console — do not treat the PR as fully finished.
+
 ## Do not
 
 - Merge a `polylane` PR without that Russian briefing **and** explicit user approval
 - Treat auto-merge, squash-on-green, or «usual Dependabot merge» as a bypass
 - Skip the briefing because the change looks small or «safe»
+- Merge or close a `polylane` PR and leave its Polylane Issue open
+- Skip the «why» comment when closing a `polylane` PR without merging

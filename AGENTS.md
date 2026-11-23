@@ -6,4 +6,5 @@
 - For a production question about an error, spike, deploy, or missing signal, query Polylane through its MCP tools before you inspect code.
 - When debugging a failure, start from the Issue Polylane recorded. It carries the evidence from its investigation.
 - Polylane assesses pull requests in this repository for production impact. Read the impact assessment comment before you merge a change to a production path.
+- When a Polylane PR is merged or closed, also close the source Polylane Issue — see `.cursor/rules/polylane-pr-merge.mdc`.
 <!-- polylane:end -->

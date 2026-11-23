@@ -16,8 +16,9 @@ alwaysApply: true
 | Project `.cursor/mcp.json` → `vps-db` | `project-*-vps-db` / `run_sql` | **live VPS Postgres SoR** (read+write via `vps-psql.sh`); Aiven only for DR reads |
 | Project `.cursor/mcp.json` → `aiven` | `project-*-aiven` / Aiven tools | cold DR / Aiven cloud (not live bot DB writes) |
 | User `~/.cursor/mcp.json` → `pingzen` | `user-pingzen` | monitors, maintenance windows |
+| User / docs → Polylane MCP (`https://mcp.polylane.com/mcp`) | Polylane tools | prod Issues, PR impact; **close source Issue** after a `polylane` PR merges/closes |
 
-Sources of truth for the list: `.cursor/mcp.json` (project) + user MCP config. If the list changes, update this table.
+Sources of truth for the list: `.cursor/mcp.json` (project) + user MCP config. If the list changes, update this table. Polylane is not in project `mcp.json` by default — enable it when investigating Issues or finishing Polylane PRs ([`polylane-pr-merge.mdc`](polylane-pr-merge.mdc)).
 
 ## How to check
 
