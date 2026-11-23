@@ -470,15 +470,6 @@ async def on_menu_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     await query.answer()
     action = (query.data or "").split(":", 1)[-1]
-    if action == "back":
-        try:
-            await query.delete_message()
-        except BadRequest:
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except BadRequest:
-                pass
-        return
     if action not in (
         "follow_monitor",
         "ai_clips",
@@ -530,15 +521,6 @@ async def on_menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     await query.answer()
     action = (query.data or "").split(":", 1)[-1]
-    if action == "back":
-        try:
-            await query.delete_message()
-        except BadRequest:
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except BadRequest:
-                pass
-        return
     try:
         await query.edit_message_text("✓")
     except BadRequest:

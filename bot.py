@@ -2352,15 +2352,6 @@ async def on_menu_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not _is_admin(user_id):
         return
     action = (query.data or "").split(":", 1)[-1]
-    if action == "back":
-        try:
-            await query.delete_message()
-        except BadRequest:
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except BadRequest:
-                pass
-        return
     try:
         await query.edit_message_text("✓")
     except BadRequest:
@@ -3190,21 +3181,21 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_menu_other,
-            pattern=r"^menu_other:(back|follow_monitor|ai_clips|whisper_alerts|create_schedule|watch|chat|game_info|channel_stats)$",
+            pattern=r"^menu_other:(follow_monitor|ai_clips|whisper_alerts|create_schedule|watch|chat|game_info|channel_stats)$",
         ),
         group=0,
     )
     app.add_handler(
         CallbackQueryHandler(
             on_menu_settings,
-            pattern=r"^menu_settings:(back|premium|sync_subs|bot_settings|beta_mode|sys_notifications|partner)$",
+            pattern=r"^menu_settings:(premium|sync_subs|bot_settings|beta_mode|sys_notifications|partner)$",
         ),
         group=0,
     )
     app.add_handler(
         CallbackQueryHandler(
             on_menu_admin,
-            pattern=r"^menu_admin:(back|broadcast|stats|reload_locales|admin_withdrawals|demo)$",
+            pattern=r"^menu_admin:(broadcast|stats|reload_locales|admin_withdrawals|demo)$",
         ),
         group=0,
     )

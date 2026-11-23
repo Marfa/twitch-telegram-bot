@@ -53,7 +53,9 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^stored_typo_fix:0$|"
     r"^gv:(?:close|hub)$|"
     r"^schq:list:(?:when|day|week)$|"
-    r"^dm_menu$"
+    r"^dm_menu$|"
+    # Other/Settings/Admin inline panels leave the main reply keyboard; not a trap.
+    r"^menu_(?:other|settings|admin):"
     r")"
 )
 

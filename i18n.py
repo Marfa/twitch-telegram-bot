@@ -456,11 +456,8 @@ def other_menu_inline(lang: str) -> InlineKeyboardMarkup:
         else InlineKeyboardButton(btn(k, lang), callback_data=f"menu_other:{k}")
         for k in keys
     ]
-    rows = _pair_inline_rows(buttons)
-    rows.append(
-        [InlineKeyboardButton(btn("back", lang), callback_data="menu_other:back")]
-    )
-    return InlineKeyboardMarkup(rows)
+    # No «Главное меню» — main reply keyboard stays; panel is just a picker.
+    return InlineKeyboardMarkup(_pair_inline_rows(buttons))
 
 
 def settings_menu(
@@ -536,9 +533,6 @@ def settings_menu_inline(
                 btn("partner", lang), callback_data="menu_settings:partner"
             )
         )
-    mid.append(
-        InlineKeyboardButton(btn("back", lang), callback_data="menu_settings:back")
-    )
     rows.extend(_pair_inline_rows(mid))
     return InlineKeyboardMarkup(rows)
 
@@ -926,11 +920,7 @@ def admin_menu_inline(lang: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(btn(k, lang), callback_data=f"menu_admin:{k}")
         for k in keys
     ]
-    rows = _pair_inline_rows(buttons)
-    rows.append(
-        [InlineKeyboardButton(btn("back", lang), callback_data="menu_admin:back")]
-    )
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup(_pair_inline_rows(buttons))
 
 
 def withdrawal_actions_keyboard(withdrawal_id: int, lang: str) -> InlineKeyboardMarkup:
