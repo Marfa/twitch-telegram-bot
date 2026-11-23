@@ -30,7 +30,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      # Host localhost only — public traffic via nginx on bot.themarfa.name
+      - "127.0.0.1:8080:8080"
     healthcheck:
       test:
         [

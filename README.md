@@ -310,6 +310,8 @@ python main.py
 
 Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
 
+Публичный HTTPS — **nginx** на VPS (`bot.themarfa.name` → `127.0.0.1:8080`). В `compose.vps.yml` порт бота опубликован только на localhost (`127.0.0.1:8080:8080`), снаружи `:8080` не слушается. Для Mini App nginx задаёт `limit_req` по IP клиента на `/app/` и `/app/chat/api/` (образец: [`deploy/nginx/`](deploy/nginx/)); `/health` и `/health/c/` без лимита (PingZen).
+
 В `.env` на VPS нужны `POSTGRES_PASSWORD` (Postgres из `compose.vps.yml`), `PUBLIC_BASE_URL` для OAuth (например `https://bot.themarfa.name`), и флаги `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (в исходниках по умолчанию выключены). Опционально `AIVEN_DATABASE_URL` — холодное зеркало Postgres на Aiven (бот на него не переключается).
 
 ### Локально / Docker
