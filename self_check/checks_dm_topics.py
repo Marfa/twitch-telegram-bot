@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot_helpers import send_reply_keyboard_menu
 from dm_topics import (
@@ -18,6 +18,7 @@ from dm_topics import (
     install_private_ui_to_general,
     private_ui_should_go_to_general,
     reset_topic_icon_cache_for_tests,
+    strip_reply_keyboards_from_threads,
     sync_user_topic_icons,
     topic_key_for_subscription,
 )
@@ -90,7 +91,12 @@ def run() -> None:
 
 async def _check_menu_keyboard_goes_to_general() -> None:
     """Reply-keyboard menus must not inherit Эфир / All-messages thread ids."""
+    from telegram import ReplyKeyboardRemove
+
     bot = AsyncMock()
+    bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(message_id=1, chat_id=7)
+    )
     kb = other_menu("ru")
     await send_reply_keyboard_menu(bot, 7, "Прочее:", kb)
     assert bot.send_message.await_count == 1
@@ -100,6 +106,38 @@ async def _check_menu_keyboard_goes_to_general() -> None:
     assert kwargs.get("reply_markup") is kb
     assert "message_thread_id" not in kwargs
     assert kwargs.get("message_thread_id") is None
+
+    # Strip sticky keyboard from Эфир (live) before setting General.
+    bot.send_message.reset_mock()
+    with patch(
+        "bot_helpers.delete_chat_message", new=AsyncMock()
+    ) as del_bh, patch("asyncio.sleep", new=AsyncMock()):
+        await strip_reply_keyboards_from_threads(bot, 7, [99])
+        assert bot.send_message.await_count == 1
+        skw = bot.send_message.await_args.kwargs
+        assert skw.get("message_thread_id") == 99
+        assert isinstance(skw.get("reply_markup"), ReplyKeyboardRemove)
+        del_bh.assert_awaited()
+
+    db = MagicMock()
+    db.is_topics_enabled = MagicMock(return_value=True)
+    db.get_user_topic_thread = MagicMock(
+        side_effect=lambda _u, key: 50 if key == "live" else None
+    )
+    bot.send_message.reset_mock()
+    with patch(
+        "bot_helpers.delete_chat_message", new=AsyncMock()
+    ), patch("asyncio.sleep", new=AsyncMock()):
+        await send_reply_keyboard_menu(
+            bot, 7, "Прочее:", kb, db=db, user_id=7
+        )
+    # 1 strip (live) + 1 General menu
+    assert bot.send_message.await_count == 2
+    strip_call, menu_call = bot.send_message.await_args_list
+    assert strip_call.kwargs.get("message_thread_id") == 50
+    assert isinstance(strip_call.kwargs.get("reply_markup"), ReplyKeyboardRemove)
+    assert "message_thread_id" not in menu_call.kwargs
+    assert menu_call.kwargs.get("reply_markup") is kb
 
 
 def _check_private_ui_general_gate() -> None:

@@ -283,6 +283,8 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_chat_id(update),
         t("menu_settings", lang),
         _settings_kb(lang, db, user_id),
+        db=db,
+        user_id=user_id,
     )
 
 
@@ -369,11 +371,20 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             with_main_menu=from_intro,
         ),
     )
-    if from_intro:
-        return
-    # Refresh sticky reply keyboard without a lasting duplicate menu message.
     chat_id = query.message.chat_id if query.message else user_id
-    await _pulse_reply_keyboard(context.bot, chat_id, bot_settings_menu(lang))
+    # Strip ReplyKeyboard from Эфир / other alert topics; set menu in General.
+    from dm_topics import strip_alert_topic_reply_keyboards
+
+    if enabled:
+        await strip_alert_topic_reply_keyboards(context.bot, db, user_id)
+    if from_intro:
+        await _pulse_reply_keyboard(
+            context.bot, chat_id, _menu(lang, user_id), db=db, user_id=user_id
+        )
+        return
+    await _pulse_reply_keyboard(
+        context.bot, chat_id, bot_settings_menu(lang), db=db, user_id=user_id
+    )
 
 
 async def open_auth_tokens_menu(
@@ -427,11 +438,14 @@ async def on_auth_tokens_revoke_donationalerts(
 async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
     await send_reply_keyboard_menu(
         context.bot,
         reply_chat_id(update),
         t("menu_other", lang),
         other_menu(lang),
+        db=db,
+        user_id=user_id,
     )
 
 async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -760,6 +774,8 @@ async def receive_ignore_igdb_text(
             reply_chat_id(update),
             t("menu_settings", lang),
             _settings_kb(lang, db, user_id),
+            db=db,
+            user_id=user_id,
         )
         context.user_data.clear()
         return ConversationHandler.END

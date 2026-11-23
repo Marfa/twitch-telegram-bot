@@ -1430,18 +1430,22 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_chat_id(update),
             t("no_subs", lang),
             _subs_kb(lang, db, user_id),
+            db=db,
+            user_id=user_id,
         )
         return
 
     # Reply keyboard must be a separate message (can't mix with inline).
     # Send it first so the last bubble near the input is the type picker / list —
     # otherwise mobile shows a huge empty gap under a trailing "Мои подписки:".
-    # General only — reply_text from Эфир / All messages would not update the keyboard.
+    # General only — strip Эфир / alert-topic keyboards, then set menu there.
     await send_reply_keyboard_menu(
         context.bot,
         reply_chat_id(update),
         t("menu_subs", lang),
         _subs_kb(lang, db, user_id),
+        db=db,
+        user_id=user_id,
     )
     types = _edit_present_types(subs)
     if len(types) > 1:

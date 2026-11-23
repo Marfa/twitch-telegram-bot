@@ -166,7 +166,16 @@ async def _deliver_alert_content_plain(
         thread_kwargs["message_thread_id"] = thread_id
     markup_kwargs: dict = {}
     if reply_markup is not None:
-        markup_kwargs["reply_markup"] = reply_markup
+        # Reply keyboards belong in General only — never attach to alert topics.
+        from telegram import ReplyKeyboardMarkup
+
+        if thread_id and isinstance(reply_markup, ReplyKeyboardMarkup):
+            logger.error(
+                "Refusing ReplyKeyboardMarkup on topic thread_id=%s; dropping markup",
+                thread_id,
+            )
+        else:
+            markup_kwargs["reply_markup"] = reply_markup
     parse_kwargs: dict = {}
     if parse_mode:
         parse_kwargs["parse_mode"] = parse_mode

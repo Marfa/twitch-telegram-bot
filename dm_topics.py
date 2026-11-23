@@ -289,6 +289,73 @@ def reset_topic_icon_cache_for_tests() -> None:
     _icons_applied.clear()
 
 
+def user_alert_topic_thread_ids(db, user_id: int) -> list[int]:
+    """Stored message_thread_id values for this user's alert topics."""
+    out: list[int] = []
+    for key in TOPIC_KEYS:
+        tid = db.get_user_topic_thread(user_id, key)
+        if tid:
+            out.append(int(tid))
+    return out
+
+
+async def strip_reply_keyboards_from_threads(
+    bot, chat_id: int, thread_ids: list[int]
+) -> None:
+    """Remove sticky ReplyKeyboard inside alert topics (Эфир, …).
+
+    Menu keyboards belong only in General. A keyboard left in Эфир intercepts
+    taps there and looks like «buttons broken everywhere».
+    """
+    if not thread_ids:
+        return
+    import asyncio
+
+    from telegram import ReplyKeyboardRemove
+    from telegram.error import BadRequest, Forbidden, TelegramError
+
+    from bot_helpers import delete_chat_message
+    from message_fx import message_fx_disabled
+
+    remove = ReplyKeyboardRemove()
+    with message_fx_disabled():
+        for tid in thread_ids:
+            try:
+                msg = await bot.send_message(
+                    int(chat_id),
+                    "·",
+                    message_thread_id=int(tid),
+                    reply_markup=remove,
+                )
+                await asyncio.sleep(0.2)
+                try:
+                    await delete_chat_message(
+                        bot, int(chat_id), msg.message_id, kind="bot_own"
+                    )
+                except (BadRequest, Forbidden):
+                    pass
+            except (BadRequest, Forbidden, TelegramError) as exc:
+                logger.info(
+                    "strip reply keyboard thread=%s chat=%s: %s",
+                    tid,
+                    chat_id,
+                    exc,
+                )
+            except Exception:
+                logger.warning(
+                    "strip reply keyboard failed thread=%s chat=%s",
+                    tid,
+                    chat_id,
+                    exc_info=True,
+                )
+
+
+async def strip_alert_topic_reply_keyboards(bot, db, user_id: int) -> None:
+    """Clear ReplyKeyboard from all stored alert topics for this user."""
+    tids = user_alert_topic_thread_ids(db, user_id)
+    await strip_reply_keyboards_from_threads(bot, user_id, tids)
+
+
 # --- Private UI → General (alerts alone use message_thread_id) -----------------
 
 _private_ui_patched = False

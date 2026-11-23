@@ -18,7 +18,7 @@ To refresh the menu without a visible message, use `_pulse_reply_keyboard` in `b
 ## Also
 
 - Build reply keyboards only via `_reply_keyboard` in `i18n.py` (`resize_keyboard=True`, `is_persistent=True`). Do not construct a non-persistent `ReplyKeyboardMarkup`.
-- **Private topics:** only **alerts** go to typed topics. All other bot UI (menus, wizards, settings, help, callback replies) stays in **General**. `install_private_ui_to_general()` rewrites private `Message.reply_*` from a topic / «All messages» thread into `send_*` without `message_thread_id`. Prefer `send_reply_keyboard_menu` / `_pulse_reply_keyboard` for reply-keyboard menus. Alert delivery keeps `send_message(..., message_thread_id=…)`.
+- **Private topics:** only **alerts** go to typed topics. All other bot UI stays in **General**. Never attach `ReplyKeyboardMarkup` to an alert topic (Эфир, …) — strip via `strip_alert_topic_reply_keyboards` then set the menu with `send_reply_keyboard_menu` / `_pulse_reply_keyboard` (no `message_thread_id`). `install_private_ui_to_general()` rewrites private `Message.reply_*` from a topic into General. Alert delivery uses `send_message(..., message_thread_id=…)` with inline markups only.
 - Do not send `ReplyKeyboardRemove` in private chats.
 - **Groups/channels:** never attach the main reply menu. Clear sticky keyboards with `ReplyKeyboardRemove` on group replies (`reply_setup_private_only`, schedule `/when`/`day`/`week`) or `clear_group_reply_keyboard` when silent. Android clients keep a persistent keyboard until remove is applied; macOS may already have dropped it.
 - Do not run `sendMessageDraft` / typing FX on a message that carries a `ReplyKeyboardMarkup` (`message_fx.py` already skips those).

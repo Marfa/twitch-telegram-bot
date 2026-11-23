@@ -2315,6 +2315,7 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
     if not _is_admin(user_id):
         return
+    db: Database = context.application.bot_data["db"]
     if demo_mode.is_active(user_id):
         lang = _user_lang(context, user_id)
         await send_reply_keyboard_menu(
@@ -2322,6 +2323,8 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             reply_chat_id(update),
             t("demo_on", lang),
             _menu(lang, user_id),
+            db=db,
+            user_id=user_id,
         )
         return
     lang = _user_lang(context, user_id)
@@ -2330,6 +2333,8 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         reply_chat_id(update),
         t("menu_admin", lang),
         admin_menu(lang),
+        db=db,
+        user_id=user_id,
     )
 
 
@@ -2412,11 +2417,14 @@ async def _enter_demo_mode(
 async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
     await send_reply_keyboard_menu(
         context.bot,
         reply_chat_id(update),
         t("menu_main", lang),
         _menu(lang, user_id),
+        db=db,
+        user_id=user_id,
     )
 
 
