@@ -1964,6 +1964,30 @@ async def _send_outbound_webhook_notification(
     return True
 
 
+def _delivery_log_extra(
+    sub: Subscription,
+    *,
+    alert_type: str,
+    outcome: str,
+    stream_id: str = "",
+    duration_ms: int | None = None,
+) -> dict[str, Any]:
+    """Identify one alert delivery attempt in the JSON log line."""
+    extra: dict[str, Any] = {
+        "sub_id": sub.id,
+        "user_id": sub.owner_id,
+        "chat_id": sub.chat_id,
+        "dest_type": sub.dest_type,
+        "alert_type": alert_type,
+        "outcome": outcome,
+    }
+    if stream_id:
+        extra["stream_id"] = stream_id
+    if duration_ms is not None:
+        extra["duration_ms"] = duration_ms
+    return extra
+
+
 async def _send_notification(
     bot,
     db: Database,
@@ -1982,6 +2006,7 @@ async def _send_notification(
 ) -> bool:
     import premium as prem
 
+    started = time.monotonic()
     # Strip unentitled advanced_mode options for this send (settings stay in DB).
     sub = prem.subscription_for_delivery(db, sub)
     if _user_notifications_paused(db, sub.owner_id):
@@ -2063,6 +2088,13 @@ async def _send_notification(
                 "Skip alert sub=%s: overlap block, message %s still present",
                 sub.id,
                 sub.last_message_id,
+                extra=_delivery_log_extra(
+                    sub,
+                    alert_type=alert_type,
+                    outcome="skipped_overlap",
+                    stream_id=stream_id,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                ),
             )
             return False
         db.set_last_message_id(sub.id, None)
@@ -2266,7 +2298,18 @@ async def _send_notification(
                 on_media_fallback=_on_media_fallback_retry,
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
-            logger.warning("Cannot send to %s after RetryAfter: %s", sub.chat_id, retry_exc)
+            logger.warning(
+                "Cannot send to %s after RetryAfter: %s",
+                sub.chat_id,
+                retry_exc,
+                extra=_delivery_log_extra(
+                    sub,
+                    alert_type=alert_type,
+                    outcome="rate_limited",
+                    stream_id=stream_id,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                ),
+            )
             _mark_destination_unreachable(db, sub, retry_exc, alert_type=alert_type)
             await _maybe_notify_delivery_failure(bot, db, sub, retry_exc)
             metrics.record_alert_delivery(
@@ -2275,7 +2318,18 @@ async def _send_notification(
             # Keep captured MP4 pending until stream ends.
             return False
     except (BadRequest, Forbidden) as exc:
-        logger.warning("Cannot send to %s: %s", sub.chat_id, exc)
+        logger.warning(
+            "Cannot send to %s: %s",
+            sub.chat_id,
+            exc,
+            extra=_delivery_log_extra(
+                sub,
+                alert_type=alert_type,
+                outcome="failed",
+                stream_id=stream_id,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            ),
+        )
         _mark_destination_unreachable(db, sub, exc, alert_type=alert_type)
         await _maybe_notify_delivery_failure(bot, db, sub, exc)
         metrics.record_alert_delivery(
@@ -2286,6 +2340,18 @@ async def _send_notification(
 
     metrics.record_alert_delivery(
         alert_type=alert_type, dest_type=sub.dest_type, outcome="sent"
+    )
+    logger.info(
+        "Alert delivered sub=%s dest=%s",
+        sub.id,
+        sub.dest_type,
+        extra=_delivery_log_extra(
+            sub,
+            alert_type=alert_type,
+            outcome="sent",
+            stream_id=stream_id,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        ),
     )
     if sub.dest_type == "dm":
         from outbound_messages import note_outbound
@@ -2435,7 +2501,12 @@ async def _send_test(
             clear_chat_unreachable(db, chat_id)
         return None
     except (BadRequest, Forbidden) as exc:
-        logger.warning("Cannot send to %s: %s", chat_id, exc)
+        logger.warning(
+            "Cannot send to %s: %s",
+            chat_id,
+            exc,
+            extra={"chat_id": chat_id, "outcome": "failed", "context": "test_send"},
+        )
         if db is not None and _is_chat_unreachable_error(exc):
             apply_chat_unreachable(db, chat_id)
         elif db is not None and _is_user_blocked_error(exc):
