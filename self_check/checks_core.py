@@ -2124,6 +2124,7 @@ def check_core() -> None:
     from i18n import (
         main_menu,
         admin_menu,
+        bot_settings_menu,
         other_menu,
         settings_menu,
         subscriptions_menu,
@@ -2213,9 +2214,10 @@ def check_core() -> None:
                     f"{[b.text for b in row]}"
                 )
         settings_kb = settings_menu(loc).keyboard
+        bot_settings_kb = bot_settings_menu(loc).keyboard
         ignored_row = next(
             row
-            for row in settings_kb
+            for row in bot_settings_kb
             if btn("ignored_words", loc) in [b.text for b in row]
         )
         assert btn("ignored_words", loc) in [b.text for b in ignored_row]
@@ -2229,6 +2231,9 @@ def check_core() -> None:
 
         from config import show_premium_ui
 
+        assert any(
+            btn("bot_settings", loc) in [b.text for b in row] for row in settings_kb
+        )
         partner_row = next(
             row
             for row in settings_kb
@@ -2245,12 +2250,12 @@ def check_core() -> None:
                 if btn("default_alert_settings", loc) in [b.text for b in row]
             )
             assert [b.text for b in defaults_row] == [
+                btn("sys_notifications", loc),
                 btn("default_alert_settings", loc),
-                btn("auth_tokens", loc),
             ]
         else:
             assert [b.text for b in partner_row] == [
-                btn("auth_tokens", loc),
+                btn("sys_notifications", loc),
                 btn("partner", loc),
             ]
         assert any(
@@ -2258,12 +2263,21 @@ def check_core() -> None:
         )
         lang_row = next(
             row
-            for row in settings_kb
+            for row in bot_settings_kb
             if btn("language", loc) in [b.text for b in row]
         )
         assert {b.text for b in lang_row} == {
-            btn("sys_notifications", loc),
+            btn("ignored_words", loc),
             btn("language", loc),
+        }
+        auth_row = next(
+            row
+            for row in bot_settings_kb
+            if btn("auth_tokens", loc) in [b.text for b in row]
+        )
+        assert {b.text for b in auth_row} == {
+            btn("auth_tokens", loc),
+            btn("back_settings", loc),
         }
         suggest_kb = watch_suggest_keyboard(loc, offer_create_alerts=True)
         cbs = [
