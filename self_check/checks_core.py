@@ -2340,6 +2340,44 @@ def check_core() -> None:
     ):
         assert probes_mod._probe_donationalerts() == (503, b"net")
         assert flaky.calls == 2
+
+    # The Telegram probe repeats one dropped connect too, and a second drop
+    # still reports the component down.
+    class _TelegramResp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"ok": True}
+
+    class _TelegramSession:
+        def __init__(self, failures):
+            self.failures = failures
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls <= self.failures:
+                raise TimeoutError("read timeout")
+            return _TelegramResp()
+
+    import config as config_mod
+
+    telegram_flaky = _TelegramSession(1)
+    with (
+        patch.object(config_mod, "TELEGRAM_BOT_TOKEN", "123:test"),
+        patch.object(probes_mod, "_SESSION", telegram_flaky),
+    ):
+        assert probes_mod._probe_telegram() == (200, b"ok")
+        assert telegram_flaky.calls == 2
+
+    telegram_down = _TelegramSession(2)
+    with (
+        patch.object(config_mod, "TELEGRAM_BOT_TOKEN", "123:test"),
+        patch.object(probes_mod, "_SESSION", telegram_down),
+    ):
+        assert probes_mod._probe_telegram() == (503, b"net")
+        assert telegram_down.calls == 2
     clear_probe_cache_for_tests()
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)

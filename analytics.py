@@ -467,7 +467,9 @@ def _redaction_self_check() -> None:
     provider.force_flush()
     probe.removeHandler(handler)
 
-    assert len(captured) == 3, "redaction probe exported wrong record count"
+    # The wrapped telegram probe repeats a dropped connect, so it exports a
+    # warning for the first attempt and the error for the second.
+    assert len(captured) == 4, "redaction probe exported wrong record count"
     for data in captured:
         record = data.log_record
         blob = (record.body or "") + "".join(
