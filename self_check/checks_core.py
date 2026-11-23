@@ -1242,6 +1242,7 @@ def check_core() -> None:
     assert '_stream_job_kwargs("check_posthog_status"' in _bot_build
     assert '_stream_job_kwargs("check_twitch_status"' in _bot_build
     assert '_stream_job_kwargs("check_cursor_status"' in _bot_build
+    assert '_stream_job_kwargs("check_polylane_status"' in _bot_build
     assert 'name="ai_clips_auto"' in _bot_build
     assert "poll_ai_clips_auto" in _bot_build
     assert 'name="purge_expired_clip_compilations"' in _bot_build

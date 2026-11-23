@@ -974,6 +974,7 @@
   "drops_configure_locked": "Creating or editing Drops alerts needs Premium alert types. You can pause or delete existing ones.",
   "twitch_status_title": "📡 Twitch Status",
   "posthog_status_title": "🦔 PostHog Status (US Cloud)",
+  "polylane_status_title": "🛰 Polylane Status (API)",
   "twitch_indicator_none": "✅ All Systems Operational",
   "twitch_indicator_minor": "⚠️ Minor issues",
   "twitch_indicator_major": "🟠 Major issues",

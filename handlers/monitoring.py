@@ -33,6 +33,18 @@ TWITCH_STATUS_PAGE_URL = f"https://{TWITCH_STATUS_HOST}/"
 CURSOR_STATUS_HOST = "status.cursor.com"
 CURSOR_STATUS_API_URL = f"https://{CURSOR_STATUS_HOST}/api/v2/status.json"
 CURSOR_STATUS_PAGE_URL = f"https://{CURSOR_STATUS_HOST}/"
+POLYLANE_STATUS_HOST = "polylanestatus.com"
+POLYLANE_STATUS_API_URL = f"https://{POLYLANE_STATUS_HOST}/api/status/summary.json"
+POLYLANE_STATUS_PAGE_URL = f"https://{POLYLANE_STATUS_HOST}/"
+# Bot runtime uses api.polylane.com (issue poll); Console/MCP are out of scope.
+POLYLANE_WATCHED_COMPONENTS = frozenset({"Polylane API"})
+_POLYLANE_STATUS_RANK = {
+    "operational": 0,
+    "under_maintenance": 1,
+    "degraded_performance": 2,
+    "partial_outage": 3,
+    "major_outage": 4,
+}
 
 _TWITCH_INDICATOR_KEYS = {
     "none": "twitch_indicator_none",
@@ -399,6 +411,193 @@ async def check_cursor_status(context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         await asyncio.sleep(_BROADCAST_SEND_PAUSE)
     bot_data["cursor_status_alerted_down"] = unhealthy
+
+
+def fetch_polylane_status() -> dict[str, Any]:
+    """Fetch Polylane status JSON (polylanestatus.com / openstatus)."""
+    import urllib.request
+
+    req = urllib.request.Request(
+        POLYLANE_STATUS_API_URL,
+        headers={"User-Agent": "twitch-telegram-bot/status-poll"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        raw = resp.read()
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("Polylane status payload is not an object")
+    return data
+
+
+def _polylane_worst_status(statuses: list[str]) -> str:
+    worst = "operational"
+    worst_rank = 0
+    for status in statuses:
+        rank = _POLYLANE_STATUS_RANK.get(status, 0)
+        if rank > worst_rank:
+            worst = status
+            worst_rank = rank
+    return worst
+
+
+def _polylane_incident_hits_watched(incident: dict[str, Any]) -> bool:
+    """True when an incident clearly touches a watched Polylane component."""
+    for affected in incident.get("affected_components") or []:
+        if not isinstance(affected, dict):
+            continue
+        name = str(affected.get("name") or "").strip()
+        if name in POLYLANE_WATCHED_COMPONENTS:
+            return True
+    blob = " ".join(
+        str(incident.get(key) or "")
+        for key in ("name", "title", "message", "body")
+    )
+    return any(name in blob for name in POLYLANE_WATCHED_COMPONENTS)
+
+
+def polylane_watched_snapshot(summary: dict[str, Any]) -> dict[str, Any]:
+    """Watched Polylane components only (API — bot issue poll)."""
+    components: list[dict[str, Any]] = []
+    for comp in summary.get("components") or []:
+        if not isinstance(comp, dict):
+            continue
+        if str(comp.get("name") or "") not in POLYLANE_WATCHED_COMPONENTS:
+            continue
+        components.append(comp)
+    incidents: list[dict[str, Any]] = []
+    for incident in summary.get("incidents") or []:
+        if isinstance(incident, dict) and _polylane_incident_hits_watched(incident):
+            incidents.append(incident)
+    overall = _polylane_worst_status(
+        [str(comp.get("status") or "operational") for comp in components]
+    )
+    return {"overall": overall, "components": components, "incidents": incidents}
+
+
+def polylane_watched_fingerprint(
+    summary: dict[str, Any],
+) -> tuple[str, tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    """Comparable watched-slice: overall, components, active incidents."""
+    snapshot = polylane_watched_snapshot(summary)
+    components = [
+        (
+            str(comp.get("name") or ""),
+            str(comp.get("status") or "operational"),
+        )
+        for comp in snapshot["components"]
+        if str(comp.get("name") or "").strip()
+    ]
+    components.sort(key=lambda item: item[0].lower())
+    incidents = [
+        (
+            str(incident.get("id") or incident.get("name") or ""),
+            str(incident.get("status") or ""),
+        )
+        for incident in snapshot["incidents"]
+        if str(incident.get("id") or incident.get("name") or "").strip()
+    ]
+    incidents.sort(key=lambda item: item[0])
+    return snapshot["overall"], tuple(components), tuple(incidents)
+
+
+def _format_polylane_status_message(lang: str, snapshot: dict) -> str:
+    overall = str(snapshot.get("overall") or "operational")
+    overall_key = _POSTHOG_OVERALL_KEYS.get(overall)
+    headline = (
+        t(overall_key, lang) if overall_key else _twitch_status_label(lang, overall)
+    )
+    lines = [
+        t("polylane_status_title", lang),
+        "",
+        headline,
+    ]
+    affected = [
+        comp
+        for comp in snapshot.get("components") or []
+        if isinstance(comp, dict)
+        and str(comp.get("status") or "operational") != "operational"
+    ]
+    if affected:
+        lines.append("")
+        lines.append(t("twitch_status_affected", lang))
+        for comp in affected:
+            name = html.escape(str(comp.get("name") or "?"))
+            label = html.escape(_twitch_status_label(lang, str(comp.get("status") or "")))
+            lines.append(f"• <b>{name}</b> — {label}")
+    incidents = [
+        inc for inc in snapshot.get("incidents") or [] if isinstance(inc, dict)
+    ]
+    if incidents:
+        lines.append("")
+        lines.append(t("twitch_status_incidents", lang))
+        for inc in incidents:
+            name = html.escape(
+                str(inc.get("name") or inc.get("title") or "?").strip() or "?"
+            )
+            lines.append(f"• {name}")
+    lines.append("")
+    lines.append(
+        f'<a href="{POLYLANE_STATUS_PAGE_URL}">{POLYLANE_STATUS_PAGE_URL}</a>'
+    )
+    lines.append("")
+    lines.append(_availability_status_footer(lang))
+    return "\n".join(lines)
+
+
+async def check_polylane_status(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Poll polylanestatus.com (Polylane API only); admin ∩ availability."""
+    from config import ADMIN_USER_IDS
+
+    try:
+        summary = await asyncio.to_thread(fetch_polylane_status)
+        fingerprint = polylane_watched_fingerprint(summary)
+    except Exception as exc:
+        logger.warning("Polylane status poll failed: %s", exc)
+        return
+
+    bot_data = context.application.bot_data
+    previous = bot_data.get("polylane_status_fingerprint")
+    bot_data["polylane_status_fingerprint"] = fingerprint
+    if previous is None:
+        return
+    if fingerprint == previous:
+        return
+
+    unhealthy = _statuspage_fingerprint_unhealthy(
+        fingerprint, ok_indicator="operational"
+    )
+    alerted_down = bool(bot_data.get("polylane_status_alerted_down"))
+    if not _should_notify_status_change(
+        unhealthy=unhealthy, alerted_down=alerted_down
+    ):
+        return
+
+    db: Database = bot_data["db"]
+    avail = set(db.get_availability_recipients())
+    user_ids = {uid for uid in ADMIN_USER_IDS if uid in avail}
+    if not user_ids:
+        return
+
+    snapshot = polylane_watched_snapshot(summary)
+    messages = {
+        locale: _format_polylane_status_message(locale, snapshot)
+        for locale in SUPPORTED_LOCALES
+    }
+    locale_rows = db.get_user_locales(list(user_ids))
+    for uid in user_ids:
+        locale = locale_rows.get(uid) or DEFAULT_LOCALE
+        message = messages.get(locale) or messages[DEFAULT_LOCALE]
+        await _send_dm_html(
+            context.bot,
+            db,
+            uid,
+            message,
+            reply_markup=dm_main_menu_keyboard(locale),
+            disable_web_page_preview=True,
+            outbound_kind="polylane_status",
+        )
+        await asyncio.sleep(_BROADCAST_SEND_PAUSE)
+    bot_data["polylane_status_alerted_down"] = unhealthy
 
 
 def _seconds_until_next_weekly_report() -> float:

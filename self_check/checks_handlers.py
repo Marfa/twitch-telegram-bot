@@ -1673,7 +1673,13 @@ def check_handlers() -> None:
     ph_msg_ok = _format_posthog_status_message("en", ph_ok)
     assert "All Systems Operational" in ph_msg_ok
     assert "EU Cloud" not in ph_msg_ok
-    from handlers.monitoring import _format_cursor_status_message
+    from handlers.monitoring import (
+        POLYLANE_STATUS_HOST,
+        _format_cursor_status_message,
+        _format_polylane_status_message,
+        polylane_watched_fingerprint,
+        polylane_watched_snapshot,
+    )
 
     cursor_msg = _format_cursor_status_message(
         "en",
@@ -1681,9 +1687,60 @@ def check_handlers() -> None:
     )
     assert "Cursor Status" in cursor_msg
     assert "Settings" in cursor_msg
+    poly_ok = {
+        "components": [
+            {"name": "Polylane Console", "status": "major_outage"},
+            {"name": "Polylane MCP", "status": "major_outage"},
+            {"name": "Polylane API", "status": "operational"},
+        ],
+        "incidents": [
+            {
+                "id": "console-only",
+                "name": "Polylane Console down",
+                "status": "investigating",
+            }
+        ],
+    }
+    poly_bad = {
+        "components": [
+            {"name": "Polylane Console", "status": "operational"},
+            {"name": "Polylane API", "status": "partial_outage"},
+        ],
+        "incidents": [
+            {
+                "id": "api-inc",
+                "name": "Polylane API partial outage",
+                "status": "investigating",
+            }
+        ],
+    }
+    poly_fp_ok = polylane_watched_fingerprint(poly_ok)
+    poly_fp_bad = polylane_watched_fingerprint(poly_bad)
+    assert poly_fp_ok[0] == "operational"
+    assert ("Polylane API", "operational") in poly_fp_ok[1]
+    assert all(name != "Polylane Console" for name, _ in poly_fp_ok[1])
+    assert poly_fp_ok[2] == ()
+    assert poly_fp_ok != poly_fp_bad
+    assert poly_fp_bad[0] == "partial_outage"
+    assert ("api-inc", "investigating") in poly_fp_bad[2]
+    assert "Polylane Console" not in [
+        c["name"] for c in polylane_watched_snapshot(poly_ok)["components"]
+    ]
+    poly_msg_ru = _format_polylane_status_message(
+        "ru", polylane_watched_snapshot(poly_bad)
+    )
+    assert "Polylane Status" in poly_msg_ru
+    assert "Polylane API" in poly_msg_ru
+    assert POLYLANE_STATUS_HOST in poly_msg_ru
+    assert "настройках" in poly_msg_ru
+    poly_msg_ok = _format_polylane_status_message(
+        "en", polylane_watched_snapshot(poly_ok)
+    )
+    assert "All Systems Operational" in poly_msg_ok
+    assert "Polylane Console" not in poly_msg_ok
     mon_src = Path("handlers/monitoring.py").read_text(encoding="utf-8")
-    # Cursor / PostHog: admins ∩ availability recipients (no beta audience).
-    assert mon_src.count("if uid in avail") >= 2
+    # Cursor / PostHog / Polylane: admins ∩ availability recipients (no beta audience).
+    assert mon_src.count("if uid in avail") >= 3
     assert "user_ids_with_active_enrollment" not in mon_src
 
     def _fake_sub(**kwargs):

@@ -975,6 +975,7 @@
   "drops_configure_locked": "Создание и правка Drops-оповещений доступны с Premium «Типы кроме старта». Можно поставить на паузу или удалить.",
   "twitch_status_title": "📡 Twitch Status",
   "posthog_status_title": "🦔 PostHog Status (US Cloud)",
+  "polylane_status_title": "🛰 Polylane Status (API)",
   "twitch_indicator_none": "✅ Все системы в норме",
   "twitch_indicator_minor": "⚠️ Незначительные проблемы",
   "twitch_indicator_major": "🟠 Серьёзные проблемы",

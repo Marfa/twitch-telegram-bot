@@ -212,6 +212,7 @@ from handlers.monitoring import (
     _seconds_until_next_premium_digest,
     _seconds_until_next_weekly_report,
     check_posthog_status,
+    check_polylane_status,
     check_twitch_status,
     check_cursor_status,
     daily_bot_stats_snapshot,
@@ -2718,6 +2719,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.bot_data["posthog_us_status_alerted_down"] = False
     app.bot_data["cursor_status_fingerprint"] = None
     app.bot_data["cursor_status_alerted_down"] = False
+    app.bot_data["polylane_status_fingerprint"] = None
+    app.bot_data["polylane_status_alerted_down"] = False
     app.bot_data["sending_broadcasts"] = set()
     app.add_error_handler(error_handler)
 
@@ -4589,6 +4592,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         first=55,
         name="check_cursor_status",
         job_kwargs=_stream_job_kwargs("check_cursor_status", misfire_grace=120),
+    )
+    app.job_queue.run_repeating(
+        check_polylane_status,
+        interval=120,
+        first=58,
+        name="check_polylane_status",
+        job_kwargs=_stream_job_kwargs("check_polylane_status", misfire_grace=120),
     )
     app.job_queue.run_repeating(
         poll_posthog_inbox_reports,

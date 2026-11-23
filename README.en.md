@@ -402,6 +402,8 @@ One-shot snapshot / approximate backfill: `python scripts/posthog-stats-snapshot
 
 Optional. Polylane has no outbound webhook to the bot — we **poll** `GET /v1/issues/{workspace}?status=new` every 5 minutes (`POLYLANE_API_KEY`). The first pass only seeds seen ids; later new `status=new` rows DM admins (RU via DeepL). Reopened / confirmed are ignored.
 
+Polylane status (`polylanestatus.com`, ~120 s): admins with availability alerts on — **Polylane API** only (issue poll); Console/MCP ignored.
+
 ## Architecture
 
 | Module | Role |
@@ -421,7 +423,7 @@ Optional. Polylane has no outbound webhook to the bot — we **poll** `GET /v1/i
 | `links.py` | `t.me/c/…/topic` parsing |
 | `health.py` | `/` landing (Dazzle, i18n), `/health` (DB ping + `check_streams` freshness; deploy gate), `/health/c/<name>` (components: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/media/compilations/{token}.mp4` (clip compilation download, 3-day TTL), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
-Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor) ~120 s, Telegram polling; public HTTPS: landing `/`, guide/webhook/privacy/placeholders, OAuth, `/health`, PostHog Issue+Report webhook.
+Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor, Polylane API) ~120 s, Telegram polling; public HTTPS: landing `/`, guide/webhook/privacy/placeholders, OAuth, `/health`, PostHog Issue+Report webhook.
 
 ## License
 

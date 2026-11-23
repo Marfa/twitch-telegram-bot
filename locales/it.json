@@ -955,6 +955,7 @@
   "drops_configure_locked": "Creare o modificare gli avvisi Drops richiede i tipi di avviso Premium. Puoi mettere in pausa o eliminare quelli esistenti.",
   "twitch_status_title": "📡 Stato Twitch",
   "posthog_status_title": "🦔 Stato PostHog (US Cloud)",
+  "polylane_status_title": "🛰 Stato Polylane (API)",
   "twitch_indicator_none": "✅ Tutti i sistemi operativi",
   "twitch_indicator_minor": "⚠️ Problemi minori",
   "twitch_indicator_major": "🟠 Problemi maggiori",

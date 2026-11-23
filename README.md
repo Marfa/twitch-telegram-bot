@@ -402,6 +402,8 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 
 Опционально. Исходящего webhook у Polylane нет — бот **polling** `GET /v1/issues/{workspace}?status=new` каждые 5 минут (`POLYLANE_API_KEY`). Первый проход только запоминает id (без спама); дальше новые `status=new` → DM админам (RU через DeepL). Reopen / confirmed не шлём.
 
+Статус Polylane (`polylanestatus.com`, ~120 сек): админам с включённой доступностью — только компонент **Polylane API** (poll issues); Console/MCP игнорируются.
+
 ## Архитектура
 
 | Модуль | Назначение |
@@ -421,7 +423,7 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 | `links.py` | Парсинг `t.me/c/…/тема` |
 | `health.py` | `/` лендинг (Dazzle, i18n), `/health` (DB ping + freshness `check_streams`; для deploy), `/health/c/<name>` (компоненты: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/media/compilations/{token}.mp4` (компиляция клипов, TTL 3 дня), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
 
-Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor) ~120 сек, Telegram polling; публичный HTTPS: лендинг `/`, guide/webhook/privacy/placeholders, OAuth, `/health`, PostHog Issue+Report webhook.
+Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor, Polylane API) ~120 сек, Telegram polling; публичный HTTPS: лендинг `/`, guide/webhook/privacy/placeholders, OAuth, `/health`, PostHog Issue+Report webhook.
 
 ## Лицензия
 
