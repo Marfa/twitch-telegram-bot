@@ -151,6 +151,9 @@ def main() -> None:
 
     check_flow_nav()
     check_callback_wiring()
+    from .checks_menu_panels import run as check_menu_panels
+
+    check_menu_panels()
     check_alert_setting_order()
     check_button_style_options()
     from .checks_alert_repeats import check_alert_repeats

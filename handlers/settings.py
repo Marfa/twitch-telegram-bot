@@ -456,14 +456,39 @@ async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+async def on_menu_other_conv_entry(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Conversation entry for the Other panel actions that open a wizard.
+
+    Returns the wizard state so the conversation owns the next keyboard.
+    """
+    from handlers.game_info import start_game_info
+    from handlers.stream_schedule import start_stream_schedule
+    from handlers.watch import start_watch_lucky
+
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    context.user_data.clear()
+    action = (query.data or "").split(":", 1)[-1]
+    if action == "watch":
+        return await start_watch_lucky(update, context)
+    if action == "game_info":
+        return await start_game_info(update, context)
+    return await start_stream_schedule(update, context)
+
+
 async def on_menu_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Inline Other panel actions (same features as reply other_menu)."""
     from handlers.ai_clips import start_ai_clips
     from handlers.channel_stats import start_channel_stats
     from handlers.follow_monitor import open_follow_monitor_menu
-    from handlers.game_info import start_game_info
-    from handlers.stream_schedule import start_stream_schedule
-    from handlers.watch import start_watch_lucky
 
     query = update.callback_query
     if not query:
@@ -474,10 +499,7 @@ async def on_menu_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "follow_monitor",
         "ai_clips",
         "whisper_alerts",
-        "create_schedule",
-        "watch",
         "chat",
-        "game_info",
         "channel_stats",
     ):
         return
@@ -498,16 +520,7 @@ async def on_menu_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if action == "chat":
         await open_stream_chat(update, context)
         return
-    if action == "watch":
-        await start_watch_lucky(update, context)
-        return
-    if action == "game_info":
-        await start_game_info(update, context)
-        return
-    if action == "channel_stats":
-        await start_channel_stats(update, context)
-        return
-    await start_stream_schedule(update, context)
+    await start_channel_stats(update, context)
 
 
 async def on_menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
