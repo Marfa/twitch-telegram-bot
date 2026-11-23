@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 import analytics
 import beta as beta_features
 import premium as prem
+import request_context
 from bot_helpers import _user_lang, _wizard, reply_chat_id
 from db import Database
 from i18n import all_wizard_nav_buttons, btn, is_menu_button, main_menu, t
@@ -287,6 +288,7 @@ async def on_gift_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(t("premium_gift_invalid", lang))
         return
     gift, until_unix = result
+    request_context.annotate(gift_kind=gift.kind)
     analytics.capture(
         user_id,
         "premium_gift_redeemed",
