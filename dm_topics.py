@@ -51,9 +51,6 @@ _bot_settings_ok: bool | None = None
 _icon_stickers_by_emoji: dict[str, str] | None = None
 # (user_id, topic_key) already edited with an emoji this process — avoid spam on alerts.
 _icons_applied: set[tuple[int, str]] = set()
-# Users whose alert topics already got ReplyKeyboardRemove this process.
-# Menu nav must not re-strip every tap — posting into Эфир / … bumps the sidebar.
-_reply_keyboards_stripped: set[int] = set()
 
 
 def topic_key_for_subscription(sub, alert_type: str) -> str | None:
@@ -286,11 +283,10 @@ def _thread_id_from_forum_topic(result: Any) -> int | None:
 
 
 def reset_topic_icon_cache_for_tests() -> None:
-    """Clear sticker + applied-icon + strip caches (self_check)."""
+    """Clear sticker + applied-icon caches (self_check)."""
     global _icon_stickers_by_emoji
     _icon_stickers_by_emoji = None
     _icons_applied.clear()
-    _reply_keyboards_stripped.clear()
 
 
 def user_alert_topic_thread_ids(db, user_id: int) -> list[int]:
@@ -357,17 +353,15 @@ async def strip_reply_keyboards_from_threads(
 async def strip_alert_topic_reply_keyboards(
     bot, db, user_id: int, *, force: bool = False
 ) -> None:
-    """Clear ReplyKeyboard from stored alert topics (once per user per process).
+    """Clear ReplyKeyboard from stored alert topics.
 
-    force=True after enabling topics. Menu / pulse reuse the cache so taps do
-    not post into every topic again.
+    Only when force=True (topics enable). Menu / pulse / redeploy must not
+    post into Эфир — that bumps the sidebar and looks like topics recreating.
     """
-    uid = int(user_id)
-    if not force and uid in _reply_keyboards_stripped:
+    if not force:
         return
     tids = user_alert_topic_thread_ids(db, user_id)
     await strip_reply_keyboards_from_threads(bot, user_id, tids)
-    _reply_keyboards_stripped.add(uid)
 
 
 # --- Private UI → General (alerts alone use message_thread_id) -----------------

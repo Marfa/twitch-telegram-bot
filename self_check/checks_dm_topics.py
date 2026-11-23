@@ -18,6 +18,7 @@ from dm_topics import (
     install_private_ui_to_general,
     private_ui_should_go_to_general,
     reset_topic_icon_cache_for_tests,
+    strip_alert_topic_reply_keyboards,
     strip_reply_keyboards_from_threads,
     sync_user_topic_icons,
     topic_key_for_subscription,
@@ -120,38 +121,30 @@ async def _check_menu_keyboard_goes_to_general() -> None:
         assert isinstance(skw.get("reply_markup"), ReplyKeyboardRemove)
         del_bh.assert_awaited()
 
-    reset_topic_icon_cache_for_tests()
     db = MagicMock()
     db.is_topics_enabled = MagicMock(return_value=True)
     db.get_user_topic_thread = MagicMock(
         side_effect=lambda _u, key: 50 if key == "live" else None
     )
     bot.send_message.reset_mock()
-    with patch(
-        "bot_helpers.delete_chat_message", new=AsyncMock()
-    ), patch("asyncio.sleep", new=AsyncMock()):
-        await send_reply_keyboard_menu(
-            bot, 7, "Прочее:", kb, db=db, user_id=7
-        )
-    # 1 strip (live) + 1 General menu
-    assert bot.send_message.await_count == 2
-    strip_call, menu_call = bot.send_message.await_args_list
-    assert strip_call.kwargs.get("message_thread_id") == 50
-    assert isinstance(strip_call.kwargs.get("reply_markup"), ReplyKeyboardRemove)
-    assert "message_thread_id" not in menu_call.kwargs
-    assert menu_call.kwargs.get("reply_markup") is kb
+    await send_reply_keyboard_menu(bot, 7, "Прочее:", kb, db=db, user_id=7)
+    # Menu must not strip topics — only force=True on topics enable does.
+    assert bot.send_message.await_count == 1
+    assert "message_thread_id" not in bot.send_message.await_args.kwargs
+    assert bot.send_message.await_args.kwargs.get("reply_markup") is kb
 
-    # Second menu tap must not post into topics again.
     bot.send_message.reset_mock()
     with patch(
         "bot_helpers.delete_chat_message", new=AsyncMock()
     ), patch("asyncio.sleep", new=AsyncMock()):
-        await send_reply_keyboard_menu(
-            bot, 7, "Настройки:", kb, db=db, user_id=7
-        )
+        await strip_alert_topic_reply_keyboards(bot, db, 7)
+        assert bot.send_message.await_count == 0
+        await strip_alert_topic_reply_keyboards(bot, db, 7, force=True)
     assert bot.send_message.await_count == 1
-    assert "message_thread_id" not in bot.send_message.await_args.kwargs
-    assert bot.send_message.await_args.kwargs.get("reply_markup") is kb
+    assert bot.send_message.await_args.kwargs.get("message_thread_id") == 50
+    assert isinstance(
+        bot.send_message.await_args.kwargs.get("reply_markup"), ReplyKeyboardRemove
+    )
 
 
 def _check_private_ui_general_gate() -> None:

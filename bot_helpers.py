@@ -328,14 +328,10 @@ async def send_reply_keyboard_menu(
 ) -> None:
     """Post a reply-keyboard menu into General (no message_thread_id).
 
-    Strips any sticky ReplyKeyboard from alert topics (Эфир, …) first when
-    topics are enabled — menu must not live there.
+    db/user_id kept for call-site compat; topic keyboard strip is only via
+    strip_alert_topic_reply_keyboards(..., force=True) on topics enable.
     """
-    uid = int(user_id) if user_id is not None else int(chat_id)
-    if db is not None and db.is_topics_enabled(uid):
-        from dm_topics import strip_alert_topic_reply_keyboards
-
-        await strip_alert_topic_reply_keyboards(bot, db, uid)
+    _ = (db, user_id)
     kwargs: dict = {"reply_markup": reply_markup}
     if parse_mode is not None:
         kwargs["parse_mode"] = parse_mode
@@ -353,11 +349,7 @@ async def _pulse_reply_keyboard(
     """Set reply keyboard in General without leaving a visible chat message."""
     from message_fx import message_fx_disabled
 
-    uid = int(user_id) if user_id is not None else int(chat_id)
-    if db is not None and db.is_topics_enabled(uid):
-        from dm_topics import strip_alert_topic_reply_keyboards
-
-        await strip_alert_topic_reply_keyboards(bot, db, uid)
+    _ = (db, user_id)
 
     # Draft/typing wrap can race with an immediate delete on some clients and
     # leave the reply keyboard collapsed after inline-only DMs (bot_update).
