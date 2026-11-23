@@ -375,6 +375,7 @@ from handlers.settings import (
     open_beta_mode_menu,
     open_other_menu,
     on_menu_other,
+    on_menu_other_conv_entry,
     on_menu_settings,
     open_auth_tokens_menu,
     on_auth_tokens_revoke_twitch,
@@ -3181,7 +3182,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_menu_other,
-            pattern=r"^menu_other:(follow_monitor|ai_clips|whisper_alerts|create_schedule|watch|chat|game_info|channel_stats)$",
+            pattern=r"^menu_other:(follow_monitor|ai_clips|whisper_alerts|chat|channel_stats)$",
         ),
         group=0,
     )
@@ -3502,6 +3503,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             MessageHandler(
                 _btn_filter("create_schedule"), dm_only_conv_entry(start_stream_schedule)
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(on_menu_other_conv_entry),
+                pattern=r"^menu_other:(create_schedule|watch|game_info)$",
             ),
             MessageHandler(
                 _btn_filter("language"), dm_only_conv_entry(start_language_change)
