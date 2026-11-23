@@ -2,14 +2,38 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
-from dm_topics import TOPIC_KEYS, topic_key_for_subscription
+from dm_topics import (
+    TOPIC_KEYS,
+    _TOPIC_ICON_COLOR,
+    _TOPIC_ICON_EMOJI,
+    ensure_all_user_topics,
+    ensure_user_topic,
+    icon_custom_emoji_id_for_topic,
+    reset_topic_icon_cache_for_tests,
+    sync_user_topic_icons,
+    topic_key_for_subscription,
+)
 from i18n import btn, topics_intro_keyboard, topics_support_keyboard, t
 
 
 def run() -> None:
     assert "live" in TOPIC_KEYS and "giveaway_watch" in TOPIC_KEYS
+    for key in TOPIC_KEYS:
+        assert key in _TOPIC_ICON_COLOR
+        assert key in _TOPIC_ICON_EMOJI and _TOPIC_ICON_EMOJI[key]
+        # createForumTopic only accepts these six RGB values.
+        assert _TOPIC_ICON_COLOR[key] in {
+            0x6FB9F0,
+            0xFFD67E,
+            0xCB86DB,
+            0x8EEE98,
+            0xFF93B2,
+            0xFB6F5F,
+        }
     for loc in ("ru", "en", "uk", "it"):
         assert btn("bot_settings", loc)
         assert t("topics_support_toggle", loc)
@@ -53,3 +77,67 @@ def run() -> None:
     )
     assert topic_key_for_subscription(upcoming, "schedule") == "upcoming"
     assert topic_key_for_subscription(upcoming, "schedule_cancel") == "upcoming"
+
+    asyncio.run(_check_topic_icons())
+
+
+async def _check_topic_icons() -> None:
+    reset_topic_icon_cache_for_tests()
+    bot = AsyncMock()
+    stickers = [
+        SimpleNamespace(emoji="📣", custom_emoji_id="id-live"),
+        SimpleNamespace(emoji="🏁", custom_emoji_id="id-end"),
+        SimpleNamespace(emoji="🎮", custom_emoji_id="id-cat"),
+        SimpleNamespace(emoji="📆", custom_emoji_id="id-up"),
+        SimpleNamespace(emoji="💎", custom_emoji_id="id-drops"),  # 🎁 missing → fallback
+        SimpleNamespace(emoji="🔎", custom_emoji_id="id-game"),
+        SimpleNamespace(emoji="📰", custom_emoji_id="id-rel"),
+        SimpleNamespace(emoji="🎉", custom_emoji_id="id-gv"),
+    ]
+    bot.get_forum_topic_icon_stickers = AsyncMock(return_value=stickers)
+    assert await icon_custom_emoji_id_for_topic(bot, "live") == "id-live"
+    assert await icon_custom_emoji_id_for_topic(bot, "drops") == "id-drops"
+    assert await icon_custom_emoji_id_for_topic(bot, "missing") is None
+
+    db = MagicMock()
+    db.get_user_topic_thread = MagicMock(return_value=None)
+    db.set_user_topic_thread = MagicMock()
+    bot.do_api_request = AsyncMock(
+        return_value={"message_thread_id": 42}
+    )
+    bot.edit_forum_topic = AsyncMock()
+    reset_topic_icon_cache_for_tests()
+    bot.get_forum_topic_icon_stickers = AsyncMock(return_value=stickers)
+
+    tid = await ensure_user_topic(bot, db, 7, "live", lang="en")
+    assert tid == 42
+    create_kwargs = bot.do_api_request.await_args.kwargs["api_kwargs"]
+    assert create_kwargs["icon_custom_emoji_id"] == "id-live"
+    assert create_kwargs["icon_color"] == _TOPIC_ICON_COLOR["live"]
+    db.set_user_topic_thread.assert_called_once_with(7, "live", 42)
+
+    # Existing threads: ensure_all creates none and syncs icons via editForumTopic.
+    db.get_user_topic_thread = MagicMock(
+        side_effect=lambda _u, key: 100 + TOPIC_KEYS.index(key)
+    )
+    bot.do_api_request.reset_mock()
+    bot.edit_forum_topic.reset_mock()
+    reset_topic_icon_cache_for_tests()
+    bot.get_forum_topic_icon_stickers = AsyncMock(return_value=stickers)
+    n = await ensure_all_user_topics(bot, db, 9, lang="en")
+    assert n == len(TOPIC_KEYS)
+    assert bot.do_api_request.await_count == 0
+    assert bot.edit_forum_topic.await_count == len(TOPIC_KEYS)
+    edited_ids = {
+        call.kwargs["icon_custom_emoji_id"]
+        for call in bot.edit_forum_topic.await_args_list
+    }
+    assert "id-live" in edited_ids
+    assert "id-drops" in edited_ids
+
+    bot.edit_forum_topic.reset_mock()
+    reset_topic_icon_cache_for_tests()
+    bot.get_forum_topic_icon_stickers = AsyncMock(return_value=stickers)
+    updated = await sync_user_topic_icons(bot, db, 9)
+    assert updated == len(TOPIC_KEYS)
+    assert bot.edit_forum_topic.await_count == len(TOPIC_KEYS)

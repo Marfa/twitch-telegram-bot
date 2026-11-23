@@ -26,16 +26,31 @@ GENERAL_TOPIC_ID = 1
 # Allowed icon_color values only (createForumTopic).
 _TOPIC_ICON_COLOR: dict[str, int] = {
     "live": 0x6FB9F0,
-    "end": 0xFF93C2,
-    "category": 0xFF865D,
+    "end": 0xFF93B2,
+    "category": 0x8EEE98,
     "upcoming": 0xFFD67E,
     "drops": 0xCB86DB,
     "game": 0xFB6F5F,
     "release": 0xFFD67E,
-    "giveaway_watch": 0xFF865D,
+    "giveaway_watch": 0xFF93B2,
+}
+
+# First emoji found in getForumTopicIconStickers wins per topic key.
+_TOPIC_ICON_EMOJI: dict[str, tuple[str, ...]] = {
+    "live": ("📣", "🔥", "⚡️"),
+    "end": ("🏁", "⏹", "💤"),
+    "category": ("🎮", "💻", "📱"),
+    "upcoming": ("📆", "📅", "⏰"),
+    "drops": ("🎁", "💎", "🛍"),
+    "game": ("🔎", "💡", "🎲"),
+    "release": ("📰", "📚", "🆕"),
+    "giveaway_watch": ("🎉", "🏆", "🎟"),
 }
 
 _bot_settings_ok: bool | None = None
+_icon_stickers_by_emoji: dict[str, str] | None = None
+# (user_id, topic_key) already edited with an emoji this process — avoid spam on alerts.
+_icons_applied: set[tuple[int, str]] = set()
 
 
 def topic_key_for_subscription(sub, alert_type: str) -> str | None:
@@ -81,6 +96,77 @@ async def ensure_bot_topic_settings(bot) -> bool:
         return False
 
 
+async def _load_icon_stickers(bot) -> dict[str, str]:
+    """emoji → custom_emoji_id from getForumTopicIconStickers (cached)."""
+    global _icon_stickers_by_emoji
+    if _icon_stickers_by_emoji is not None:
+        return _icon_stickers_by_emoji
+    by_emoji: dict[str, str] = {}
+    try:
+        stickers = await bot.get_forum_topic_icon_stickers()
+    except (BadRequest, TelegramError) as exc:
+        logger.warning("getForumTopicIconStickers failed: %s", exc)
+        _icon_stickers_by_emoji = {}
+        return _icon_stickers_by_emoji
+    except Exception as exc:
+        logger.warning("getForumTopicIconStickers unexpected: %s", exc)
+        _icon_stickers_by_emoji = {}
+        return _icon_stickers_by_emoji
+    for sticker in stickers or ():
+        emoji = getattr(sticker, "emoji", None) or ""
+        custom_id = getattr(sticker, "custom_emoji_id", None)
+        if not emoji or not custom_id:
+            continue
+        # Prefer first id for a given emoji glyph.
+        by_emoji.setdefault(str(emoji), str(custom_id))
+    _icon_stickers_by_emoji = by_emoji
+    logger.info("forum topic icon stickers loaded count=%s", len(by_emoji))
+    return by_emoji
+
+
+async def icon_custom_emoji_id_for_topic(bot, topic_key: str) -> str | None:
+    """Resolve a custom_emoji_id for topic_key from Telegram's allowed sticker set."""
+    if topic_key not in TOPIC_KEYS:
+        return None
+    by_emoji = await _load_icon_stickers(bot)
+    if not by_emoji:
+        return None
+    for emoji in _TOPIC_ICON_EMOJI.get(topic_key, ()):
+        custom_id = by_emoji.get(emoji)
+        if custom_id:
+            return custom_id
+    return None
+
+
+async def _apply_topic_icon(
+    bot, user_id: int, topic_key: str, thread_id: int, *, force: bool = False
+) -> bool:
+    """editForumTopic with emoji icon. Returns True when an edit was attempted ok."""
+    key = (int(user_id), topic_key)
+    if not force and key in _icons_applied:
+        return False
+    custom_id = await icon_custom_emoji_id_for_topic(bot, topic_key)
+    if not custom_id:
+        return False
+    try:
+        await bot.edit_forum_topic(
+            chat_id=user_id,
+            message_thread_id=int(thread_id),
+            icon_custom_emoji_id=custom_id,
+        )
+    except (BadRequest, TelegramError) as exc:
+        logger.warning(
+            "editForumTopic icon failed user=%s key=%s thread=%s: %s",
+            user_id,
+            topic_key,
+            thread_id,
+            exc,
+        )
+        return False
+    _icons_applied.add(key)
+    return True
+
+
 async def ensure_user_topic(
     bot,
     db,
@@ -94,20 +180,25 @@ async def ensure_user_topic(
         return None
     existing = db.get_user_topic_thread(user_id, topic_key)
     if existing:
+        await _apply_topic_icon(bot, user_id, topic_key, int(existing))
         return int(existing)
     await ensure_bot_topic_settings(bot)
     from i18n import t
 
     name = t(f"topic_name_{topic_key}", lang)
     icon_color = _TOPIC_ICON_COLOR.get(topic_key, 0x6FB9F0)
+    custom_id = await icon_custom_emoji_id_for_topic(bot, topic_key)
+    api_kwargs: dict[str, Any] = {
+        "chat_id": user_id,
+        "name": name[:128],
+        "icon_color": icon_color,
+    }
+    if custom_id:
+        api_kwargs["icon_custom_emoji_id"] = custom_id
     try:
         result = await bot.do_api_request(
             "createForumTopic",
-            api_kwargs={
-                "chat_id": user_id,
-                "name": name[:128],
-                "icon_color": icon_color,
-            },
+            api_kwargs=api_kwargs,
         )
     except (BadRequest, TelegramError) as exc:
         logger.warning(
@@ -124,17 +215,35 @@ async def ensure_user_topic(
         )
         return None
     db.set_user_topic_thread(user_id, topic_key, thread_id)
+    if custom_id:
+        _icons_applied.add((int(user_id), topic_key))
     return thread_id
 
 
 async def ensure_all_user_topics(bot, db, user_id: int, *, lang: str) -> int:
-    """Create all product topics for a user. Returns how many thread ids are stored."""
+    """Create all product topics for a user. Returns how many thread ids are stored.
+
+    Existing threads get an emoji icon via ensure_user_topic (once per process).
+    Opening Bot settings also runs sync_user_topic_icons for a full refresh.
+    """
     ok = 0
     for key in TOPIC_KEYS:
         tid = await ensure_user_topic(bot, db, user_id, key, lang=lang)
         if tid:
             ok += 1
     return ok
+
+
+async def sync_user_topic_icons(bot, db, user_id: int) -> int:
+    """Apply emoji icons to stored topic threads. Returns successful edits."""
+    updated = 0
+    for key in TOPIC_KEYS:
+        tid = db.get_user_topic_thread(user_id, key)
+        if not tid:
+            continue
+        if await _apply_topic_icon(bot, user_id, key, int(tid), force=True):
+            updated += 1
+    return updated
 
 
 async def resolve_alert_thread_id(
@@ -171,3 +280,10 @@ def _thread_id_from_forum_topic(result: Any) -> int | None:
         return int(raw)
     except (TypeError, ValueError):
         return None
+
+
+def reset_topic_icon_cache_for_tests() -> None:
+    """Clear sticker + applied-icon caches (self_check)."""
+    global _icon_stickers_by_emoji
+    _icon_stickers_by_emoji = None
+    _icons_applied.clear()

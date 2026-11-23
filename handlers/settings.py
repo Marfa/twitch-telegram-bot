@@ -286,9 +286,18 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _send_bot_settings_screen(
     bot, chat_id: int, db: Database, user_id: int, lang: str
 ) -> None:
+    from dm_topics import sync_user_topic_icons
     from i18n import bot_settings_menu, topics_support_keyboard
 
     enabled = db.is_topics_enabled(user_id)
+    if enabled:
+        # Best-effort: refresh emoji icons on already-created topics (once per open).
+        try:
+            await sync_user_topic_icons(bot, db, user_id)
+        except Exception:
+            logger.warning(
+                "sync_user_topic_icons failed user=%s", user_id, exc_info=True
+            )
     await bot.send_message(
         chat_id,
         t("menu_bot_settings", lang),
