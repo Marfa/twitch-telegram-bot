@@ -212,6 +212,10 @@ def _check_submenu_reply_keyboards() -> None:
                 settings_menu_inline(loc, beta_enrolled=0, beta_total=0),
             ),
             ("admin_menu_inline", admin_menu_inline(loc)),
+            (
+                "admin_menu_inline_demo",
+                admin_menu_inline(loc, demo_active=True),
+            ),
             ("bot_settings_menu_inline", bot_settings_menu_inline(loc)),
             ("auth_tokens_menu_inline", auth_tokens_menu_inline(loc)),
             ("partner_menu_inline", partner_menu_inline(loc)),

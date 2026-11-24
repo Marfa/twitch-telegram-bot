@@ -1001,10 +1001,25 @@ def admin_menu(lang: str) -> ReplyKeyboardMarkup:
     return _reply_keyboard(rows)
 
 
-def admin_menu_inline(lang: str) -> InlineKeyboardMarkup:
-    """Admin tools as a message — keeps the main reply keyboard unchanged."""
+def admin_menu_inline(
+    lang: str, *, demo_active: bool = False
+) -> InlineKeyboardMarkup:
+    """Admin tools as a message — keeps the main reply keyboard unchanged.
+
+    In demo mode only the Demo toggle is shown (exit); full tools stay hidden.
+    """
     from config import show_partner_ui
 
+    if demo_active:
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        btn("demo", lang), callback_data="menu_admin:demo"
+                    )
+                ]
+            ]
+        )
     keys = ["broadcast", "stats", "reload_locales"]
     if show_partner_ui():
         keys.append("admin_withdrawals")

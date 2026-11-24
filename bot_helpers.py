@@ -305,10 +305,11 @@ def _user_notifications_paused(db: Database, user_id: int) -> bool:
 
 
 def _menu(lang: str, user_id: int) -> ReplyKeyboardMarkup:
+    # Admin stays on the reply keyboard in demo; exit demo is inline under Admin.
     return main_menu(
         lang,
-        is_admin=_is_admin(user_id) and not demo_mode.is_active(user_id),
-        demo_active=demo_mode.is_active(user_id),
+        is_admin=_is_admin(user_id),
+        demo_active=False,
     )
 
 

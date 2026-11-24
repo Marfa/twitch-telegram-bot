@@ -2337,18 +2337,13 @@ async def open_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not _is_admin(user_id):
         return
     lang = _user_lang(context, user_id)
-    if demo_mode.is_active(user_id):
-        await context.bot.send_message(
-            reply_chat_id(update),
-            t("demo_on", lang),
-            reply_markup=_menu(lang, user_id),
-        )
-        return
     # Inline panel — do not replace the main reply keyboard.
+    # In demo: only the Demo button (exit); full admin tools stay hidden.
+    demo_on = demo_mode.is_active(user_id)
     await context.bot.send_message(
         reply_chat_id(update),
-        t("menu_admin", lang),
-        reply_markup=admin_menu_inline(lang),
+        t("demo_on" if demo_on else "menu_admin", lang),
+        reply_markup=admin_menu_inline(lang, demo_active=demo_on),
     )
 
 
@@ -2409,12 +2404,14 @@ async def toggle_demo_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     db: Database = context.application.bot_data["db"]
     context.user_data.clear()
     if demo_mode.is_active(user_id):
+        from i18n import admin_menu_inline
+
         db.delete_demo_subscriptions(user_id)
         demo_mode.restore_user_state(db, user_id)
         demo_mode.deactivate(user_id)
         await update.effective_message.reply_text(
             t("demo_off", lang),
-            reply_markup=admin_menu(lang),
+            reply_markup=admin_menu_inline(lang),
         )
         return
     await _enter_demo_mode(update, context, user_id, lang, db)
@@ -2470,10 +2467,12 @@ async def _enter_demo_mode(
                 notify_on_end=False,
                 is_demo=True,
             )
+    from i18n import admin_menu_inline
+
     demo_mode.activate(user_id)
     await update.effective_message.reply_text(
         t("demo_on", lang),
-        reply_markup=_menu(lang, user_id),
+        reply_markup=admin_menu_inline(lang, demo_active=True),
     )
 
 
