@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import Application, ContextTypes
 
-from bot_helpers import _user_notifications_paused
+from bot_helpers import _send_dm_html, _user_notifications_paused
 from db import (
     Database,
     Subscription,
@@ -745,12 +745,65 @@ async def _send_delayed_category_notification(
     )
 
 
+async def _notify_premium_expiries(
+    context: ContextTypes.DEFAULT_TYPE, db: Database
+) -> None:
+    """Send Premium trial-expiry, pay-reminder and Stars-grace DMs for one tick.
+
+    Each DM is that recipient's own outcome (``_send_dm_html``), so a blocked or
+    failed send leaves the rest of the loop, and the rest of the tick, running.
+    """
+    import premium as prem
+    from bot_helpers import _user_lang
+    from config import CHECK_INTERVAL
+
+    expired_trials = await asyncio.to_thread(prem.expire_due_trials, db)
+    if expired_trials:
+        logger.info("Expired %s premium trial(s)", len(expired_trials))
+        max_age = max(int(CHECK_INTERVAL) * 2, 120)
+        now = int(datetime.now(timezone.utc).timestamp())
+        for user_id, trial_until in expired_trials:
+            if not prem.trial_expiry_should_notify(
+                trial_until, now=now, max_age_sec=max_age
+            ):
+                continue
+            if db.is_bot_blocked(user_id):
+                continue
+            lang = _user_lang(context, user_id) or DEFAULT_LOCALE
+            await _send_dm_html(
+                context.bot,
+                db,
+                user_id,
+                t("premium_trial_expired", lang),
+                outbound_kind="trial_expiry",
+            )
+
+    from premium_handlers import send_pay_reminder_dm, send_stars_grace_dm
+
+    pay_reminders = await asyncio.to_thread(prem.claim_pay_reminders, db)
+    if pay_reminders:
+        logger.info("Premium pay reminder(s): %s", len(pay_reminders))
+        for reminder in pay_reminders:
+            if db.is_bot_blocked(reminder.user_id):
+                continue
+            lang = _user_lang(context, reminder.user_id) or DEFAULT_LOCALE
+            await send_pay_reminder_dm(context.bot, db, reminder, lang)
+
+    stars_grace_new = await asyncio.to_thread(prem.process_stars_expiry_grace, db)
+    if stars_grace_new:
+        logger.info("Stars Premium grace started for %s user(s)", len(stars_grace_new))
+        for user_id in stars_grace_new:
+            if db.is_bot_blocked(user_id):
+                continue
+            lang = _user_lang(context, user_id) or DEFAULT_LOCALE
+            await send_stars_grace_dm(context.bot, db, user_id, lang)
+
+
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     import time as _time
 
     import premium as prem
     from bot import _render_sub_template
-    from bot_helpers import _user_lang
     from config import CHECK_INTERVAL
 
     started = _time.monotonic()
@@ -783,71 +836,7 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
 
     db: Database = context.application.bot_data["db"]
-    expired_trials = await asyncio.to_thread(prem.expire_due_trials, db)
-    if expired_trials:
-        logger.info("Expired %s premium trial(s)", len(expired_trials))
-        max_age = max(int(CHECK_INTERVAL) * 2, 120)
-        now = int(datetime.now(timezone.utc).timestamp())
-        for user_id, trial_until in expired_trials:
-            if not prem.trial_expiry_should_notify(
-                trial_until, now=now, max_age_sec=max_age
-            ):
-                continue
-            if db.is_bot_blocked(user_id):
-                continue
-            lang = _user_lang(context, user_id) or DEFAULT_LOCALE
-            try:
-                await context.bot.send_message(
-                    user_id, t("premium_trial_expired", lang)
-                )
-            except Forbidden:
-                from handlers.delivery import apply_user_blocked
-
-                apply_user_blocked(db, user_id, source="trial_expiry")
-            except BadRequest:
-                logger.exception(
-                    "Failed to send trial expiry notice to %s", user_id
-                )
-
-    from premium_handlers import send_pay_reminder_dm, send_stars_grace_dm
-
-    pay_reminders = await asyncio.to_thread(prem.claim_pay_reminders, db)
-    if pay_reminders:
-        logger.info("Premium pay reminder(s): %s", len(pay_reminders))
-        for reminder in pay_reminders:
-            if db.is_bot_blocked(reminder.user_id):
-                continue
-            lang = _user_lang(context, reminder.user_id) or DEFAULT_LOCALE
-            try:
-                await send_pay_reminder_dm(context.bot, db, reminder, lang)
-            except Forbidden:
-                from handlers.delivery import apply_user_blocked
-
-                apply_user_blocked(
-                    db, reminder.user_id, source=f"{reminder.kind}_pay_remind"
-                )
-            except BadRequest:
-                logger.exception(
-                    "Failed to send %s pay reminder to %s",
-                    reminder.kind,
-                    reminder.user_id,
-                )
-
-    stars_grace_new = await asyncio.to_thread(prem.process_stars_expiry_grace, db)
-    if stars_grace_new:
-        logger.info("Stars Premium grace started for %s user(s)", len(stars_grace_new))
-        for user_id in stars_grace_new:
-            if db.is_bot_blocked(user_id):
-                continue
-            lang = _user_lang(context, user_id) or DEFAULT_LOCALE
-            try:
-                await send_stars_grace_dm(context.bot, db, user_id, lang)
-            except Forbidden:
-                from handlers.delivery import apply_user_blocked
-
-                apply_user_blocked(db, user_id, source="stars_premium_grace")
-            except BadRequest:
-                logger.exception("Failed to send Stars Premium grace warn to %s", user_id)
+    await _notify_premium_expiries(context, db)
 
     paused_unentitled = await prem.expire_unentitled_alerts(context.bot, db)
     if paused_unentitled:
