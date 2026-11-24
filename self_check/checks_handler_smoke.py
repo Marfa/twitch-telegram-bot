@@ -1254,7 +1254,7 @@ async def _smoke_premium_and_menus(db) -> None:
     update = _msg_update(_FREE_UID)
     ctx = _ctx(application)
     await open_partner_menu(update, ctx)
-    update.effective_message.reply_text.assert_awaited()
+    application.bot.send_message.assert_awaited()
 
     update = _msg_update(_FREE_UID)
     ctx = _ctx(application)
@@ -1288,7 +1288,7 @@ async def _smoke_premium_and_menus(db) -> None:
     ctx = _ctx(application)
     with patch("handlers.admin_stats._can_use_admin_tools", return_value=True):
         await admin_show_stats(update, ctx)
-    update.effective_message.reply_text.assert_awaited()
+    application.bot.send_message.assert_awaited()
 
 
 async def _smoke_delivery_and_helpers(db) -> None:
