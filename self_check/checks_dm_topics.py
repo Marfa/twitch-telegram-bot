@@ -74,10 +74,64 @@ def _check_new_user_topics_default_on() -> None:
         assert db.is_topics_enabled(204) is True
 
 
+def _check_start_offloads_flag_lookup() -> None:
+    """The PostHog flag request blocks, so /start must run it off the event loop."""
+    import tempfile
+    import time
+    from pathlib import Path
+
+    import analytics
+    import bot as bot_module
+    from db import open_database
+    from self_check.checks_flow_nav import _app, _ctx, _msg_update
+
+    def slow_flag(user_id: int, key: str) -> str:
+        time.sleep(0.3)
+        return "control"
+
+    async def _scenario() -> int:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = open_database(Path(tmp) / "start_loop.db")
+            application, _bot = _app(db)
+            user_id = 900777
+            update = _msg_update(user_id, "/start")
+            ctx = _ctx(application)
+            ctx.args = []
+            ticks = 0
+            stop = False
+
+            async def _ticker() -> None:
+                nonlocal ticks
+                while not stop:
+                    ticks += 1
+                    await asyncio.sleep(0.02)
+
+            ticker = asyncio.create_task(_ticker())
+            try:
+                with patch.object(
+                    analytics, "get_feature_flag", side_effect=slow_flag
+                ), patch.object(
+                    bot_module, "sync_stream_chat_menu_button", new=AsyncMock()
+                ):
+                    await bot_module.start(update, ctx)
+            finally:
+                stop = True
+                await ticker
+
+            assert db.user_exists(user_id)
+            # "control" switches topics off, so this also proves the awaited
+            # result reaches the new user instead of being dropped.
+            assert db.is_topics_enabled(user_id) is False
+            return ticks
+
+    ticks = asyncio.run(_scenario())
+    assert ticks > 5, f"/start blocked the event loop (ticker turns={ticks})"
+
 
 def run() -> None:
     assert "live" in TOPIC_KEYS and "giveaway_watch" in TOPIC_KEYS
     _check_new_user_topics_default_on()
+    _check_start_offloads_flag_lookup()
     for key in TOPIC_KEYS:
         assert key in _TOPIC_ICON_COLOR
         assert key in _TOPIC_ICON_EMOJI and _TOPIC_ICON_EMOJI[key]

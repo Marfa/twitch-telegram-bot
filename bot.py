@@ -1161,7 +1161,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     topics_variant: str | None = None
     lucky_nth: int | None = None
     if is_first_start:
-        topics_variant = analytics.apply_topics_default_experiment(db, user_id)
+        # PostHog flag evaluation is a blocking HTTPS request; keep it off the
+        # single event loop so other users, alerts and the health probe run.
+        topics_variant = await asyncio.to_thread(
+            analytics.apply_topics_default_experiment, db, user_id
+        )
         from config import ENABLE_PREMIUM
         import premium_lucky as lucky
 
