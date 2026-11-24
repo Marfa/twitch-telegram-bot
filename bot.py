@@ -228,6 +228,7 @@ from handlers.monitoring import (
 )
 from handlers.partner import (
     admin_show_withdrawals,
+    on_menu_partner,
     on_referral_withdrawal_action,
     open_partner_menu,
     partner_request_withdraw,
@@ -268,6 +269,7 @@ from handlers.broadcast import (
     admin_select_type,
     on_broadcast_feedback,
     on_dm_main_menu,
+    on_menu_broadcast,
     on_sb_delete,
     on_sb_edit_pick,
     on_sb_edit_text_click,
@@ -377,6 +379,8 @@ from handlers.settings import (
     on_menu_other,
     on_menu_other_conv_entry,
     on_menu_settings,
+    on_menu_bot_settings,
+    on_menu_auth,
     open_auth_tokens_menu,
     on_auth_tokens_revoke_twitch,
     on_auth_tokens_revoke_donationalerts,
@@ -2378,6 +2382,21 @@ async def on_menu_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await toggle_demo_mode(update, context)
 
 
+def _ack_menu_bot_settings_then(handler):
+    """Conversation entry from Bot settings / Broadcast inline buttons."""
+
+    async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from handlers.settings import _ack_inline_panel
+
+        query = update.callback_query
+        if query:
+            await query.answer()
+            await _ack_inline_panel(query)
+        return await handler(update, context)
+
+    return wrapped
+
+
 async def toggle_demo_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     if not _is_admin(user_id):
@@ -3206,6 +3225,34 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(
+            on_menu_bot_settings,
+            pattern=r"^menu_bot_settings:(back|show|auth_tokens|topics_support|default_alert_settings)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_menu_auth,
+            pattern=r"^menu_auth:(back|revoke_twitch|revoke_donationalerts)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_menu_partner,
+            pattern=r"^menu_partner:(back|stats|link|withdraw|withdrawals)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_menu_broadcast,
+            pattern=r"^menu_broadcast:(back|scheduled_broadcasts|sent_broadcasts)$",
+        ),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(on_sys_availability_toggle, pattern=r"^sys_availability:toggle$"),
         group=0,
     )
@@ -3525,6 +3572,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             MessageHandler(
                 _btn_filter("broadcast_new"), dm_only_conv_entry(admin_broadcast_start)
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(_ack_menu_bot_settings_then(start_language_change)),
+                pattern=r"^menu_bot_settings:language$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(_ack_menu_bot_settings_then(start_ignored_words)),
+                pattern=r"^menu_bot_settings:ignored_words$",
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(_ack_menu_bot_settings_then(admin_broadcast_start)),
+                pattern=r"^menu_broadcast:broadcast_new$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_import_mode_sync), pattern=r"^import_mode:sync$"

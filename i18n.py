@@ -538,7 +538,7 @@ def settings_menu_inline(
 
 
 def bot_settings_menu(lang: str) -> ReplyKeyboardMarkup:
-    """Language, ignore words, OAuth tokens, topics, default stream-alert settings."""
+    """Legacy reply keyboard. Prefer bot_settings_menu_inline."""
     return _reply_keyboard(
         _pair_reply_rows(
             [
@@ -553,12 +553,41 @@ def bot_settings_menu(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
+def bot_settings_menu_inline(lang: str) -> InlineKeyboardMarkup:
+    """Bot settings panel — does not replace the main reply keyboard."""
+    buttons = [
+        InlineKeyboardButton(
+            btn("ignored_words", lang),
+            callback_data="menu_bot_settings:ignored_words",
+        ),
+        InlineKeyboardButton(
+            btn("language", lang), callback_data="menu_bot_settings:language"
+        ),
+        InlineKeyboardButton(
+            btn("auth_tokens", lang), callback_data="menu_bot_settings:auth_tokens"
+        ),
+        InlineKeyboardButton(
+            btn("topics_support", lang),
+            callback_data="menu_bot_settings:topics_support",
+        ),
+        InlineKeyboardButton(
+            btn("default_alert_settings", lang),
+            callback_data="menu_bot_settings:default_alert_settings",
+        ),
+        InlineKeyboardButton(
+            btn("back_settings", lang), callback_data="menu_bot_settings:back"
+        ),
+    ]
+    return InlineKeyboardMarkup(_pair_inline_rows(buttons))
+
+
 def topics_support_keyboard(
     lang: str,
     *,
     enabled: bool,
     callback_data: str = "topics:toggle",
     with_main_menu: bool = False,
+    with_back_bot_settings: bool = False,
 ) -> InlineKeyboardMarkup:
     mark = "✅ " if enabled else "⬜️ "
     rows: list[list[InlineKeyboardButton]] = [
@@ -569,6 +598,15 @@ def topics_support_keyboard(
             )
         ]
     ]
+    if with_back_bot_settings:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    btn("back_bot_settings", lang),
+                    callback_data="menu_bot_settings:show",
+                )
+            ]
+        )
     if with_main_menu:
         rows.append([dm_main_menu_button(lang)])
     return InlineKeyboardMarkup(rows)
@@ -585,6 +623,7 @@ def topics_intro_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 
 def auth_tokens_menu(lang: str) -> ReplyKeyboardMarkup:
+    """Legacy reply keyboard. Prefer auth_tokens_menu_inline."""
     return _reply_keyboard(
         [
             [KeyboardButton(btn("auth_tokens_revoke_twitch", lang))],
@@ -594,7 +633,33 @@ def auth_tokens_menu(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
+def auth_tokens_menu_inline(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    btn("auth_tokens_revoke_twitch", lang),
+                    callback_data="menu_auth:revoke_twitch",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("auth_tokens_revoke_donationalerts", lang),
+                    callback_data="menu_auth:revoke_donationalerts",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    btn("back_bot_settings", lang),
+                    callback_data="menu_auth:back",
+                )
+            ],
+        ]
+    )
+
+
 def partner_menu(lang: str) -> ReplyKeyboardMarkup:
+    """Legacy reply keyboard. Prefer partner_menu_inline."""
     return _reply_keyboard(
         [
             [
@@ -610,6 +675,34 @@ def partner_menu(lang: str) -> ReplyKeyboardMarkup:
             ],
         ]
     )
+
+
+def partner_menu_inline(lang: str) -> InlineKeyboardMarkup:
+    rows = _pair_inline_rows(
+        [
+            InlineKeyboardButton(
+                btn("partner_stats", lang), callback_data="menu_partner:stats"
+            ),
+            InlineKeyboardButton(
+                btn("partner_link", lang), callback_data="menu_partner:link"
+            ),
+            InlineKeyboardButton(
+                btn("partner_withdraw", lang), callback_data="menu_partner:withdraw"
+            ),
+            InlineKeyboardButton(
+                btn("partner_withdrawals", lang),
+                callback_data="menu_partner:withdrawals",
+            ),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                btn("back_settings", lang), callback_data="menu_partner:back"
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def premium_actions_keyboard(
@@ -941,6 +1034,7 @@ def withdrawal_actions_keyboard(withdrawal_id: int, lang: str) -> InlineKeyboard
 
 
 def broadcast_menu(lang: str) -> ReplyKeyboardMarkup:
+    """Legacy reply keyboard. Prefer broadcast_menu_inline."""
     buttons = [
         KeyboardButton(btn("broadcast_new", lang)),
         KeyboardButton(btn("scheduled_broadcasts", lang)),
@@ -948,6 +1042,24 @@ def broadcast_menu(lang: str) -> ReplyKeyboardMarkup:
         KeyboardButton(btn("back", lang)),
     ]
     return _reply_keyboard(_pair_reply_rows(buttons))
+
+
+def broadcast_menu_inline(lang: str) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(
+            btn("broadcast_new", lang), callback_data="menu_broadcast:broadcast_new"
+        ),
+        InlineKeyboardButton(
+            btn("scheduled_broadcasts", lang),
+            callback_data="menu_broadcast:scheduled_broadcasts",
+        ),
+        InlineKeyboardButton(
+            btn("sent_broadcasts", lang),
+            callback_data="menu_broadcast:sent_broadcasts",
+        ),
+        InlineKeyboardButton(btn("back", lang), callback_data="menu_broadcast:back"),
+    ]
+    return InlineKeyboardMarkup(_pair_inline_rows(buttons))
 
 
 def dm_main_menu_button(lang: str) -> InlineKeyboardButton:

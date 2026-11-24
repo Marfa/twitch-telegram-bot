@@ -25,7 +25,7 @@ import premium as prem
 from bot_helpers import (
     _menu,
     _pulse_reply_keyboard,
-    _settings_kb,
+    _settings_inline,
     _user_lang,
     _user_notifications_paused,
     is_private_chat,
@@ -45,7 +45,7 @@ from i18n import (
     ignored_words_keyboard,
     is_menu_button,
     language_keyboard,
-    other_menu,
+    other_menu_inline,
     sys_notifications_keyboard,
     t,
     whisper_alerts_keyboard,
@@ -274,8 +274,6 @@ async def _show_ignored_words_screen(
     return _global_ignore_state()
 
 async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from bot_helpers import _settings_inline
-
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
@@ -287,15 +285,32 @@ async def open_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+async def _dismiss_inline_panel(query) -> None:
+    try:
+        await query.delete_message()
+    except BadRequest:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except BadRequest:
+            pass
+
+
+async def _ack_inline_panel(query) -> None:
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+
+
 async def _send_bot_settings_screen(
     bot, chat_id: int, db: Database, user_id: int, lang: str
 ) -> None:
-    from i18n import bot_settings_menu
+    from i18n import bot_settings_menu_inline
 
     await bot.send_message(
         chat_id,
         t("menu_bot_settings", lang),
-        reply_markup=bot_settings_menu(lang),
+        reply_markup=bot_settings_menu_inline(lang),
     )
 
 
@@ -312,8 +327,7 @@ async def open_bot_settings_menu(
 async def open_topics_support_menu(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    from bot_helpers import _pulse_reply_keyboard
-    from i18n import bot_settings_menu, topics_support_keyboard
+    from i18n import topics_support_keyboard
 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
@@ -323,18 +337,16 @@ async def open_topics_support_menu(
     await context.bot.send_message(
         chat_id,
         t("topics_support_on" if enabled else "topics_support_off", lang),
-        reply_markup=topics_support_keyboard(lang, enabled=enabled),
-    )
-    # Keep bot-settings reply keyboard after an inline-only screen.
-    await _pulse_reply_keyboard(
-        context.bot, chat_id, bot_settings_menu(lang), db=db, user_id=user_id
+        reply_markup=topics_support_keyboard(
+            lang, enabled=enabled, with_back_bot_settings=True
+        ),
     )
 
 
 async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot_helpers import _pulse_reply_keyboard
     from dm_topics import ensure_all_user_topics, ensure_bot_topic_settings
-    from i18n import bot_settings_menu, topics_support_keyboard
+    from i18n import topics_support_keyboard
 
     query = update.callback_query
     if not query:
@@ -360,6 +372,7 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     enabled=False,
                     callback_data=cb,
                     with_main_menu=from_intro,
+                    with_back_bot_settings=not from_intro,
                 ),
             )
             return
@@ -375,6 +388,7 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             enabled=enabled,
             callback_data=cb,
             with_main_menu=from_intro,
+            with_back_bot_settings=not from_intro,
         ),
     )
     chat_id = query.message.chat_id if query.message else user_id
@@ -389,23 +403,19 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await _pulse_reply_keyboard(
             context.bot, chat_id, _menu(lang, user_id), db=db, user_id=user_id
         )
-        return
-    await _pulse_reply_keyboard(
-        context.bot, chat_id, bot_settings_menu(lang), db=db, user_id=user_id
-    )
 
 
 async def open_auth_tokens_menu(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    from i18n import auth_tokens_menu
+    from i18n import auth_tokens_menu_inline
 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t("auth_tokens_menu", lang),
-        reply_markup=auth_tokens_menu(lang),
+        reply_markup=auth_tokens_menu_inline(lang),
     )
 
 
@@ -413,7 +423,7 @@ async def on_auth_tokens_revoke_twitch(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     from handlers.background_jobs import sync_optional_jobs
-    from i18n import auth_tokens_menu
+    from i18n import auth_tokens_menu_inline
     from oauth_tokens import revoke_twitch_oauth_tokens
 
     user_id = update.effective_user.id
@@ -421,26 +431,111 @@ async def on_auth_tokens_revoke_twitch(
     db: Database = context.application.bot_data["db"]
     revoke_twitch_oauth_tokens(db, user_id)
     sync_optional_jobs(context.application.job_queue, db)
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t("auth_tokens_revoked_twitch", lang),
-        reply_markup=auth_tokens_menu(lang),
+        reply_markup=auth_tokens_menu_inline(lang),
     )
 
 
 async def on_auth_tokens_revoke_donationalerts(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    from i18n import auth_tokens_menu
+    from i18n import auth_tokens_menu_inline
     from oauth_tokens import revoke_donationalerts_oauth_tokens
 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     revoke_donationalerts_oauth_tokens(db, user_id)
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t("auth_tokens_revoked_donationalerts", lang),
-        reply_markup=auth_tokens_menu(lang),
+        reply_markup=auth_tokens_menu_inline(lang),
     )
+
+
+async def on_menu_bot_settings(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Bot-settings panel navigation (language/ignore are Conversation entries)."""
+    from handlers.stream_defaults import open_stream_defaults_editor
+    from i18n import auth_tokens_menu_inline, bot_settings_menu_inline
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    action = (query.data or "").split(":", 1)[-1]
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if action == "back":
+        try:
+            await query.edit_message_text(
+                t("menu_settings", lang),
+                reply_markup=_settings_inline(lang, db, user_id),
+            )
+        except BadRequest:
+            await _dismiss_inline_panel(query)
+            await open_settings_menu(update, context)
+        return
+    if action == "show":
+        try:
+            await query.edit_message_text(
+                t("menu_bot_settings", lang),
+                reply_markup=bot_settings_menu_inline(lang),
+            )
+        except BadRequest:
+            await _ack_inline_panel(query)
+            await open_bot_settings_menu(update, context)
+        return
+    if action == "auth_tokens":
+        try:
+            await query.edit_message_text(
+                t("auth_tokens_menu", lang),
+                reply_markup=auth_tokens_menu_inline(lang),
+            )
+        except BadRequest:
+            await _ack_inline_panel(query)
+            await open_auth_tokens_menu(update, context)
+        return
+    if action == "topics_support":
+        await _ack_inline_panel(query)
+        await open_topics_support_menu(update, context)
+        return
+    if action == "default_alert_settings":
+        await _ack_inline_panel(query)
+        await open_stream_defaults_editor(update, context)
+        return
+
+
+async def on_menu_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from i18n import bot_settings_menu_inline
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    action = (query.data or "").split(":", 1)[-1]
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    if action == "back":
+        try:
+            await query.edit_message_text(
+                t("menu_bot_settings", lang),
+                reply_markup=bot_settings_menu_inline(lang),
+            )
+        except BadRequest:
+            await _dismiss_inline_panel(query)
+            await open_bot_settings_menu(update, context)
+        return
+    await _ack_inline_panel(query)
+    if action == "revoke_twitch":
+        await on_auth_tokens_revoke_twitch(update, context)
+        return
+    if action == "revoke_donationalerts":
+        await on_auth_tokens_revoke_donationalerts(update, context)
 
 
 async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -562,7 +657,7 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not beta_features.is_enabled(db, user_id, BETA_FEATURE_ID):
         await update.effective_message.reply_text(
             t("chat_beta_required", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=other_menu_inline(lang),
         )
         return
     open_url = chat_webapp_url(
@@ -572,7 +667,7 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not open_url:
         await update.effective_message.reply_text(
             t("chat_beta_required", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=other_menu_inline(lang),
         )
         return
     await sync_stream_chat_menu_button(context.bot, db, user_id)
@@ -733,7 +828,7 @@ async def on_beta_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await context.bot.send_message(
         reply_chat_id(update),
         toast,
-        reply_markup=_settings_kb(lang, db, user_id),
+        reply_markup=_settings_inline(lang, db, user_id),
     )
 
 async def start_ignored_words(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -873,8 +968,6 @@ async def receive_ignore_igdb_text(
             return await _resume_after_ignore_igdb(
                 update, context, user_id=user_id, lang=lang, db=db
             )
-        from bot_helpers import _settings_inline
-
         await context.bot.send_message(
             reply_chat_id(update),
             t("menu_settings", lang),
@@ -1403,7 +1496,7 @@ async def complete_whisper_oauth(
         await application.bot.send_message(
             owner_id,
             t(key, lang),
-            reply_markup=_settings_kb(lang, db, owner_id),
+            reply_markup=_settings_inline(lang, db, owner_id),
         )
         return
     info = token_info or {}
@@ -1412,7 +1505,7 @@ async def complete_whisper_oauth(
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=other_menu_inline(lang),
         )
         return
     refresh = info.get("refresh_token") or ""
@@ -1437,14 +1530,14 @@ async def complete_whisper_oauth(
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=other_menu_inline(lang),
         )
         return
     analytics.capture(owner_id, "whisper_alerts_toggled", {"enabled": True})
     await application.bot.send_message(
         owner_id,
         t("whisper_alerts_enabled", lang),
-        reply_markup=other_menu(lang),
+        reply_markup=other_menu_inline(lang),
     )
 
 async def notify_whisper_received(application: Application, event: Any) -> None:

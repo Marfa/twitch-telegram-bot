@@ -184,7 +184,15 @@ def _cb_update(user_id: int, data: str, capture: _BotCapture | None = None):
 
 
 def _check_submenu_reply_keyboards() -> None:
-    from i18n import admin_menu_inline, other_menu_inline, settings_menu_inline
+    from i18n import (
+        admin_menu_inline,
+        auth_tokens_menu_inline,
+        bot_settings_menu_inline,
+        broadcast_menu_inline,
+        other_menu_inline,
+        partner_menu_inline,
+        settings_menu_inline,
+    )
 
     for loc in SUPPORTED_LOCALES:
         cases = [
@@ -204,6 +212,10 @@ def _check_submenu_reply_keyboards() -> None:
                 settings_menu_inline(loc, beta_enrolled=0, beta_total=0),
             ),
             ("admin_menu_inline", admin_menu_inline(loc)),
+            ("bot_settings_menu_inline", bot_settings_menu_inline(loc)),
+            ("auth_tokens_menu_inline", auth_tokens_menu_inline(loc)),
+            ("partner_menu_inline", partner_menu_inline(loc)),
+            ("broadcast_menu_inline", broadcast_menu_inline(loc)),
         ]
         for name, markup in cases:
             assert markup_has_escape_hatch(markup), (
@@ -652,12 +664,13 @@ async def _scenario_settings_and_partner(db) -> None:
     labels = [
         b.text
         for m in cap.markups
-        if getattr(m, "keyboard", None)
-        for row in m.keyboard
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
         for b in row
     ]
     assert btn("auth_tokens_revoke_twitch", "ru") in labels
     assert btn("auth_tokens_revoke_donationalerts", "ru") in labels
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
     cap.assert_turn("settings_auth_tokens")
 
     application, bot = _app(db)
@@ -666,6 +679,8 @@ async def _scenario_settings_and_partner(db) -> None:
     update = _msg_update(_FREE_UID, btn("partner", "ru"), cap)
     ctx = _ctx(application)
     await open_partner_menu(update, ctx)
+    assert any(getattr(m, "inline_keyboard", None) for m in cap.markups)
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
     cap.assert_turn("partner_menu")
 
     application, bot = _app(db)
@@ -3060,7 +3075,11 @@ async def _scenario_wizard_save_draft(db) -> None:
     cap.wrap(bot)
     update, query = _cb_update(_FREE_UID, f"toggle:{sub_id}", cap)
     ctx = _ctx(application)
-    await on_toggle(update, ctx)
+    with patch(
+        "handlers.subscriptions.prem.can_enable_more_async",
+        new=AsyncMock(return_value=True),
+    ):
+        await on_toggle(update, ctx)
     edited = [
         str(c.kwargs.get("text") or (c.args[0] if c.args else "") or "")
         for c in query.edit_message_text.await_args_list
@@ -4323,6 +4342,106 @@ async def _scenario_schedule_vacation(db) -> None:
     premium2.assert_awaited()
 
 
+async def _scenario_inline_nav_panels(db) -> None:
+    """Nested nav panels stay inline (Bot settings / Auth / Partner / Broadcast)."""
+    from bot import open_admin_menu
+    from handlers.broadcast import on_menu_broadcast, open_broadcast_menu
+    from handlers.partner import on_menu_partner, open_partner_menu
+    from handlers.settings import (
+        on_menu_auth,
+        on_menu_bot_settings,
+        open_bot_settings_menu,
+        open_settings_menu,
+    )
+
+    def _inline_cbs(cap: _BotCapture) -> list[str]:
+        return [
+            b.callback_data or ""
+            for m in cap.markups
+            if getattr(m, "inline_keyboard", None)
+            for row in m.inline_keyboard
+            for b in row
+        ]
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    update = _msg_update(_FREE_UID, btn("settings", "ru"), cap)
+    await open_settings_menu(update, ctx)
+    assert "menu_settings:bot_settings" in _inline_cbs(cap)
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
+    cap.assert_turn("inline_nav_settings")
+
+    update = _msg_update(_FREE_UID, btn("bot_settings", "ru"), cap)
+    await open_bot_settings_menu(update, ctx)
+    cbs = _inline_cbs(cap)
+    assert "menu_bot_settings:auth_tokens" in cbs
+    assert "menu_bot_settings:language" in cbs
+    assert "menu_bot_settings:ignored_words" in cbs
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
+    cap.assert_turn("inline_nav_bot_settings")
+
+    update, query = _cb_update(_FREE_UID, "menu_bot_settings:auth_tokens", cap)
+    await on_menu_bot_settings(update, ctx)
+    assert "menu_auth:revoke_twitch" in _inline_cbs(cap)
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
+    cap.assert_turn("inline_nav_auth")
+
+    update, query = _cb_update(_FREE_UID, "menu_auth:back", cap)
+    await on_menu_auth(update, ctx)
+    assert "menu_bot_settings:auth_tokens" in _inline_cbs(cap)
+    cap.assert_turn("inline_nav_auth_back")
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    update = _msg_update(_FREE_UID, btn("partner", "ru"), cap)
+    await open_partner_menu(update, ctx)
+    assert "menu_partner:stats" in _inline_cbs(cap)
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
+    update, query = _cb_update(_FREE_UID, "menu_partner:back", cap)
+    with patch("handlers.partner._partner_enabled", return_value=True), patch(
+        "handlers.partner.open_partner_menu", new=open_partner_menu
+    ):
+        await on_menu_partner(update, ctx)
+    assert any(
+        (b.callback_data or "").startswith("menu_settings:")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ) or any(getattr(m, "inline_keyboard", None) for m in cap.markups)
+    cap.assert_turn("inline_nav_partner")
+
+    db.upsert_user(_ADMIN_UID)
+    db.set_user_locale(_ADMIN_UID, "ru")
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(application)
+    update = _msg_update(_ADMIN_UID, btn("admin", "ru"), cap)
+    with patch("bot._is_admin", return_value=True):
+        await open_admin_menu(update, ctx)
+    assert "menu_admin:broadcast" in _inline_cbs(cap)
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
+
+    update = _msg_update(_ADMIN_UID, btn("broadcast", "ru"), cap)
+    with patch("handlers.broadcast._can_use_admin_tools", return_value=True):
+        await open_broadcast_menu(update, ctx)
+    cbs = _inline_cbs(cap)
+    assert "menu_broadcast:broadcast_new" in cbs
+    assert "menu_broadcast:scheduled_broadcasts" in cbs
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
+
+    update, query = _cb_update(_ADMIN_UID, "menu_broadcast:back", cap)
+    with patch("handlers.broadcast._can_use_admin_tools", return_value=True):
+        await on_menu_broadcast(update, ctx)
+    assert "menu_admin:broadcast" in _inline_cbs(cap)
+    cap.assert_turn("inline_nav_broadcast")
+
+
 async def _scenario_bot_settings_topics(db) -> None:
     """§8 — Settings → Bot settings → Topic support (checkbox on demand)."""
     from handlers.settings import (
@@ -4349,19 +4468,21 @@ async def _scenario_bot_settings_topics(db) -> None:
         for b in row
     ]
     assert "topics:toggle" not in inline_cbs
-    reply_texts = [
+    inline_texts = [
         b.text
         for m in cap.markups
-        if getattr(m, "keyboard", None)
-        for row in m.keyboard
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
         for b in row
     ]
-    assert btn("ignored_words", "ru") in reply_texts
-    assert btn("language", "ru") in reply_texts
-    assert btn("auth_tokens", "ru") in reply_texts
-    assert btn("topics_support", "ru") in reply_texts
-    assert btn("default_alert_settings", "ru") in reply_texts
-    assert btn("back_settings", "ru") in reply_texts
+    assert btn("ignored_words", "ru") in inline_texts
+    assert btn("language", "ru") in inline_texts
+    assert btn("auth_tokens", "ru") in inline_texts
+    assert btn("topics_support", "ru") in inline_texts
+    assert btn("default_alert_settings", "ru") in inline_texts
+    assert btn("back_settings", "ru") in inline_texts
+    assert "menu_bot_settings:topics_support" in inline_cbs
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
     cap.assert_turn("bot_settings_menu")
 
     update = _msg_update(_FREE_UID, btn("topics_support", "ru"), cap)
@@ -4534,14 +4655,15 @@ async def _scenario_settings_stream_defaults(db) -> None:
 
     update = _msg_update(_FREE_UID, btn("bot_settings", "ru"), cap)
     await open_bot_settings_menu(update, ctx)
-    reply_texts = [
+    inline_texts = [
         b.text
         for m in cap.markups
-        if getattr(m, "keyboard", None)
-        for row in m.keyboard
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
         for b in row
     ]
-    assert btn("default_alert_settings", "ru") in reply_texts
+    assert btn("default_alert_settings", "ru") in inline_texts
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
     cap.assert_turn("settings_bot_settings_for_defaults")
 
     update = _msg_update(_FREE_UID, btn("default_alert_settings", "ru"), cap)
@@ -4564,12 +4686,13 @@ async def _scenario_settings_stream_defaults(db) -> None:
     back_texts = [
         b.text
         for m in cap.markups
-        if getattr(m, "keyboard", None)
-        for row in m.keyboard
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
         for b in row
     ]
     assert btn("back_settings", "ru") in back_texts
     assert btn("default_alert_settings", "ru") in back_texts
+    assert not any(getattr(m, "keyboard", None) for m in cap.markups)
     cap.assert_turn("settings_stream_defaults_cancel")
     assert "editing_defaults" not in ctx.user_data
 
@@ -5601,6 +5724,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_schedule_vacation(db)
         await _scenario_schedule_publish_chain(db)
         await _scenario_schedule_deferred_week(db)
+        await _scenario_inline_nav_panels(db)
         await _scenario_bot_settings_topics(db)
         await _scenario_topics_menu_from_live_topic(db)
         await _scenario_settings_extended(db)

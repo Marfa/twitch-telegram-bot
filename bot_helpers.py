@@ -460,7 +460,7 @@ def group_setup_menu_filter():
 
 GROUP_SETUP_CALLBACK_PATTERN = (
     r"^(import_mode:|sync:|edit_f:|edit_g:|edit_set:|watch:|alert_type:|new_sub_other:|premium_gate:|"
-    r"menu_other:|menu_settings:|menu_admin:|"
+    r"menu_other:|menu_settings:|menu_admin:|menu_bot_settings:|menu_auth:|menu_partner:|menu_broadcast:|"
     r"dup:|dest:|strip_name:|image_ask:|image_pos:|ignore_keywords:|"
     r"template_typo:|stored_typo_fix:|list_type:|delete_|enable_all|toggle:|sub_toggle:|alert_pause:|"
     r"sys_updates:|sys_availability:|sys_other:|sys_promo:|sys_sync:|sys_beta:|"

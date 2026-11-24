@@ -14,7 +14,7 @@ import multistream as ms
 import premium as prem
 from bot_helpers import _user_lang, reply_chat_id
 from db import Database
-from i18n import bot_settings_menu, edit_options_keyboard, t
+from i18n import bot_settings_menu_inline, edit_options_keyboard, t
 from stream_alert_defaults import (
     defaults_ready_to_apply,
     draft_as_subscription,
@@ -118,7 +118,7 @@ async def open_stream_defaults_editor(
     ensure_defaults_draft(context.user_data, db, user_id)
     await update.effective_message.reply_text(
         t("menu_bot_settings", lang),
-        reply_markup=bot_settings_menu(lang),
+        reply_markup=bot_settings_menu_inline(lang),
     )
     await show_defaults_editor(update, context)
 
@@ -164,7 +164,7 @@ async def on_defedit_callback(
         await context.bot.send_message(
             reply_chat_id(update),
             t("cancelled", lang),
-            reply_markup=bot_settings_menu(lang),
+            reply_markup=bot_settings_menu_inline(lang),
         )
         return ConversationHandler.END
 
@@ -184,7 +184,7 @@ async def on_defedit_callback(
         await context.bot.send_message(
             reply_chat_id(update),
             note,
-            reply_markup=bot_settings_menu(lang),
+            reply_markup=bot_settings_menu_inline(lang),
         )
         return ConversationHandler.END
 

@@ -22,6 +22,10 @@ _GAME_INFO_UID = 900002
 _WATCH_UID = 900003
 _CONV_ACTIONS = ("create_schedule", "watch", "game_info")
 _PANEL_ACTIONS = ("follow_monitor", "ai_clips", "whisper_alerts", "chat", "channel_stats")
+_BOT_SETTINGS_CONV = ("language", "ignored_words")
+_BOT_SETTINGS_PANEL = ("back", "auth_tokens", "topics_support", "default_alert_settings")
+_BROADCAST_CONV = ("broadcast_new",)
+_BROADCAST_PANEL = ("back", "scheduled_broadcasts", "sent_broadcasts")
 
 
 def _callback_update(data: str, bot, user_id: int) -> Update:
@@ -179,6 +183,39 @@ def run() -> None:
             )
             assert not _matches(earlier, update), (
                 f"menu_other:{action} is answered before the conversation group"
+            )
+
+        for action in _BOT_SETTINGS_PANEL:
+            update = _callback_update(f"menu_bot_settings:{action}", app.bot, _SCHED_UID)
+            assert _matches(earlier, update), (
+                f"menu_bot_settings:{action} panel callback is not wired"
+            )
+            assert not _matches(conv.entry_points, update), (
+                f"menu_bot_settings:{action} must stay a panel callback"
+            )
+        for action in _BOT_SETTINGS_CONV:
+            update = _callback_update(f"menu_bot_settings:{action}", app.bot, _SCHED_UID)
+            assert _matches(conv.entry_points, update), (
+                f"menu_bot_settings:{action} is not a conversation entry point"
+            )
+            assert not _matches(earlier, update), (
+                f"menu_bot_settings:{action} is answered before the conversation group"
+            )
+        for action in _BROADCAST_PANEL:
+            update = _callback_update(f"menu_broadcast:{action}", app.bot, _SCHED_UID)
+            assert _matches(earlier, update), (
+                f"menu_broadcast:{action} panel callback is not wired"
+            )
+            assert not _matches(conv.entry_points, update), (
+                f"menu_broadcast:{action} must stay a panel callback"
+            )
+        for action in _BROADCAST_CONV:
+            update = _callback_update(f"menu_broadcast:{action}", app.bot, _SCHED_UID)
+            assert _matches(conv.entry_points, update), (
+                f"menu_broadcast:{action} is not a conversation entry point"
+            )
+            assert not _matches(earlier, update), (
+                f"menu_broadcast:{action} is answered before the conversation group"
             )
 
         asyncio.run(
