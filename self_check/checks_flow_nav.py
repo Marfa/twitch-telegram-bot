@@ -4136,7 +4136,7 @@ async def _scenario_twitch_link_wizard_offer(db) -> None:
     assert ctx.user_data.get("pending_twitch_channel") == "shroud"
     cap.assert_turn("twitch_link_wizard_started")
 
-    # Prefill channel leaves a lasting Reply Cancel (Extras is inline-only).
+    # Prefill channel attaches inline Cancel (sticky stays main_menu).
     from handlers.wizard import _go_channel_prompt
 
     application, bot = _app(db, twitch=twitch)
@@ -4158,10 +4158,16 @@ async def _scenario_twitch_link_wizard_offer(db) -> None:
     assert markup is not None
     labels = {
         (b.text if hasattr(b, "text") else b)
-        for row in markup.keyboard
+        for row in markup.inline_keyboard
+        for b in row
+    }
+    cbs = {
+        (b.callback_data if hasattr(b, "callback_data") else None)
+        for row in markup.inline_keyboard
         for b in row
     }
     assert btn("wizard_cancel", "ru") in labels
+    assert "wizard_nav:cancel" in cbs
     assert "shroud" in str(first.args[0] if first.args else first.kwargs.get("text"))
 
 
