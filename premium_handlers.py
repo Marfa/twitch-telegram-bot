@@ -14,7 +14,7 @@ from telegram.ext import Application, ContextTypes
 import premium as prem
 import demo_mode
 import analytics
-from bot_helpers import with_oauth_legal
+from bot_helpers import _send_dm_html, with_oauth_legal
 from config import twitch_oauth_redirect_uri
 from db import Database
 from health import create_pending_login_state
@@ -2204,15 +2204,20 @@ async def _year_extend_invoice(
     return link, stars, total
 
 
-async def send_stars_grace_dm(bot, db: Database, user_id: int, lang: str) -> None:
-    """Grace DM: Restore for month/legacy; «Продлить» + year invoice for yearly."""
+async def send_stars_grace_dm(bot, db: Database, user_id: int, lang: str) -> str:
+    """Grace DM: Restore for month/legacy; «Продлить» + year invoice for yearly.
+
+    Returns the delivery outcome for this user ("sent" / "blocked" / "failed").
+    """
     if prem.stars_plan_kind(db, user_id) == "year":
         created = await _year_extend_invoice(
             bot, db, user_id, lang, source="stars_grace"
         )
         if created:
             link, _stars, total = created
-            await bot.send_message(
+            return await _send_dm_html(
+                bot,
+                db,
                 user_id,
                 t("premium_stars_grace_warn_year", lang),
                 reply_markup=_pay_remind_url_markup(
@@ -2221,13 +2226,16 @@ async def send_stars_grace_dm(bot, db: Database, user_id: int, lang: str) -> Non
                     url=link,
                 ),
                 disable_web_page_preview=True,
+                outbound_kind="stars_premium_grace",
             )
-            return
-    await bot.send_message(
+    return await _send_dm_html(
+        bot,
+        db,
         user_id,
         t("premium_stars_grace_warn", lang),
         reply_markup=_stars_pay_restore_markup(lang),
         disable_web_page_preview=True,
+        outbound_kind="stars_premium_grace",
     )
 
 
@@ -2236,8 +2244,11 @@ async def send_pay_reminder_dm(
     db: Database,
     reminder: prem.PayReminder,
     lang: str,
-) -> None:
-    """DM pay reminder; attach full-price renew invoice for canceled feat/channel."""
+) -> str:
+    """DM pay reminder; attach full-price renew invoice for canceled feat/channel.
+
+    Returns the delivery outcome for this user ("sent" / "blocked" / "failed").
+    """
     until = _fmt_until(reminder.until_unix)
     if reminder.kind == "stars":
         # Restore is grace-only. Yearly reminder gets «Продлить» + year invoice.
@@ -2247,7 +2258,9 @@ async def send_pay_reminder_dm(
             )
             if created:
                 link, stars, total = created
-                await bot.send_message(
+                return await _send_dm_html(
+                    bot,
+                    db,
                     reminder.user_id,
                     t("premium_stars_pay_remind_year", lang, until=until, stars=stars),
                     reply_markup=_pay_remind_url_markup(
@@ -2256,15 +2269,17 @@ async def send_pay_reminder_dm(
                         url=link,
                     ),
                     disable_web_page_preview=True,
+                    outbound_kind="stars_pay_remind",
                 )
-                return
-        await bot.send_message(
+        return await _send_dm_html(
+            bot,
+            db,
             reminder.user_id,
             t("premium_stars_pay_remind", lang, until=until),
             reply_markup=_dm_menu_only_markup(lang),
             disable_web_page_preview=True,
+            outbound_kind="stars_pay_remind",
         )
-        return
 
     if reminder.kind == "feat":
         features_txt = _feat_remind_features_text(lang, reminder.feature_ids)
@@ -2296,7 +2311,9 @@ async def send_pay_reminder_dm(
                 subscription_period=prem.stars_period(),
             )
             if link:
-                await bot.send_message(
+                return await _send_dm_html(
+                    bot,
+                    db,
                     reminder.user_id,
                     t(
                         "premium_feat_pay_remind_invoice",
@@ -2311,9 +2328,11 @@ async def send_pay_reminder_dm(
                         url=link,
                     ),
                     disable_web_page_preview=True,
+                    outbound_kind="feat_pay_remind",
                 )
-                return
-        await bot.send_message(
+        return await _send_dm_html(
+            bot,
+            db,
             reminder.user_id,
             t(
                 "premium_feat_pay_remind",
@@ -2323,8 +2342,8 @@ async def send_pay_reminder_dm(
             ),
             reply_markup=_dm_menu_only_markup(lang),
             disable_web_page_preview=True,
+            outbound_kind="feat_pay_remind",
         )
-        return
 
     if reminder.kind == "channel":
         channel = reminder.channel_login or reminder.channel_twitch_user_id
@@ -2359,7 +2378,9 @@ async def send_pay_reminder_dm(
                 subscription_period=prem.stars_period(),
             )
             if link:
-                await bot.send_message(
+                return await _send_dm_html(
+                    bot,
+                    db,
                     reminder.user_id,
                     t(
                         "premium_channel_pay_remind_invoice",
@@ -2374,9 +2395,11 @@ async def send_pay_reminder_dm(
                         url=link,
                     ),
                     disable_web_page_preview=True,
+                    outbound_kind="channel_pay_remind",
                 )
-                return
-        await bot.send_message(
+        return await _send_dm_html(
+            bot,
+            db,
             reminder.user_id,
             t(
                 "premium_channel_pay_remind",
@@ -2386,6 +2409,7 @@ async def send_pay_reminder_dm(
             ),
             reply_markup=_dm_menu_only_markup(lang),
             disable_web_page_preview=True,
+            outbound_kind="channel_pay_remind",
         )
 
 

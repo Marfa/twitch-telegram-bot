@@ -206,6 +206,9 @@ def main() -> None:
     from .checks_telegram_retry import run as check_telegram_retry
 
     check_telegram_retry()
+    from .checks_telegram_dm_boundary import run as check_telegram_dm_boundary
+
+    check_telegram_dm_boundary()
     from .checks_request_context import run as check_request_context
 
     check_request_context()

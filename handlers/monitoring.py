@@ -821,12 +821,13 @@ async def _send_growth_report_to_admins(
             previous=previous,
             period=period,
         )
-        try:
-            await context.bot.send_message(admin_id, text)
-        except (BadRequest, Forbidden) as exc:
-            logger.warning(
-                "Cannot send %s report to admin %s: %s", snapshot_kind, admin_id, exc
-            )
+        await _send_dm_html(
+            context.bot,
+            db,
+            admin_id,
+            text,
+            outbound_kind=f"growth_{snapshot_kind}",
+        )
     _save_admin_growth_snapshot(
         snapshot_kind, users=users, trials=len(trials)
     )

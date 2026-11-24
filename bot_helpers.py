@@ -8,7 +8,7 @@ from typing import Literal
 
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
-from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
+from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler, filters
 
 import beta as beta_features
@@ -662,7 +662,7 @@ async def _send_dm_html(
                 return _result("blocked")
             logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
             return _result("failed")
-        except (BadRequest, RetryAfter) as retry_exc:
+        except TelegramError as retry_exc:
             logger.warning("Broadcast to %s failed after RetryAfter: %s", uid, retry_exc)
             return _result("failed")
     except Forbidden as exc:
@@ -673,7 +673,9 @@ async def _send_dm_html(
             return _result("blocked")
         logger.warning("Broadcast to %s failed: %s", uid, exc)
         return _result("failed")
-    except BadRequest as exc:
-        logger.warning("Broadcast to %s failed: %s", uid, exc)
+    except TelegramError as exc:
+        # No other branch repeats the send: after a transport error the message may
+        # already have been delivered, and a duplicate DM is worse than a lost one.
+        logger.warning("Broadcast to %s failed (%s): %s", uid, kind, exc)
         return _result("failed")
 
