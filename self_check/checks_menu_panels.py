@@ -70,6 +70,14 @@ def _patch_bot(sent: list, markups: list):
     async def _send(chat_id, text, **kwargs):
         return await _reply(text, **kwargs)
 
+    async def _edit_message_text(*args, **kwargs):
+        # watch:again edits the panel message; count that as an answer.
+        text = kwargs.get("text")
+        if text is not None:
+            sent.append(text)
+            markups.append(kwargs.get("reply_markup"))
+        return True
+
     async def _get_me(bot_self, *args, **kwargs):
         bot_self._bot_user = User(id=42, first_name="bot", is_bot=True)
         return bot_self._bot_user
@@ -99,7 +107,9 @@ def _patch_bot(sent: list, markups: list):
             ),
         ),
         patch.object(ExtBot, "send_chat_action", AsyncMock(return_value=True)),
-        patch.object(ExtBot, "edit_message_text", AsyncMock(return_value=True)),
+        patch.object(
+            ExtBot, "edit_message_text", AsyncMock(side_effect=_edit_message_text)
+        ),
         patch.object(ExtBot, "edit_message_reply_markup", AsyncMock(return_value=True)),
         patch.object(ExtBot, "answer_callback_query", AsyncMock(return_value=True)),
         patch.object(ExtBot, "delete_message", AsyncMock(return_value=True)),
