@@ -19,6 +19,7 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r":cancel$|"
     r":back$|"
     r"^watch_nav:(?:back|cancel)$|"
+    r"^wizard_nav:(?:back|cancel)$|"
     r"^alert_type:cancel$|"
     r"^edit_type_pick_cancel:|"
     r"^premium_gate:(?:cancel|skip)$|"
@@ -54,8 +55,8 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^gv:(?:close|hub)$|"
     r"^schq:list:(?:when|day|week)$|"
     r"^dm_menu$|"
-    # Other/Settings/Admin inline panels leave the main reply keyboard; not a trap.
-    r"^menu_(?:other|settings|admin):"
+    # Other/Settings/Admin/Subs inline panels leave the main reply keyboard; not a trap.
+    r"^menu_(?:other|settings|admin|subs):"
     r")"
 )
 

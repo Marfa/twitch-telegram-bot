@@ -754,6 +754,7 @@ from handlers.subscriptions import (
     on_welcome_demo_offer_no,
     on_welcome_demo_offer_yes,
     offer_due_welcome_demos,
+    on_menu_subs_cart,
     open_cart_menu,
     open_subscriptions_menu,
     open_sync_settings,
@@ -771,6 +772,7 @@ from handlers.subscriptions import (
     receive_edit_overlap,
     start_edit_template,
     start_edit_top_donations,
+    start_pause_from_menu_subs,
     start_pause_notifications,
     start_twitch_import,
     cancel_twitch_import,
@@ -3214,6 +3216,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         group=0,
     )
     app.add_handler(
+        CallbackQueryHandler(on_menu_subs_cart, pattern=r"^menu_subs:cart$"),
+        group=0,
+    )
+    app.add_handler(
         CallbackQueryHandler(
             on_menu_settings,
             pattern=r"^menu_settings:(premium|sync_subs|bot_settings|beta_mode|sys_notifications|partner)$",
@@ -3526,6 +3532,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
 
     _wiz_cancel = MessageHandler(_btn_filter("wizard_cancel"), cancel)
     _wiz_back = MessageHandler(_btn_filter("wizard_back"), wizard_back)
+    _wiz_cancel_cb = CallbackQueryHandler(cancel, pattern=r"^wizard_nav:cancel$")
+    _wiz_back_cb = CallbackQueryHandler(wizard_back, pattern=r"^wizard_nav:back$")
 
     conv = ConversationHandler(
         entry_points=[
@@ -3572,6 +3580,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             MessageHandler(
                 _btn_filter("pause_notifications"),
                 dm_only_conv_entry(start_pause_notifications),
+            ),
+            CallbackQueryHandler(
+                dm_only_conv_entry(start_pause_from_menu_subs),
+                pattern=r"^menu_subs:pause$",
             ),
             MessageHandler(
                 _btn_filter("broadcast_new"), dm_only_conv_entry(admin_broadcast_start)
@@ -4368,6 +4380,8 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             CommandHandler("cancel", dm_only_conv_entry(cancel)),
             CommandHandler("help", dm_only_conv_entry(help_command)),
             MessageHandler(_btn_filter("wizard_cancel"), cancel),
+            _wiz_cancel_cb,
+            _wiz_back_cb,
         ],
         allow_reentry=True,
         name="main_conversation",
@@ -4387,6 +4401,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 MessageHandler(
                     _btn_filter("wizard_cancel"), cancel_follow_monitor_search
                 ),
+                CallbackQueryHandler(
+                    cancel_follow_monitor_search, pattern=r"^wizard_nav:cancel$"
+                ),
                 CommandHandler("cancel", cancel_follow_monitor_search),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, receive_follow_monitor_search
@@ -4395,6 +4412,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         },
         fallbacks=[
             MessageHandler(_btn_filter("wizard_cancel"), cancel_follow_monitor_search),
+            CallbackQueryHandler(
+                cancel_follow_monitor_search, pattern=r"^wizard_nav:cancel$"
+            ),
             CommandHandler("cancel", cancel_follow_monitor_search),
             MessageHandler(_btn_filter("follow_monitor"), cancel_follow_monitor_search),
             MessageHandler(_btn_filter("other"), cancel_follow_monitor_search),
@@ -4430,6 +4450,9 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         },
         fallbacks=[
             MessageHandler(_btn_filter("wizard_cancel"), cancel_giveaways_discount),
+            CallbackQueryHandler(
+                cancel_giveaways_discount, pattern=r"^wizard_nav:cancel$"
+            ),
             CommandHandler("cancel", cancel_giveaways_discount),
             CallbackQueryHandler(
                 cancel_giveaways_discount, pattern=r"^gv:hub$"
@@ -4462,21 +4485,34 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         _clear_stuck_conversation(update, context)
 
     async def orphan_wizard_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        # After deploy, wizard ReplyKeyboard may remain while conversation state is gone.
+        # After deploy, wizard ReplyKeyboard/inline nav may remain while conversation is gone.
         from handlers.premium_gift import _GIFT_WIZ_TOKEN, gift_wiz_cancel
 
         if context.user_data.get(_GIFT_WIZ_TOKEN):
             await gift_wiz_cancel(update, context)
             return
-        try:
-            key = conv._get_key(update)
-        except Exception:
-            key = None
-        if key is not None and key in conv._conversations:
-            return
+        for c in (conv, fm_search_conv, giveaways_discount_conv):
+            try:
+                key = c._get_key(update)
+            except Exception:
+                continue
+            if key is not None and key in c._conversations:
+                return
         user_id = update.effective_user.id
         lang = _user_lang(context, user_id)
         context.user_data.clear()
+        if update.callback_query:
+            await update.callback_query.answer()
+            try:
+                await update.callback_query.edit_message_text("✓")
+            except BadRequest:
+                pass
+            await context.bot.send_message(
+                reply_chat_id(update),
+                t("cancelled", lang),
+                reply_markup=_menu(lang, user_id),
+            )
+            return
         await update.effective_message.reply_text(
             t("cancelled", lang),
             reply_markup=_menu(lang, user_id),
@@ -4556,6 +4592,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(MessageHandler(_btn_filter("wizard_cancel"), orphan_wizard_nav), group=0)
     app.add_handler(MessageHandler(_btn_filter("wizard_back"), orphan_wizard_nav), group=0)
+    app.add_handler(
+        CallbackQueryHandler(orphan_wizard_nav, pattern=r"^wizard_nav:(cancel|back)$"),
+        group=0,
+    )
     # After deploy/restart: schedule wizard inline (slots / vacation) with no conversation.
     app.add_handler(
         CallbackQueryHandler(

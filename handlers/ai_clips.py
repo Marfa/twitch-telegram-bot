@@ -62,9 +62,9 @@ from clip_compilation import (
     safe_unlink_compilation,
     select_clips_by_views,
 )
-from bot_helpers import _user_lang, reply_chat_id, with_oauth_legal
+from bot_helpers import _menu, _user_lang, reply_chat_id, with_oauth_legal
 from db import Database
-from i18n import DEFAULT_LOCALE, other_menu, t
+from i18n import DEFAULT_LOCALE, other_menu_inline, t
 from twitch import CLIPS_MANAGE_SCOPE, TwitchClient
 
 logger = logging.getLogger(__name__)
@@ -592,7 +592,7 @@ async def start_ai_clips(
         await context.bot.send_message(
             chat,
             t("ai_clips_beta_required", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
     if not premium_ok:
@@ -601,7 +601,7 @@ async def start_ai_clips(
         await context.bot.send_message(
             chat,
             t("ai_clips_premium_required", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         await send_premium_screen(
             context.bot,
@@ -618,7 +618,7 @@ async def start_ai_clips(
         await context.bot.send_message(
             chat,
             t("ai_clips_tools_missing", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
 
@@ -627,7 +627,7 @@ async def start_ai_clips(
         await context.bot.send_message(
             chat,
             t("ai_clips_need_auth", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         await _send_oauth_prompt(context.bot, twitch, user_id, lang)
         return
@@ -643,7 +643,7 @@ async def start_ai_clips(
         await context.bot.send_message(
             chat,
             t("ai_clips_list_failed", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
 
@@ -652,7 +652,7 @@ async def start_ai_clips(
         await context.bot.send_message(
             chat,
             t("ai_clips_no_vods", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
 
@@ -813,7 +813,7 @@ async def on_ai_clips_callback(
         except BadRequest:
             pass
         await context.bot.send_message(
-            chat, t("menu_other", lang), reply_markup=other_menu(lang)
+            chat, t("menu_other", lang), reply_markup=other_menu_inline(lang)
         )
         return
 
@@ -923,7 +923,7 @@ async def on_ai_clips_callback(
         except BadRequest:
             pass
         await context.bot.send_message(
-            chat, t("menu_other", lang), reply_markup=other_menu(lang)
+            chat, t("menu_other", lang), reply_markup=other_menu_inline(lang)
         )
         return
 
@@ -1257,7 +1257,7 @@ async def complete_ai_clips_oauth(
         await application.bot.send_message(
             owner_id,
             t("ai_clips_oauth_failed", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, owner_id),
         )
         return
     from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
@@ -1271,7 +1271,7 @@ async def complete_ai_clips_oauth(
     await application.bot.send_message(
         owner_id,
         t("ai_clips_oauth_done", lang),
-        reply_markup=other_menu(lang),
+        reply_markup=_menu(lang, owner_id),
     )
 
 

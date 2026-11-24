@@ -27,6 +27,7 @@ from bot_helpers import (
     _pause_notifications_enabled,
     _pulse_reply_keyboard,
     _pulse_wizard_keyboard,
+    _settings_inline,
     _settings_kb,
     _user_lang,
     _user_notifications_paused,
@@ -81,7 +82,7 @@ from i18n import (
     ignore_keywords_keyboard,
     import_mode_keyboard,
     is_menu_button,
-    subscriptions_menu,
+    subscriptions_menu_inline,
     sync_settings_keyboard,
     sync_unfollow_keyboard,
     delete_all_confirm_keyboard,
@@ -221,11 +222,41 @@ def _format_pause_until(until_ts: int, lang: str) -> str:
 
 
 def _subs_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:
-    return subscriptions_menu(
+    """Sticky for My subscriptions exits — always main_menu (cart/pause are inline)."""
+    _ = db
+    return _menu(lang, user_id)
+
+
+def _subs_inline(lang: str, db: Database, user_id: int) -> InlineKeyboardMarkup:
+    return subscriptions_menu_inline(
         lang,
         cart=_deleted_subscriptions_cart_enabled(db, user_id),
         pause_notifications=_pause_notifications_enabled(db, user_id),
     )
+
+
+async def _send_subs_panel(
+    bot,
+    chat_id: int,
+    lang: str,
+    db: Database,
+    user_id: int,
+    *,
+    text: str | None = None,
+) -> None:
+    """Main sticky + optional inline Cart/Pause under My subscriptions."""
+    await send_reply_keyboard_menu(
+        bot,
+        chat_id,
+        text or t("menu_subs", lang),
+        _menu(lang, user_id),
+        db=db,
+        user_id=user_id,
+        lang=lang,
+    )
+    panel = _subs_inline(lang, db, user_id)
+    if panel.inline_keyboard:
+        await bot.send_message(chat_id, t("menu_subs", lang), reply_markup=panel)
 
 
 def import_followed_as_subscriptions(
@@ -721,11 +752,9 @@ async def open_cart_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
+    chat_id = reply_chat_id(update)
     if not _deleted_subscriptions_cart_enabled(db, user_id):
-        await update.effective_message.reply_text(
-            t("menu_subs", lang),
-            reply_markup=_subs_kb(lang, db, user_id),
-        )
+        await _send_subs_panel(context.bot, chat_id, lang, db, user_id)
         return
     is_demo = demo_mode.is_active(user_id)
     days = prem.deleted_subscriptions_cart_days(db, user_id)
@@ -748,12 +777,37 @@ async def open_cart_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             markup = None
         else:
             markup = _delete_cart_keyboard(lang, view, set())
-    # Keyboard switch first — same mobile gap as list_subscriptions if reversed.
-    await update.effective_message.reply_text(
-        t("menu_subs", lang),
-        reply_markup=_subs_kb(lang, db, user_id),
+    await _pulse_reply_keyboard(
+        context.bot, chat_id, _menu(lang, user_id), user_id=user_id, lang=lang
     )
-    await update.effective_message.reply_text(text, reply_markup=markup)
+    await context.bot.send_message(chat_id, text, reply_markup=markup)
+
+
+async def on_menu_subs_cart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inline My subscriptions → Cart."""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    await open_cart_menu(update, context)
+
+
+async def start_pause_from_menu_subs(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Inline My subscriptions → Pause (conversation entry)."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        try:
+            await query.edit_message_text("✓")
+        except BadRequest:
+            pass
+    return await start_pause_notifications(update, context)
 
 
 async def start_pause_notifications(
@@ -1423,33 +1477,28 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
+    chat_id = reply_chat_id(update)
     subs = _subs_for_owner(db, user_id)
     if not subs:
-        await send_reply_keyboard_menu(
-            context.bot,
-            reply_chat_id(update),
-            t("no_subs", lang),
-            _subs_kb(lang, db, user_id),
-            db=db,
-            user_id=user_id,
+        await _send_subs_panel(
+            context.bot, chat_id, lang, db, user_id, text=t("no_subs", lang)
         )
         return
 
-    # Reply keyboard must be a separate message (can't mix with inline).
-    # Send it first so the last bubble near the input is the type picker / list —
-    # otherwise mobile shows a huge empty gap under a trailing "Мои подписки:".
-    # General only — strip Эфир / alert-topic keyboards, then set menu there.
-    await send_reply_keyboard_menu(
-        context.bot,
-        reply_chat_id(update),
-        t("menu_subs", lang),
-        _subs_kb(lang, db, user_id),
-        db=db,
-        user_id=user_id,
+    # Sticky stays main_menu; cart/pause are a separate inline panel.
+    # Send panel first so the last bubble near the input is the type picker / list.
+    await _pulse_reply_keyboard(
+        context.bot, chat_id, _menu(lang, user_id), user_id=user_id, lang=lang
     )
+    panel = _subs_inline(lang, db, user_id)
+    if panel.inline_keyboard:
+        await context.bot.send_message(
+            chat_id, t("menu_subs", lang), reply_markup=panel
+        )
     types = _edit_present_types(subs)
     if len(types) > 1:
-        await update.effective_message.reply_text(
+        await context.bot.send_message(
+            chat_id,
             t("list_type_pick", lang),
             reply_markup=_alert_type_pick_keyboard(lang, types, "list_type"),
         )
@@ -2056,7 +2105,7 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if not db.set_twitch_sync_period(user_id, days, next_at):
             await update.effective_message.reply_text(
                 t("sync_menu_off", lang),
-                reply_markup=_settings_kb(lang, db, user_id),
+                reply_markup=_settings_inline(lang, db, user_id),
             )
             return ConversationHandler.END
         if days > 0:
@@ -2065,7 +2114,7 @@ async def receive_sync_days(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             sync_optional_jobs(context.application.job_queue, db)
         await update.effective_message.reply_text(
             t("sync_period_updated", lang, days=days),
-            reply_markup=_settings_kb(lang, db, user_id),
+            reply_markup=_settings_inline(lang, db, user_id),
         )
         context.user_data.pop("sync_days_mode", None)
         return ConversationHandler.END
@@ -2144,7 +2193,7 @@ async def open_sync_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not sync or sync.period_days <= 0:
         await update.effective_message.reply_text(
             t("sync_menu_off", lang),
-            reply_markup=_settings_kb(lang, db, user_id),
+            reply_markup=_settings_inline(lang, db, user_id),
         )
         return
     await update.effective_message.reply_text(
@@ -2363,7 +2412,7 @@ async def on_sync_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await context.bot.send_message(
         user_id,
         text,
-        reply_markup=_settings_kb(lang, db, user_id),
+        reply_markup=_settings_inline(lang, db, user_id),
     )
     await _ask_sync_unfollow_if_needed(
         context.application, user_id, lang, ask_streamers
@@ -2942,7 +2991,7 @@ async def start_edit_game_field(
             reply_markup=watch_tags_keyboard(lang, show_nav=False),
             parse_mode=ParseMode.HTML,
         )
-        await _pulse_wizard_keyboard(context, update, lang, back=False)
+        await _pulse_wizard_keyboard(context.bot, reply_chat_id(update), lang, back=False, user_id=update.effective_user.id)
         return _sub_states()["EDIT_REPEAT"]
     if field == "viewers":
         await query.edit_message_text("✓")
@@ -2952,7 +3001,7 @@ async def start_edit_game_field(
             reply_markup=watch_viewers_keyboard(lang, show_nav=False),
             parse_mode=ParseMode.HTML,
         )
-        await _pulse_wizard_keyboard(context, update, lang, back=False)
+        await _pulse_wizard_keyboard(context.bot, reply_chat_id(update), lang, back=False, user_id=update.effective_user.id)
         return _sub_states()["EDIT_REPEAT"]
     if field == "language":
         await query.edit_message_text("✓")
@@ -2961,7 +3010,7 @@ async def start_edit_game_field(
             t("watch_lang_prompt", lang),
             reply_markup=watch_lang_keyboard(lang, show_nav=False),
         )
-        await _pulse_wizard_keyboard(context, update, lang, back=False)
+        await _pulse_wizard_keyboard(context.bot, reply_chat_id(update), lang, back=False, user_id=update.effective_user.id)
         return _sub_states()["EDIT_REPEAT"]
     return ConversationHandler.END
 

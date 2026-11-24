@@ -35,7 +35,7 @@
 | Schedule reminders | If the streamer has a Twitch schedule — remind N minutes before |
 | Alert history | DM only: last 7 days free, 60 days with Premium (or pay-per-feature); viewed / unviewed marks, “viewed all below”, **To unwatched** pagination jump |
 | Advanced options | Extras checklist for everyone: image, clean title, ignore / **categories** (alert only when the streamer is online in selected Twitch games) / delay / restart mute / **repeats** / **overlap guard** (stream start) / delete previous / **pin message** until stream ends (not in DMs) / **custom URL buttons** ⭐, chat button, remind about stream (upcoming), **top donations** (stream end: DonationAlerts), **stream cancel** ⭐ (upcoming: day’s slots removed without replacement), **multistream** ⭐ (stream start: GoodGame / VK Play / YouTube / TikTok — prefer all online, send after 15 min anyway), **button color** (default / blue / green / red when any button option is on), link preview (if URL in template; off with image/chat button). On **To DM** ⭐ — **topic per streamer** (up to 5; otherwise alerts by type). DM alerts include a **⏸ Pause alert** button (disables that subscription without blocking the bot; not shown in groups/channels) |
-| Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share**; **🧺 Cart** and **⏸ Pause notifications** in the bottom menu; **💬 Stream chat** — Mini App with embed + Helix send / Simple IRC |
+| Subscriptions | **📋 My subscriptions** in the main menu: paginated list; per sub — enable/disable, edit, delete, **Share**; **🧺 Cart** and **⏸ Pause notifications** as inline under the list (bottom reply keyboard stays the main menu); **💬 Stream chat** — Mini App with embed + Helix send / Simple IRC |
 | Streamer Telegram | After manually creating a stream alert, TG channels are appended to the “Setup complete” message after the alert note (Helix/seeds = curated, no disclaimer; otherwise crowd with disclaimer) |
 | Import from Twitch | OAuth → one-time or periodic sync; new follows only, manual subs kept |
 | Stream schedule | **📅 Manage schedule** in **📦 Other**: weekly text wizard; **fix a day** / **vacation** / Twitch publish — **Premium** (“Twitch schedule tools”); **Time zone** (UTC) |
@@ -138,7 +138,7 @@ Steps 4 / 6 / 7 / 8 / 11 only after checking Extras (and Premium for ⭐). Chat 
 
 For **upcoming stream**, after the channel and schedule check — template and settings (“Reminder button” — a button with a share link for a stream-start alert; optional “Block repeats” — one upcoming alert per day, schedule changes for that day are ignored; “Stream cancel” ⭐ — separate template when a day’s schedule slots are removed without replacement), then reminder minutes and destination (no “do you want reminders?” ask).
 
-Each step has **Back**, **Cancel**, and **Main menu**. When editing a subscription — only those three reply buttons.
+Each step has **Back** and **Cancel** (inline); the **Main menu** stays on the bottom reply keyboard. When editing a subscription — the same Back/Cancel.
 
 **Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `viewer_avg`, `viewer_peak`, `thumbnail_url`, `tags`, `{game_description}`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **Clean title**: on create — **Extras**; on edit — edit menu (same labels as Extras). Strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default.
 
@@ -255,7 +255,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
-| 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart**; **⏸ Pause notifications** |
+| 📋 My subscriptions | List with enable/disable, edit, delete, share; **🧺 Cart** / **⏸ Pause** — inline under the list |
 | 📜 Alert history | DM: 7 days free / 60 days Premium; 🙄/🫣 viewed marks, “viewed all below”, **To unwatched** |
 | 📦 Other | Follow/Unfollow (settings Premium), AI clips (Premium / à la carte), whisper alerts, schedule, what to watch (feeling lucky), chat, game info (IGDB card; upcoming / unknown date — “Remind about release” → release alerts wizard; already out — “Find streams”; for **ru** — “Buy” → https://gglead.org/go22483), channel stats (Premium / à la carte) |
 | ↳ 💬 Whisper alerts | On after Twitch OAuth; Telegram gets sender, text, conversation link |

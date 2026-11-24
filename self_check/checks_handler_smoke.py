@@ -1089,14 +1089,12 @@ async def _smoke_subscriptions(db) -> None:
     await list_subscriptions(update, ctx)
     from i18n import t as _t
 
-    # menu_subs reply keyboard → General via send_message; type picker still reply_text.
+    # Sticky main via pulse; type picker via send_message (not reply sticky submenu).
     menu_texts = [
         c.args[1] if len(c.args) > 1 else c.kwargs.get("text")
         for c in bot.send_message.await_args_list
     ]
-    assert _t("menu_subs", "ru") in menu_texts
-    reply_texts = [c.args[0] for c in update.effective_message.reply_text.await_args_list]
-    assert reply_texts and reply_texts[-1] == _t("list_type_pick", "ru")
+    assert _t("list_type_pick", "ru") in menu_texts
 
     reply = MagicMock()
     reply.reply_text = AsyncMock()

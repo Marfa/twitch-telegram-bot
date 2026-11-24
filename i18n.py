@@ -391,6 +391,7 @@ def subscriptions_menu(
     cart: bool = False,
     pause_notifications: bool = False,
 ) -> ReplyKeyboardMarkup:
+    """Legacy reply keyboard. Prefer subscriptions_menu_inline (sticky stays main)."""
     keys: list[str] = []
     if cart:
         keys.append("cart")
@@ -399,6 +400,30 @@ def subscriptions_menu(
     keys.append("back")
     buttons = [KeyboardButton(btn(k, lang)) for k in keys]
     return _reply_keyboard(_pair_reply_rows(buttons))
+
+
+def subscriptions_menu_inline(
+    lang: str,
+    *,
+    cart: bool = False,
+    pause_notifications: bool = False,
+) -> InlineKeyboardMarkup:
+    """Cart / Pause under My subscriptions — does not replace the main reply keyboard."""
+    buttons: list[InlineKeyboardButton] = []
+    if cart:
+        buttons.append(
+            InlineKeyboardButton(btn("cart", lang), callback_data="menu_subs:cart")
+        )
+    if pause_notifications:
+        buttons.append(
+            InlineKeyboardButton(
+                btn("pause_notifications", lang),
+                callback_data="menu_subs:pause",
+            )
+        )
+    if not buttons:
+        return InlineKeyboardMarkup([])
+    return InlineKeyboardMarkup(_pair_inline_rows(buttons))
 
 
 def other_menu(lang: str) -> ReplyKeyboardMarkup:
@@ -1110,14 +1135,33 @@ def broadcast_feedback_keyboard(
 
 
 def wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
+    """Legacy reply Cancel/Back. Prefer wizard_nav_inline (sticky stays main)."""
     row = [KeyboardButton(btn("wizard_cancel", lang))]
     if back:
         row.insert(0, KeyboardButton(btn("wizard_back", lang)))
     return _reply_keyboard([row])
 
 
-def admin_wizard_menu(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
-    return wizard_menu(lang, back=back)
+def wizard_nav_inline(lang: str, *, back: bool = True) -> InlineKeyboardMarkup:
+    """Wizard Cancel/Back as inline — keeps the main reply keyboard unchanged."""
+    row: list[InlineKeyboardButton] = []
+    if back:
+        row.append(
+            InlineKeyboardButton(
+                btn("wizard_back", lang), callback_data="wizard_nav:back"
+            )
+        )
+    row.append(
+        InlineKeyboardButton(
+            btn("wizard_cancel", lang), callback_data="wizard_nav:cancel"
+        )
+    )
+    return InlineKeyboardMarkup([row])
+
+
+def admin_wizard_menu(lang: str, *, back: bool = True) -> InlineKeyboardMarkup:
+    """Admin broadcast wizard nav — inline only (same as wizard_nav_inline)."""
+    return wizard_nav_inline(lang, back=back)
 
 
 def language_keyboard(lang: str | None = None) -> InlineKeyboardMarkup:

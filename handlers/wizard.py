@@ -20,6 +20,7 @@ import premium as prem
 import request_context
 from bot_helpers import (
     _menu,
+    _settings_inline,
     _settings_kb,
     _user_lang,
     _wizard,
@@ -488,7 +489,7 @@ async def on_premium_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await context.bot.send_message(
             reply_chat_id(update),
             t("menu_settings", lang),
-            reply_markup=_settings_kb(lang, db, user_id),
+            reply_markup=_settings_inline(lang, db, user_id),
         )
         context.user_data.clear()
         return ConversationHandler.END
@@ -2337,6 +2338,8 @@ async def _go_dest_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     return await _prompt_dest_step(update, context, lang)
 
 async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.callback_query:
+        await update.callback_query.answer()
     lang = _user_lang(context, update.effective_user.id)
     state = context.user_data.get("wizard_back_state")
     if state == _wz()["CHANNEL"]:

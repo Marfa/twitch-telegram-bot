@@ -16,9 +16,9 @@ from telegram.ext import Application, ContextTypes
 
 import analytics
 import premium as prem
-from bot_helpers import _user_lang, reply_chat_id, with_oauth_legal
+from bot_helpers import _menu, _user_lang, reply_chat_id, with_oauth_legal
 from db import ChannelStatsSample, ChannelStatsTrack, Database
-from i18n import DEFAULT_LOCALE, other_menu, t
+from i18n import DEFAULT_LOCALE, t
 from twitch import TwitchClient, twitch_login_link_html
 
 logger = logging.getLogger(__name__)
@@ -524,7 +524,7 @@ async def _deliver_card(
         photo=InputFile(io.BytesIO(png), filename="channel_stats.png"),
         caption=caption,
         parse_mode=ParseMode.HTML,
-        reply_markup=other_menu(lang),
+        reply_markup=_menu(lang, user_id),
     )
     analytics.capture(
         user_id,
@@ -585,7 +585,7 @@ async def start_channel_stats(
     except Exception:
         logger.exception("channel_stats card failed owner=%s", user_id)
         await context.bot.send_message(
-            chat, t("channel_stats_failed", lang), reply_markup=other_menu(lang)
+            chat, t("channel_stats_failed", lang), reply_markup=_menu(lang, user_id)
         )
 
 
@@ -601,7 +601,7 @@ async def complete_channel_stats_oauth(
     if error or not token_info:
         key = "oauth_denied" if error == "access_denied" else "channel_stats_failed"
         await application.bot.send_message(
-            owner_id, t(key, lang), reply_markup=other_menu(lang)
+            owner_id, t(key, lang), reply_markup=_menu(lang, owner_id)
         )
         return
     login = str(token_info.get("twitch_login") or "").strip().lower()
@@ -611,7 +611,7 @@ async def complete_channel_stats_oauth(
     ).strip() or login
     if not login or not tid:
         await application.bot.send_message(
-            owner_id, t("channel_stats_failed", lang), reply_markup=other_menu(lang)
+            owner_id, t("channel_stats_failed", lang), reply_markup=_menu(lang, owner_id)
         )
         return
     if not await prem.has_feature(application.bot, db, owner_id, FEATURE_ID):
@@ -643,7 +643,7 @@ async def complete_channel_stats_oauth(
     track = db.get_channel_stats_track(owner_id)
     if not track:
         await application.bot.send_message(
-            owner_id, t("channel_stats_failed", lang), reply_markup=other_menu(lang)
+            owner_id, t("channel_stats_failed", lang), reply_markup=_menu(lang, owner_id)
         )
         return
     await application.bot.send_message(
@@ -657,7 +657,7 @@ async def complete_channel_stats_oauth(
     except Exception:
         logger.exception("channel_stats card after oauth owner=%s", owner_id)
         await application.bot.send_message(
-            owner_id, t("channel_stats_failed", lang), reply_markup=other_menu(lang)
+            owner_id, t("channel_stats_failed", lang), reply_markup=_menu(lang, owner_id)
         )
 
 

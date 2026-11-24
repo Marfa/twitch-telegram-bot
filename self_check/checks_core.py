@@ -2190,6 +2190,8 @@ def check_core() -> None:
                 f"other_menu row {i} must be paired: {[b.text for b in row]}"
             )
         assert [b.text for b in other_kb[-1]] == [btn("back", loc)]
+        from i18n import subscriptions_menu_inline, wizard_nav_inline
+
         subs_kb = subscriptions_menu(loc).keyboard
         assert [[b.text for b in row] for row in subs_kb] == [
             [btn("back", loc)],
@@ -2213,6 +2215,28 @@ def check_core() -> None:
                     f"subscriptions_menu row {i} must be paired: "
                     f"{[b.text for b in row]}"
                 )
+        subs_inline = subscriptions_menu_inline(
+            loc, cart=True, pause_notifications=True
+        )
+        assert [
+            [(b.text, b.callback_data) for b in row]
+            for row in subs_inline.inline_keyboard
+        ] == [
+            [
+                (btn("cart", loc), "menu_subs:cart"),
+                (btn("pause_notifications", loc), "menu_subs:pause"),
+            ],
+        ]
+        wiz_nav = wizard_nav_inline(loc)
+        assert [
+            [(b.text, b.callback_data) for b in row]
+            for row in wiz_nav.inline_keyboard
+        ] == [
+            [
+                (btn("wizard_back", loc), "wizard_nav:back"),
+                (btn("wizard_cancel", loc), "wizard_nav:cancel"),
+            ],
+        ]
         settings_kb = settings_menu(loc).keyboard
         bot_settings_kb = bot_settings_menu(loc).keyboard
         ignored_row = next(

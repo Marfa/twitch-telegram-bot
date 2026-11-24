@@ -228,6 +228,19 @@ def run() -> None:
                 f"menu_broadcast:{action} is answered before the conversation group"
             )
 
+        update = _callback_update("menu_subs:cart", app.bot, _SCHED_UID)
+        assert _matches(earlier, update), "menu_subs:cart panel callback is not wired"
+        assert not _matches(conv.entry_points, update), (
+            "menu_subs:cart must stay a panel callback"
+        )
+        update = _callback_update("menu_subs:pause", app.bot, _SCHED_UID)
+        assert _matches(conv.entry_points, update), (
+            "menu_subs:pause is not a conversation entry point"
+        )
+        assert not _matches(earlier, update), (
+            "menu_subs:pause is answered before the conversation group"
+        )
+
         asyncio.run(
             _panel_entry(
                 app,

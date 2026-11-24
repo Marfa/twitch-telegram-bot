@@ -194,6 +194,8 @@ def _check_submenu_reply_keyboards() -> None:
         settings_menu_inline,
     )
 
+    from i18n import subscriptions_menu_inline, wizard_nav_inline
+
     for loc in SUPPORTED_LOCALES:
         cases = [
             ("subscriptions_menu", subscriptions_menu(loc)),
@@ -206,6 +208,12 @@ def _check_submenu_reply_keyboards() -> None:
             ("admin_menu", admin_menu(loc)),
             ("wizard_menu", wizard_menu(loc)),
             ("wizard_menu_no_back", wizard_menu(loc, back=False)),
+            ("wizard_nav_inline", wizard_nav_inline(loc)),
+            ("wizard_nav_inline_no_back", wizard_nav_inline(loc, back=False)),
+            (
+                "subscriptions_menu_inline",
+                subscriptions_menu_inline(loc, cart=True, pause_notifications=True),
+            ),
             ("other_menu_inline", other_menu_inline(loc)),
             (
                 "settings_menu_inline",
@@ -544,7 +552,6 @@ def _seed_live_sub(db, owner_id: int) -> int:
 
 async def _scenario_subscriptions(db) -> None:
     """§4 Мои подписки — list, no-share without beta, delete confirm No, cart, pause."""
-    from i18n import wizard_menu as _wizard_menu
     from handlers.subscriptions import (
         edit_menu,
         list_subscriptions,
@@ -576,7 +583,14 @@ async def _scenario_subscriptions(db) -> None:
     update = _msg_update(_FREE_UID, btn("list", "ru"), cap)
     ctx = _ctx(application)
     with patch(
-        "handlers.subscriptions.beta_features.is_enabled", return_value=False
+        "handlers.subscriptions._deleted_subscriptions_cart_enabled",
+        return_value=True,
+    ), patch(
+        "handlers.subscriptions._pause_notifications_enabled",
+        return_value=True,
+    ), patch(
+        "handlers.subscriptions._share_enabled",
+        return_value=False,
     ):
         await list_subscriptions(update, ctx)
     inline_cbs = [
@@ -586,6 +600,8 @@ async def _scenario_subscriptions(db) -> None:
         for row in m.inline_keyboard
         for b in row
     ]
+    assert "menu_subs:cart" in inline_cbs
+    assert "menu_subs:pause" in inline_cbs
     assert any(cb.startswith("toggle:") for cb in inline_cbs)
     assert any(cb.startswith("edit:") for cb in inline_cbs)
     assert any(cb.startswith("list_del:") for cb in inline_cbs)
@@ -634,15 +650,17 @@ async def _scenario_subscriptions(db) -> None:
     ctx = _ctx(application)
     with patch(
         "handlers.subscriptions._pause_notifications_enabled", return_value=True
-    ), patch(
-        "handlers.subscriptions._wizard",
-        side_effect=lambda lang, back=True: (
-            cap.note_pulse(),
-            _wizard_menu(lang, back=back),
-        )[1],
     ):
         state = await start_pause_notifications(update, ctx)
     assert state is not None
+    pause_cbs = [
+        (b.callback_data or "")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "wizard_nav:cancel" in pause_cbs
     cap.assert_turn("subscriptions_pause")
 
     application, bot = _app(db)

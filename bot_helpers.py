@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Literal
 
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler, filters
@@ -21,7 +21,7 @@ from i18n import (
     main_menu,
     settings_menu,
     t,
-    wizard_menu,
+    wizard_nav_inline,
 )
 
 logger = logging.getLogger(__name__)
@@ -313,8 +313,33 @@ def _menu(lang: str, user_id: int) -> ReplyKeyboardMarkup:
     )
 
 
-def _wizard(lang: str, *, back: bool = True) -> ReplyKeyboardMarkup:
-    return wizard_menu(lang, back=back)
+def _wizard(lang: str, *, back: bool = True) -> InlineKeyboardMarkup:
+    """Wizard Cancel/Back as inline — sticky reply keyboard stays main_menu."""
+    return wizard_nav_inline(lang, back=back)
+
+
+def _coerce_main_reply_keyboard(
+    reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None,
+    *,
+    chat_id: int,
+    user_id: int | None = None,
+    lang: str | None = None,
+) -> ReplyKeyboardMarkup | ReplyKeyboardRemove | None:
+    """Private chats may only sticky main_menu; coerce accidental submenus."""
+    if reply_markup is None or isinstance(reply_markup, ReplyKeyboardRemove):
+        return reply_markup
+    if not isinstance(reply_markup, ReplyKeyboardMarkup):
+        return reply_markup
+    uid = int(user_id) if user_id is not None else int(chat_id)
+    locale = lang or DEFAULT_LOCALE
+    expected = _menu(locale, uid)
+    if reply_markup.keyboard == expected.keyboard:
+        return reply_markup
+    logger.warning(
+        "Coerced non-main sticky reply keyboard for chat_id=%s to main_menu",
+        chat_id,
+    )
+    return expected
 
 
 async def send_reply_keyboard_menu(
@@ -326,14 +351,19 @@ async def send_reply_keyboard_menu(
     parse_mode: str | None = None,
     db: Database | None = None,
     user_id: int | None = None,
+    lang: str | None = None,
 ) -> None:
     """Post a reply-keyboard menu into General (no message_thread_id).
 
-    db/user_id kept for call-site compat; topic keyboard strip is only via
+    Only main_menu is allowed as sticky; other markups are coerced.
+    Topic keyboard strip is only via
     strip_alert_topic_reply_keyboards(..., force=True) on topics enable.
     """
-    _ = (db, user_id)
-    kwargs: dict = {"reply_markup": reply_markup}
+    _ = db
+    markup = _coerce_main_reply_keyboard(
+        reply_markup, chat_id=int(chat_id), user_id=user_id, lang=lang
+    )
+    kwargs: dict = {"reply_markup": markup}
     if parse_mode is not None:
         kwargs["parse_mode"] = parse_mode
     await bot.send_message(int(chat_id), text, **kwargs)
@@ -346,11 +376,15 @@ async def _pulse_reply_keyboard(
     *,
     db: Database | None = None,
     user_id: int | None = None,
+    lang: str | None = None,
 ) -> None:
     """Set reply keyboard in General without leaving a visible chat message."""
     from message_fx import message_fx_disabled
 
-    _ = (db, user_id)
+    _ = db
+    markup = _coerce_main_reply_keyboard(
+        reply_markup, chat_id=int(chat_id), user_id=user_id, lang=lang
+    )
 
     # Draft/typing wrap can race with an immediate delete on some clients and
     # leave the reply keyboard collapsed after inline-only DMs (bot_update).
@@ -358,7 +392,7 @@ async def _pulse_reply_keyboard(
     with message_fx_disabled():
         for attempt in range(3):
             try:
-                msg = await bot.send_message(chat_id, "·", reply_markup=reply_markup)
+                msg = await bot.send_message(chat_id, "·", reply_markup=markup)
                 # Brief pause so the client applies ReplyKeyboard before delete.
                 await asyncio.sleep(0.35)
                 try:
@@ -384,9 +418,15 @@ async def _pulse_reply_keyboard(
                 return
 
 
-async def _pulse_wizard_keyboard(bot, chat_id: int, lang: str, *, back: bool = True) -> None:
-    """Refresh Cancel/Back reply keyboard; carrier message is deleted immediately."""
-    await _pulse_reply_keyboard(bot, chat_id, _wizard(lang, back=back))
+async def _pulse_wizard_keyboard(
+    bot, chat_id: int, lang: str, *, back: bool = True, user_id: int | None = None
+) -> None:
+    """Refresh main reply keyboard during wizards (Cancel/Back are inline)."""
+    _ = back
+    uid = int(user_id) if user_id is not None else int(chat_id)
+    await _pulse_reply_keyboard(
+        bot, chat_id, _menu(lang, uid), user_id=uid, lang=lang
+    )
 
 
 def _btn_filter(key: str) -> filters.Regex:
@@ -461,7 +501,7 @@ def group_setup_menu_filter():
 
 GROUP_SETUP_CALLBACK_PATTERN = (
     r"^(import_mode:|sync:|edit_f:|edit_g:|edit_set:|watch:|alert_type:|new_sub_other:|premium_gate:|"
-    r"menu_other:|menu_settings:|menu_admin:|menu_bot_settings:|menu_auth:|menu_partner:|menu_broadcast:|"
+    r"menu_other:|menu_settings:|menu_admin:|menu_bot_settings:|menu_auth:|menu_partner:|menu_broadcast:|menu_subs:|wizard_nav:|"
     r"dup:|dest:|strip_name:|image_ask:|image_pos:|ignore_keywords:|"
     r"template_typo:|stored_typo_fix:|list_type:|delete_|enable_all|toggle:|sub_toggle:|alert_pause:|"
     r"sys_updates:|sys_availability:|sys_other:|sys_promo:|sys_sync:|sys_beta:|"

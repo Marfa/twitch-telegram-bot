@@ -15,9 +15,9 @@ from telegram.ext import Application, ContextTypes, ConversationHandler
 import analytics
 import beta as beta_features
 import premium as prem
-from bot_helpers import _user_lang, _user_notifications_paused, reply_chat_id, with_oauth_legal
+from bot_helpers import _menu, _user_lang, _user_notifications_paused, reply_chat_id, with_oauth_legal
 from db import Database
-from i18n import DEFAULT_LOCALE, follow_monitor_keyboard, other_menu, t
+from i18n import DEFAULT_LOCALE, follow_monitor_keyboard, t
 from twitch import FOLLOWERS_SCOPE, TwitchClient, twitch_login_link_html
 
 logger = logging.getLogger(__name__)
@@ -203,7 +203,7 @@ async def open_follow_monitor_menu(
     if not beta_ok:
         await update.effective_message.reply_text(
             t("follow_monitor_beta_required", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, user_id),
         )
         return
     # After GA (or without Premium): screen/lists stay open; settings need Premium.
@@ -414,7 +414,7 @@ async def complete_follow_monitor_oauth(
         await application.bot.send_message(
             owner_id,
             t(key, lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, owner_id),
         )
         return
     info = token_info or {}
@@ -426,7 +426,7 @@ async def complete_follow_monitor_oauth(
         await application.bot.send_message(
             owner_id,
             t("follow_monitor_failed", lang),
-            reply_markup=other_menu(lang),
+            reply_markup=_menu(lang, owner_id),
         )
         return
     from oauth_tokens import apply_oauth_success_tokens, restore_after_twitch_oauth
@@ -463,7 +463,7 @@ async def complete_follow_monitor_oauth(
     await application.bot.send_message(
         owner_id,
         t("follow_monitor_enabled", lang),
-        reply_markup=other_menu(lang),
+        reply_markup=_menu(lang, owner_id),
     )
     asyncio.create_task(_sync_owner(application, owner_id))
 
@@ -960,8 +960,20 @@ async def cancel_follow_monitor_search(
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     row = db.get_follow_monitor(user_id)
-    await update.effective_message.reply_text(
-        t("cancelled", lang),
-        reply_markup=_kb_from_row(lang, row),
-    )
+    if update.callback_query:
+        await update.callback_query.answer()
+        try:
+            await update.callback_query.edit_message_text("✓")
+        except BadRequest:
+            pass
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("cancelled", lang),
+            reply_markup=_kb_from_row(lang, row),
+        )
+    else:
+        await update.effective_message.reply_text(
+            t("cancelled", lang),
+            reply_markup=_kb_from_row(lang, row),
+        )
     return ConversationHandler.END
