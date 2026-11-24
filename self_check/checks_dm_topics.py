@@ -220,17 +220,20 @@ async def _check_menu_keyboard_goes_to_general() -> None:
     """Reply-keyboard menus must not inherit Эфир / All-messages thread ids."""
     from telegram import ReplyKeyboardRemove
 
+    from bot_helpers import _menu
+
     bot = AsyncMock()
     bot.send_message = AsyncMock(
         return_value=SimpleNamespace(message_id=1, chat_id=7)
     )
+    # other_menu is legacy sticky; helper coerces to main_menu.
     kb = other_menu("ru")
-    await send_reply_keyboard_menu(bot, 7, "Прочее:", kb)
+    await send_reply_keyboard_menu(bot, 7, "Прочее:", kb, user_id=7, lang="ru")
     assert bot.send_message.await_count == 1
     args, kwargs = bot.send_message.await_args
     assert args[0] == 7
     assert args[1] == "Прочее:"
-    assert kwargs.get("reply_markup") is kb
+    assert kwargs.get("reply_markup").keyboard == _menu("ru", 7).keyboard
     assert "message_thread_id" not in kwargs
     assert kwargs.get("message_thread_id") is None
 
@@ -252,11 +255,16 @@ async def _check_menu_keyboard_goes_to_general() -> None:
         side_effect=lambda _u, key: 50 if key == "live" else None
     )
     bot.send_message.reset_mock()
-    await send_reply_keyboard_menu(bot, 7, "Прочее:", kb, db=db, user_id=7)
+    await send_reply_keyboard_menu(
+        bot, 7, "Прочее:", kb, db=db, user_id=7, lang="ru"
+    )
     # Menu must not strip topics — only force=True on topics enable does.
     assert bot.send_message.await_count == 1
     assert "message_thread_id" not in bot.send_message.await_args.kwargs
-    assert bot.send_message.await_args.kwargs.get("reply_markup") is kb
+    assert (
+        bot.send_message.await_args.kwargs.get("reply_markup").keyboard
+        == _menu("ru", 7).keyboard
+    )
 
     bot.send_message.reset_mock()
     with patch(
