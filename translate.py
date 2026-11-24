@@ -50,6 +50,44 @@ def markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+_TELEGRAM_HTML_TAG_RE = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9-]*)[^>]*>")
+
+
+def truncate_telegram_html(text: str, limit: int) -> str:
+    """Cut Telegram HTML to limit characters without leaving a tag open.
+
+    Telegram rejects the whole message when a start tag has no end tag, so the
+    cut lands before a tag or entity that crosses the limit, and the tags still
+    open at the cut are closed after the ellipsis.
+    """
+    if limit <= 0 or len(text) <= limit:
+        return text
+    cut = limit
+    last_lt = text.rfind("<", 0, cut)
+    if last_lt != -1 and ">" not in text[last_lt:cut]:
+        cut = last_lt
+    last_amp = text.rfind("&", 0, cut)
+    if last_amp != -1 and ";" not in text[last_amp:cut]:
+        cut = last_amp
+    head = text[:cut].rstrip()
+    open_tags: list[str] = []
+    for match in _TELEGRAM_HTML_TAG_RE.finditer(head):
+        name = match.group(2).lower()
+        if match.group(1):
+            for index in range(len(open_tags) - 1, -1, -1):
+                if open_tags[index] == name:
+                    del open_tags[index:]
+                    break
+        else:
+            open_tags.append(name)
+    return head + "…" + "".join(f"</{tag}>" for tag in reversed(open_tags))
+
+
+def telegram_html_to_plain(text: str) -> str:
+    """Drop Telegram HTML markup for a resend without parse_mode."""
+    return html.unescape(re.sub(r"<[^>]*>", "", text))
+
+
 def _deepl_base_url(api_key: str) -> str:
     return "https://api-free.deepl.com" if api_key.endswith(":fx") else "https://api.deepl.com"
 

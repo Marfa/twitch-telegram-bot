@@ -1149,6 +1149,91 @@ def mark_posthog_issue_notified(
         logger.warning("Could not persist PostHog issue notify cooldown", exc_info=True)
 
 
+_ADMIN_DESCRIPTION_MAX = 1200
+
+
+def _admin_issue_description(description: str, *, label: str) -> str:
+    """Brief translated Telegram-HTML description for one admin alert.
+
+    The raw markdown is cut before conversion, and the translated HTML is cut
+    only at a complete tag boundary, because Telegram rejects a message that
+    has a start tag without its end tag.
+    """
+    from translate import (
+        markdown_to_telegram_html,
+        translate_text,
+        truncate_telegram_html,
+    )
+
+    text = description.strip()
+    if not text:
+        return ""
+    if len(text) > _ADMIN_DESCRIPTION_MAX:
+        text = text[: _ADMIN_DESCRIPTION_MAX - 1] + "…"
+    desc_html = markdown_to_telegram_html(text)
+    try:
+        desc_ru = translate_text(desc_html, target_lang="ru")
+    except Exception:
+        logger.exception("DeepL description translate failed for %s", label)
+        desc_ru = desc_html
+    return truncate_telegram_html(desc_ru, _ADMIN_DESCRIPTION_MAX)
+
+
+def _telegram_rejects_html(exc: BaseException) -> bool:
+    """Telegram refused the message body because its HTML entities do not parse."""
+    return isinstance(exc, BadRequest) and "parse entities" in str(exc).lower()
+
+
+async def _send_admin_alert(
+    bot: Any,
+    admin_id: int,
+    text: str,
+    *,
+    label: str,
+    reply_markup: Any = None,
+) -> bool:
+    """Send one admin alert; send again as plain text when Telegram refuses the markup.
+
+    A refused HTML body loses the whole alert, so the same content goes out once
+    more without parse_mode. Returns True when the admin got the message.
+    """
+    from translate import telegram_html_to_plain
+
+    kwargs: dict[str, Any] = {"disable_web_page_preview": True}
+    if reply_markup is not None:
+        kwargs["reply_markup"] = reply_markup
+    try:
+        await bot.send_message(admin_id, text, parse_mode=ParseMode.HTML, **kwargs)
+        return True
+    except BadRequest as exc:
+        if not _telegram_rejects_html(exc):
+            logger.warning("Cannot send %s to admin %s: %s", label, admin_id, exc)
+            return False
+        logger.warning(
+            "Telegram rejected %s markup for admin %s: %s; resending as plain text",
+            label,
+            admin_id,
+            exc,
+        )
+    except Forbidden as exc:
+        logger.warning("Cannot send %s to admin %s: %s", label, admin_id, exc)
+        return False
+    except (NetworkError, RetryAfter) as exc:
+        # Keep looping: one transient DM must not cancel the rest.
+        logger.warning(
+            "Transient Telegram error sending %s to admin %s: %s", label, admin_id, exc
+        )
+        return False
+    try:
+        await bot.send_message(admin_id, telegram_html_to_plain(text), **kwargs)
+        return True
+    except (BadRequest, Forbidden, NetworkError, RetryAfter) as exc:
+        logger.warning(
+            "Plain-text resend of %s to admin %s failed: %s", label, admin_id, exc
+        )
+        return False
+
+
 async def notify_admins_posthog_issue(
     application: Application, payload: dict[str, str]
 ) -> bool:
@@ -1157,7 +1242,7 @@ async def notify_admins_posthog_issue(
     Returns True when no retry is needed (delivered, cooldown hit, or no admins).
     """
     from config import ADMIN_USER_IDS
-    from translate import markdown_to_telegram_html, translate_text
+    from translate import translate_text
 
     if not ADMIN_USER_IDS:
         return True
@@ -1179,18 +1264,7 @@ async def notify_admins_posthog_issue(
     except Exception:
         logger.exception("DeepL name translate failed for PostHog issue")
         name_ru = name
-    desc_ru = ""
-    if description:
-        if len(description) > 1200:
-            description = description[:1197] + "…"
-        desc_html = markdown_to_telegram_html(description)
-        try:
-            desc_ru = translate_text(desc_html, target_lang="ru")
-        except Exception:
-            logger.exception("DeepL description translate failed for PostHog issue")
-            desc_ru = desc_html
-        if len(desc_ru) > 1200:
-            desc_ru = desc_ru[:1197] + "…"
+    desc_ru = _admin_issue_description(description, label="PostHog issue")
     link_block = f"\n\n{html.escape(url)}" if url else ""
     desc_block = desc_ru + "\n" if desc_ru else ""
     delivered = False
@@ -1210,23 +1284,10 @@ async def notify_admins_posthog_issue(
             description=desc_block,
             link=link_block,
         )
-        try:
-            await application.bot.send_message(
-                admin_id,
-                text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
+        if await _send_admin_alert(
+            application.bot, admin_id, text, label="PostHog issue"
+        ):
             delivered = True
-        except (BadRequest, Forbidden) as exc:
-            logger.warning("Cannot send PostHog issue to admin %s: %s", admin_id, exc)
-        except (NetworkError, RetryAfter) as exc:
-            # Keep looping: one transient DM must not cancel the rest.
-            logger.warning(
-                "Transient Telegram error sending PostHog issue to admin %s: %s",
-                admin_id,
-                exc,
-            )
     if delivered:
         mark_posthog_issue_notified(payload)
     return delivered
@@ -1444,7 +1505,7 @@ async def notify_admins_polylane_issue(
     Returns True when at least one admin got the alert (or there are no admins).
     """
     from config import ADMIN_USER_IDS
-    from translate import markdown_to_telegram_html, translate_text
+    from translate import translate_text
 
     if not ADMIN_USER_IDS:
         return True
@@ -1458,18 +1519,7 @@ async def notify_admins_polylane_issue(
     except Exception:
         logger.exception("DeepL name translate failed for Polylane issue")
         name_ru = name
-    desc_ru = ""
-    if description:
-        if len(description) > 1200:
-            description = description[:1197] + "…"
-        desc_html = markdown_to_telegram_html(description)
-        try:
-            desc_ru = translate_text(desc_html, target_lang="ru")
-        except Exception:
-            logger.exception("DeepL description translate failed for Polylane issue")
-            desc_ru = desc_html
-        if len(desc_ru) > 1200:
-            desc_ru = desc_ru[:1197] + "…"
+    desc_ru = _admin_issue_description(description, label="Polylane issue")
     sev_block = f"{html.escape(severity)} · " if severity else ""
     link_block = f"\n\n{html.escape(url)}" if url else ""
     desc_block = desc_ru + "\n" if desc_ru else ""
@@ -1485,23 +1535,14 @@ async def notify_admins_polylane_issue(
             description=desc_block,
             link=link_block,
         )
-        try:
-            await application.bot.send_message(
-                admin_id,
-                text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-                reply_markup=dm_main_menu_keyboard(lang),
-            )
+        if await _send_admin_alert(
+            application.bot,
+            admin_id,
+            text,
+            label="Polylane issue",
+            reply_markup=dm_main_menu_keyboard(lang),
+        ):
             delivered = True
-        except (BadRequest, Forbidden) as exc:
-            logger.warning("Cannot send Polylane issue to admin %s: %s", admin_id, exc)
-        except (NetworkError, RetryAfter) as exc:
-            logger.warning(
-                "Transient Telegram error sending Polylane issue to admin %s: %s",
-                admin_id,
-                exc,
-            )
     return delivered
 
 

@@ -2946,6 +2946,7 @@ def check_handlers() -> None:
     _check_posthog_inbox_poll_network_blip()
     _check_polylane_new_issue_poll()
     _check_posthog_admin_notify_transient_failure()
+    _check_admin_alert_html_truncation()
     _check_admin_alert_poll_seen_after_delivery()
 
 
@@ -3094,6 +3095,89 @@ def _check_posthog_admin_notify_transient_failure() -> None:
     assert ok is True
     assert bot.send_message.await_count == 3
     mark.assert_called_once_with(payload)
+
+
+def _check_admin_alert_html_truncation() -> None:
+    """Long issue descriptions keep valid Telegram HTML, else resend as plain text."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from telegram.constants import ParseMode
+    from handlers.monitoring import notify_admins_posthog_issue
+    from translate import truncate_telegram_html
+
+    def _assert_balanced(markup: str) -> None:
+        stack: list[str] = []
+        for match in re.finditer(r"<(/?)([a-zA-Z][a-zA-Z0-9-]*)[^>]*>", markup):
+            name = match.group(2).lower()
+            if match.group(1):
+                assert stack and stack.pop() == name, markup[-120:]
+            else:
+                stack.append(name)
+        assert not stack, markup[-120:]
+
+    # The observed cut: the code span opens before 1197 and closes after it.
+    crossing = markdown_to_telegram_html("A" * 1190 + "`code`")
+    assert len(crossing) > 1200
+    cut = truncate_telegram_html(crossing, 1200)
+    _assert_balanced(cut)
+    assert cut.endswith("</code>")
+
+    db = MagicMock()
+    db.get_user_locale.return_value = "en"
+    payload = {
+        "kind": "created",
+        "name": "Truncated body",
+        "description": "A" * 1190 + "`code`",
+        "url": "https://example.test/issue",
+        "fingerprint": "fp-html-cut",
+    }
+
+    bot = AsyncMock()
+    app = SimpleNamespace(bot=bot, bot_data={"db": db})
+    with (
+        patch("config.ADMIN_USER_IDS", [1]),
+        patch("handlers.monitoring.should_notify_posthog_issue", return_value=True),
+        patch("handlers.monitoring.mark_posthog_issue_notified") as mark,
+        patch("translate.translate_text", side_effect=lambda s, **_: s),
+    ):
+        ok = asyncio.run(notify_admins_posthog_issue(app, payload))
+    assert ok is True
+    mark.assert_called_once_with(payload)
+    assert bot.send_message.await_count == 1
+    sent = bot.send_message.await_args.args[1]
+    _assert_balanced(sent)
+    assert bot.send_message.await_args.kwargs["parse_mode"] == ParseMode.HTML
+    assert "</code>" in sent
+
+    # A body Telegram still refuses goes out once more without parse_mode.
+    refusing_bot = AsyncMock()
+    refusing_bot.send_message.side_effect = [
+        BadRequest(
+            'Can\'t parse entities: can\'t find end tag corresponding to start tag "code"'
+        ),
+        None,
+    ]
+    refusing_app = SimpleNamespace(bot=refusing_bot, bot_data={"db": db})
+    with (
+        patch("config.ADMIN_USER_IDS", [1]),
+        patch("handlers.monitoring.should_notify_posthog_issue", return_value=True),
+        patch("handlers.monitoring.mark_posthog_issue_notified") as mark2,
+        patch("translate.translate_text", side_effect=lambda s, **_: s),
+    ):
+        ok = asyncio.run(
+            notify_admins_posthog_issue(
+                refusing_app, dict(payload, fingerprint="fp-html-fallback")
+            )
+        )
+    assert ok is True
+    mark2.assert_called_once()
+    assert refusing_bot.send_message.await_count == 2
+    assert "parse_mode" not in refusing_bot.send_message.await_args.kwargs
+    plain = refusing_bot.send_message.await_args.args[1]
+    assert "<code>" not in plain
+    assert "code" in plain
 
 
 def _check_admin_alert_poll_seen_after_delivery() -> None:
