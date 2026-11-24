@@ -408,7 +408,7 @@ def subscriptions_menu_inline(
     cart: bool = False,
     pause_notifications: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Cart / Pause under My subscriptions — does not replace the main reply keyboard."""
+    """Cart / Pause rows for My subscriptions list / type pick (last, after alert types)."""
     buttons: list[InlineKeyboardButton] = []
     if cart:
         buttons.append(

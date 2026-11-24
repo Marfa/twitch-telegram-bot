@@ -235,6 +235,13 @@ def _subs_inline(lang: str, db: Database, user_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def _subs_action_rows(
+    lang: str, db: Database, user_id: int
+) -> list[list[InlineKeyboardButton]]:
+    """Cart / Pause rows — append after type pick / list actions (after release)."""
+    return list(_subs_inline(lang, db, user_id).inline_keyboard)
+
+
 async def _send_subs_panel(
     bot,
     chat_id: int,
@@ -244,19 +251,16 @@ async def _send_subs_panel(
     *,
     text: str | None = None,
 ) -> None:
-    """Main sticky + optional inline Cart/Pause under My subscriptions."""
-    await send_reply_keyboard_menu(
-        bot,
-        chat_id,
-        text or t("menu_subs", lang),
-        _menu(lang, user_id),
-        db=db,
-        user_id=user_id,
-        lang=lang,
+    """Pulse main sticky; one message with optional Cart/Pause inline."""
+    await _pulse_reply_keyboard(
+        bot, chat_id, _menu(lang, user_id), user_id=user_id, lang=lang
     )
     panel = _subs_inline(lang, db, user_id)
-    if panel.inline_keyboard:
-        await bot.send_message(chat_id, t("menu_subs", lang), reply_markup=panel)
+    await bot.send_message(
+        chat_id,
+        text or t("menu_subs", lang),
+        reply_markup=panel if panel.inline_keyboard else None,
+    )
 
 
 def import_followed_as_subscriptions(
@@ -1366,6 +1370,8 @@ def _subs_list_keyboard(
         rows.extend(_subs_toggle_keyboard(db, owner_id, lang, page_subs))
     if total > 1:
         rows.append(_subs_page_nav_row("list_page", page, total))
+    if actions:
+        rows.extend(_subs_action_rows(lang, db, owner_id))
     if not rows:
         return None
     return InlineKeyboardMarkup(rows)
@@ -1485,22 +1491,21 @@ async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    # Sticky stays main_menu; cart/pause are a separate inline panel.
-    # Send panel first so the last bubble near the input is the type picker / list.
+    # Sticky stays main_menu; Cart/Pause are last rows on type pick / list (one message).
     await _pulse_reply_keyboard(
         context.bot, chat_id, _menu(lang, user_id), user_id=user_id, lang=lang
     )
-    panel = _subs_inline(lang, db, user_id)
-    if panel.inline_keyboard:
-        await context.bot.send_message(
-            chat_id, t("menu_subs", lang), reply_markup=panel
-        )
     types = _edit_present_types(subs)
     if len(types) > 1:
         await context.bot.send_message(
             chat_id,
             t("list_type_pick", lang),
-            reply_markup=_alert_type_pick_keyboard(lang, types, "list_type"),
+            reply_markup=_alert_type_pick_keyboard(
+                lang,
+                types,
+                "list_type",
+                extra_rows=_subs_action_rows(lang, db, user_id),
+            ),
         )
         return
     await _deliver_subs_list(
