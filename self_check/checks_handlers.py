@@ -3109,7 +3109,7 @@ def _check_admin_alert_html_truncation() -> None:
 
     def _assert_balanced(markup: str) -> None:
         stack: list[str] = []
-        for match in re.finditer(r"<(/?)([a-zA-Z][a-zA-Z0-9-]*)[^>]*>", markup):
+        for match in re.finditer(r"<(/?)([a-zA-Z][a-zA-Z0-9-]{0,63})[^>]*>", markup):
             name = match.group(2).lower()
             if match.group(1):
                 assert stack and stack.pop() == name, markup[-120:]
