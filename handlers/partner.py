@@ -7,9 +7,15 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 
-from bot_helpers import _can_use_admin_tools, _is_admin, _user_lang
+from bot_helpers import _can_use_admin_tools, _is_admin, _user_lang, reply_chat_id
 from db import Database
-from i18n import DEFAULT_LOCALE, admin_menu, partner_menu, t, withdrawal_actions_keyboard
+from i18n import (
+    DEFAULT_LOCALE,
+    admin_menu_inline,
+    partner_menu_inline,
+    t,
+    withdrawal_actions_keyboard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +33,15 @@ async def open_partner_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
-    db: Database = context.application.bot_data["db"]
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t(
             "partner_intro",
             lang,
             percent=REFERRAL_COMMISSION_PERCENT,
             min_stars=REFERRAL_WITHDRAW_MIN_STARS,
         ),
-        reply_markup=partner_menu(lang),
+        reply_markup=partner_menu_inline(lang),
     )
 
 
@@ -46,7 +52,8 @@ async def partner_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     stats = db.get_referral_stats(user_id)
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t(
             "partner_stats",
             lang,
@@ -54,7 +61,7 @@ async def partner_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
             payments=stats.payments,
             available=stats.available_stars,
         ),
-        reply_markup=partner_menu(lang),
+        reply_markup=partner_menu_inline(lang),
     )
 
 
@@ -68,9 +75,10 @@ async def partner_show_link(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         me = await context.bot.get_me()
         username = me.username or ""
     link = f"https://t.me/{username}?start=ref_{user_id}" if username else f"ref_{user_id}"
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t("partner_link", lang, link=link),
-        reply_markup=partner_menu(lang),
+        reply_markup=partner_menu_inline(lang),
     )
 
 
@@ -87,31 +95,34 @@ async def partner_request_withdraw(
     stats = db.get_referral_stats(user_id)
     available = stats.available_stars
     if available < REFERRAL_WITHDRAW_MIN_STARS:
-        await update.effective_message.reply_text(
+        await context.bot.send_message(
+            reply_chat_id(update),
             t(
                 "partner_withdraw_min",
                 lang,
                 min_stars=REFERRAL_WITHDRAW_MIN_STARS,
                 available=available,
             ),
-            reply_markup=partner_menu(lang),
+            reply_markup=partner_menu_inline(lang),
         )
         return
     request_id = db.request_referral_withdrawal(user_id, available)
     if request_id is None:
-        await update.effective_message.reply_text(
+        await context.bot.send_message(
+            reply_chat_id(update),
             t(
                 "partner_withdraw_min",
                 lang,
                 min_stars=REFERRAL_WITHDRAW_MIN_STARS,
                 available=available,
             ),
-            reply_markup=partner_menu(lang),
+            reply_markup=partner_menu_inline(lang),
         )
         return
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t("partner_withdraw_ok", lang, id=request_id, amount=available),
-        reply_markup=partner_menu(lang),
+        reply_markup=partner_menu_inline(lang),
     )
     for admin_id in ADMIN_USER_IDS:
         admin_lang = db.get_user_locale(admin_id) or DEFAULT_LOCALE
@@ -152,9 +163,10 @@ async def partner_show_withdrawals(
     db: Database = context.application.bot_data["db"]
     items = db.list_referral_withdrawals(user_id, limit=20)
     if not items:
-        await update.effective_message.reply_text(
+        await context.bot.send_message(
+            reply_chat_id(update),
             t("partner_withdrawals_empty", lang),
-            reply_markup=partner_menu(lang),
+            reply_markup=partner_menu_inline(lang),
         )
         return
     lines = [t("partner_withdrawals_title", lang)]
@@ -168,10 +180,52 @@ async def partner_show_withdrawals(
                 status=_partner_wd_status_label(item.status, lang),
             )
         )
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         "\n".join(lines),
-        reply_markup=partner_menu(lang),
+        reply_markup=partner_menu_inline(lang),
     )
+
+
+async def on_menu_partner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from bot_helpers import _settings_inline
+    from handlers.settings import _dismiss_inline_panel, open_settings_menu
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    if not _partner_enabled():
+        return
+    action = (query.data or "").split(":", 1)[-1]
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    if action == "back":
+        try:
+            await query.edit_message_text(
+                t("menu_settings", lang),
+                reply_markup=_settings_inline(lang, db, user_id),
+            )
+        except BadRequest:
+            await _dismiss_inline_panel(query)
+            await open_settings_menu(update, context)
+        return
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    if action == "stats":
+        await partner_show_stats(update, context)
+        return
+    if action == "link":
+        await partner_show_link(update, context)
+        return
+    if action == "withdraw":
+        await partner_request_withdraw(update, context)
+        return
+    if action == "withdrawals":
+        await partner_show_withdrawals(update, context)
 
 
 async def admin_show_withdrawals(
@@ -185,18 +239,22 @@ async def admin_show_withdrawals(
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
     items = db.list_pending_referral_withdrawals()
+    chat_id = reply_chat_id(update)
     if not items:
-        await update.effective_message.reply_text(
+        await context.bot.send_message(
+            chat_id,
             t("admin_withdrawals_empty", lang),
-            reply_markup=admin_menu(lang),
+            reply_markup=admin_menu_inline(lang),
         )
         return
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        chat_id,
         t("admin_withdrawals_title", lang),
-        reply_markup=admin_menu(lang),
+        reply_markup=admin_menu_inline(lang),
     )
     for item in items:
-        await update.effective_message.reply_text(
+        await context.bot.send_message(
+            chat_id,
             t(
                 "admin_withdrawal_line",
                 lang,

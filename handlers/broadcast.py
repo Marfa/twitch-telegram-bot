@@ -32,7 +32,8 @@ from i18n import (
     admin_wizard_menu,
     all_wizard_nav_buttons,
     broadcast_feedback_keyboard,
-    broadcast_menu,
+    admin_menu_inline,
+    broadcast_menu_inline,
     format_schedule_month_label,
     is_menu_button,
     schedule_calendar_days_keyboard,
@@ -151,10 +152,45 @@ async def open_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     context.user_data.clear()
     lang = _user_lang(context, user_id)
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t("menu_broadcast", lang),
-        reply_markup=broadcast_menu(lang),
+        reply_markup=broadcast_menu_inline(lang),
     )
+
+
+async def on_menu_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Broadcast panel: scheduled/sent lists and back (new is a conv entry)."""
+    from handlers.settings import _ack_inline_panel, _dismiss_inline_panel
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    user_id = query.from_user.id
+    if not _can_use_admin_tools(user_id):
+        return
+    action = (query.data or "").split(":", 1)[-1]
+    lang = _user_lang(context, user_id)
+    if action == "back":
+        try:
+            await query.edit_message_text(
+                t("menu_admin", lang),
+                reply_markup=admin_menu_inline(lang),
+            )
+        except BadRequest:
+            await _dismiss_inline_panel(query)
+            from bot import open_admin_menu
+
+            await open_admin_menu(update, context)
+        return
+    if action == "scheduled_broadcasts":
+        await _ack_inline_panel(query)
+        await admin_scheduled_list(update, context)
+        return
+    if action == "sent_broadcasts":
+        await _ack_inline_panel(query)
+        await admin_sent_list(update, context)
 
 
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1081,7 +1117,7 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             name=_broadcast_job_name(broadcast_id),
         )
         await context.bot.send_message(
-            user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu(lang)
+            user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu_inline(lang)
         )
         return ConversationHandler.END
 
@@ -1114,7 +1150,7 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text(
                 t("broadcast_scheduled", lang, when=when_label)
             )
-        await context.bot.send_message(user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu(lang))
+        await context.bot.send_message(user_id, t("menu_broadcast", lang), reply_markup=broadcast_menu_inline(lang))
         return ConversationHandler.END
 
     return ADMIN_MSG_SCHEDULE
@@ -1176,13 +1212,13 @@ async def admin_sent_list(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not items:
         await update.effective_message.reply_text(
             t("sent_empty", lang),
-            reply_markup=broadcast_menu(lang),
+            reply_markup=broadcast_menu_inline(lang),
         )
         return
 
     await update.effective_message.reply_text(
         t("sent_list_title", lang),
-        reply_markup=broadcast_menu(lang),
+        reply_markup=broadcast_menu_inline(lang),
     )
     for item in items:
         message, markup = _admin_sent_broadcast_message(db, item, lang)
@@ -1211,7 +1247,7 @@ async def admin_scheduled_list(update: Update, context: ContextTypes.DEFAULT_TYP
     if not items:
         await update.effective_message.reply_text(
             t("scheduled_empty", lang),
-            reply_markup=broadcast_menu(lang),
+            reply_markup=broadcast_menu_inline(lang),
         )
         return
 
@@ -1270,7 +1306,7 @@ async def on_sb_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await context.bot.send_message(
         user_id,
         t("menu_broadcast", lang),
-        reply_markup=broadcast_menu(lang),
+        reply_markup=broadcast_menu_inline(lang),
     )
 
 
@@ -1414,7 +1450,7 @@ async def receive_sb_edit_text(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.clear()
         await update.effective_message.reply_text(
             t("menu_broadcast", lang),
-            reply_markup=broadcast_menu(lang),
+            reply_markup=broadcast_menu_inline(lang),
         )
         return
     if not plain:
@@ -1428,7 +1464,7 @@ async def receive_sb_edit_text(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await update.effective_message.reply_text(
             t("scheduled_updated", lang, id=broadcast_id),
-            reply_markup=broadcast_menu(lang),
+            reply_markup=broadcast_menu_inline(lang),
         )
     context.user_data.clear()
 
@@ -1587,7 +1623,7 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
         await context.bot.send_message(
             user_id,
             t("menu_broadcast", lang),
-            reply_markup=broadcast_menu(lang),
+            reply_markup=broadcast_menu_inline(lang),
         )
         return ConversationHandler.END
 

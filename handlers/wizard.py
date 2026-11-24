@@ -49,7 +49,7 @@ from i18n import (
     alert_type_keyboard,
     all_btn_texts,
     all_wizard_nav_buttons,
-    broadcast_menu,
+    broadcast_menu_inline,
     category_filter_nav_keyboard,
     category_filter_pick_keyboard,
     channel_dup_keyboard,
@@ -2632,7 +2632,7 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         context.user_data.clear()
         await update.effective_message.reply_text(
             t("menu_broadcast", lang),
-            reply_markup=broadcast_menu(lang),
+            reply_markup=broadcast_menu_inline(lang),
         )
         return ConversationHandler.END
     return ConversationHandler.END

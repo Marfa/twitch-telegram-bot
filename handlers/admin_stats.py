@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot_helpers import _can_use_admin_tools, _user_lang
+from bot_helpers import _can_use_admin_tools, _user_lang, reply_chat_id
 from db import BotStats, Database
-from i18n import admin_menu, reload_strings, t
+from i18n import admin_menu_inline, reload_strings, t
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +61,10 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     db: Database = context.application.bot_data["db"]
     stats = db.get_bot_stats()
     trials = db.list_active_trial_users()
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         _format_stats(stats, lang, trials=trials),
-        reply_markup=admin_menu(lang),
+        reply_markup=admin_menu_inline(lang),
     )
 
 
@@ -76,15 +77,17 @@ async def admin_reload_locales(update: Update, context: ContextTypes.DEFAULT_TYP
         counts = reload_strings()
     except Exception as exc:
         logger.exception("locale reload failed")
-        await update.effective_message.reply_text(
+        await context.bot.send_message(
+            reply_chat_id(update),
             t("locales_reload_failed", lang, error=str(exc)[:200]),
-            reply_markup=admin_menu(lang),
+            reply_markup=admin_menu_inline(lang),
         )
         return
     summary = ", ".join(f"{loc}={n}" for loc, n in counts.items())
     logger.info("locales reloaded: %s", summary)
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        reply_chat_id(update),
         t("locales_reloaded", lang, summary=summary),
-        reply_markup=admin_menu(lang),
+        reply_markup=admin_menu_inline(lang),
     )
 
