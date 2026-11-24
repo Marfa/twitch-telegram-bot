@@ -50,6 +50,88 @@ def markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+def _is_tag_name_char(char: str) -> bool:
+    return char.isascii() and (char.isalnum() or char == "-")
+
+
+def _read_html_tag(text: str, start: int) -> tuple[int, str, bool] | None:
+    """Read the Telegram HTML tag at start as (end index, name, is closing).
+
+    One forward scan keeps the cost linear. A tag pattern over untrusted text
+    runs in quadratic time on input such as "<A" followed by many "-".
+    """
+    index = start + 1
+    is_close = text.startswith("/", index)
+    if is_close:
+        index += 1
+    name_start = index
+    if index >= len(text) or not (text[index].isascii() and text[index].isalpha()):
+        return None
+    index += 1
+    while index < len(text) and _is_tag_name_char(text[index]):
+        index += 1
+    end = text.find(">", index)
+    if end == -1:
+        return None
+    return end + 1, text[name_start:index].lower(), is_close
+
+
+def truncate_telegram_html(text: str, limit: int) -> str:
+    """Cut Telegram HTML to limit characters without leaving a tag open.
+
+    Telegram rejects the whole message when a start tag has no end tag, so the
+    cut lands before a tag or entity that crosses the limit, and the tags still
+    open at the cut are closed after the ellipsis.
+    """
+    if limit <= 0 or len(text) <= limit:
+        return text
+    cut = limit
+    last_lt = text.rfind("<", 0, cut)
+    if last_lt != -1 and ">" not in text[last_lt:cut]:
+        cut = last_lt
+    last_amp = text.rfind("&", 0, cut)
+    if last_amp != -1 and ";" not in text[last_amp:cut]:
+        cut = last_amp
+    head = text[:cut].rstrip()
+    open_tags: list[str] = []
+    scan = 0
+    while True:
+        start = head.find("<", scan)
+        if start == -1:
+            break
+        tag = _read_html_tag(head, start)
+        scan = start + 1
+        if tag is None:
+            continue
+        end, name, is_close = tag
+        scan = end
+        if is_close:
+            for position in range(len(open_tags) - 1, -1, -1):
+                if open_tags[position] == name:
+                    del open_tags[position:]
+                    break
+        else:
+            open_tags.append(name)
+    return head + "…" + "".join(f"</{tag}>" for tag in reversed(open_tags))
+
+
+def telegram_html_to_plain(text: str) -> str:
+    """Drop Telegram HTML markup for a resend without parse_mode."""
+    pieces: list[str] = []
+    scan = 0
+    while True:
+        start = text.find("<", scan)
+        if start == -1:
+            break
+        end = text.find(">", start)
+        if end == -1:
+            break
+        pieces.append(text[scan:start])
+        scan = end + 1
+    pieces.append(text[scan:])
+    return html.unescape("".join(pieces))
+
+
 def _deepl_base_url(api_key: str) -> str:
     return "https://api-free.deepl.com" if api_key.endswith(":fx") else "https://api.deepl.com"
 
