@@ -1,7 +1,13 @@
-"""Private-chat forum topics for alert types (Bot API 9.3+ / setMySettings 10.5)."""
+"""Private-chat forum topics for alert types (Bot API 9.3+ / setMySettings 10.5).
+
+Also supports Premium advanced_mode per-streamer topics (one topic per Twitch
+channel). When a streamer topic is enabled and entitled, alerts for that
+streamer go there; otherwise routing falls back to alert-type topics.
+"""
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from telegram.error import BadRequest, TelegramError
@@ -20,8 +26,26 @@ TOPIC_KEYS: tuple[str, ...] = (
     "giveaway_watch",
 )
 
+# Max concurrent enabled per-streamer DM topics (product cap).
+STREAMER_TOPIC_LIMIT = 5
+
+# Default icon color when user emoji is not in getForumTopicIconStickers.
+STREAMER_TOPIC_ICON_COLOR = 0x6FB9F0
+
 # Telegram General topic in forums / private topic mode.
 GENERAL_TOPIC_ID = 1
+
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001F9FF"
+    "\U00002600-\U000027BF"
+    "\U0001FA00-\U0001FAFF"
+    "\U00002300-\U000023FF"
+    "\U0000FE0F"
+    "\U0000200D"
+    "]+",
+    flags=re.UNICODE,
+)
 
 # Allowed icon_color values only (createForumTopic).
 _TOPIC_ICON_COLOR: dict[str, int] = {
@@ -247,6 +271,214 @@ async def sync_user_topic_icons(bot, db, user_id: int) -> int:
     return updated
 
 
+def extract_topic_emoji(text: str) -> str | None:
+    """First emoji grapheme cluster from user text, or None."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    match = _EMOJI_RE.search(raw)
+    if not match:
+        return None
+    return match.group(0)
+
+
+async def icon_custom_emoji_id_for_emoji(bot, emoji: str) -> str | None:
+    """Map a user emoji to an allowed forum topic custom_emoji_id."""
+    glyph = (emoji or "").strip()
+    if not glyph:
+        return None
+    by_emoji = await _load_icon_stickers(bot)
+    if not by_emoji:
+        return None
+    if glyph in by_emoji:
+        return by_emoji[glyph]
+    # Try without variation selector / with common variants.
+    base = glyph.replace("\ufe0f", "")
+    if base in by_emoji:
+        return by_emoji[base]
+    for key, custom_id in by_emoji.items():
+        if key.replace("\ufe0f", "") == base:
+            return custom_id
+    return None
+
+
+def streamer_topic_slots_used(db, user_id: int) -> int:
+    return int(db.count_enabled_streamer_topics(user_id) or 0)
+
+
+def streamer_topic_can_enable(
+    db, user_id: int, twitch_user_id: str
+) -> bool:
+    """True if enabling this streamer would stay within STREAMER_TOPIC_LIMIT."""
+    tid = str(twitch_user_id or "").strip()
+    existing = db.get_streamer_topic(user_id, tid) if tid else None
+    if existing and existing.get("enabled") and existing.get("message_thread_id"):
+        return True
+    return streamer_topic_slots_used(db, user_id) < STREAMER_TOPIC_LIMIT
+
+
+async def ensure_streamer_topic(
+    bot,
+    db,
+    user_id: int,
+    twitch_user_id: str,
+    *,
+    twitch_login: str = "",
+    icon_emoji: str | None = None,
+    lang: str = "en",
+) -> int | None:
+    """Return message_thread_id for this streamer's DM topic, creating if needed."""
+    tid = str(twitch_user_id or "").strip()
+    if not tid:
+        return None
+    login = str(twitch_login or "").strip().lstrip("@").lower()
+    existing = db.get_streamer_topic(user_id, tid)
+    if existing and existing.get("message_thread_id"):
+        thread_id = int(existing["message_thread_id"])
+        # Optional icon refresh when a new emoji was chosen.
+        if icon_emoji is not None and icon_emoji != str(
+            existing.get("icon_emoji") or ""
+        ):
+            custom_id = await icon_custom_emoji_id_for_emoji(bot, icon_emoji) or ""
+            try:
+                kwargs: dict[str, Any] = {
+                    "chat_id": user_id,
+                    "message_thread_id": thread_id,
+                }
+                if custom_id:
+                    kwargs["icon_custom_emoji_id"] = custom_id
+                if login:
+                    kwargs["name"] = login[:128]
+                await bot.edit_forum_topic(**kwargs)
+            except (BadRequest, TelegramError) as exc:
+                logger.warning(
+                    "editForumTopic streamer icon failed user=%s twitch=%s: %s",
+                    user_id,
+                    tid,
+                    exc,
+                )
+            db.upsert_streamer_topic(
+                user_id,
+                tid,
+                twitch_login=login or str(existing.get("twitch_login") or ""),
+                message_thread_id=thread_id,
+                enabled=True,
+                icon_emoji=icon_emoji or "",
+                icon_custom_emoji_id=custom_id,
+            )
+        elif not existing.get("enabled"):
+            db.set_streamer_topic_enabled(user_id, tid, True)
+        return thread_id
+
+    if not streamer_topic_can_enable(db, user_id, tid):
+        logger.info(
+            "streamer topic limit reached user=%s limit=%s",
+            user_id,
+            STREAMER_TOPIC_LIMIT,
+        )
+        return None
+
+    await ensure_bot_topic_settings(bot)
+    name = login or tid
+    emoji = icon_emoji
+    if emoji is None and existing:
+        emoji = str(existing.get("icon_emoji") or "") or None
+    custom_id = await icon_custom_emoji_id_for_emoji(bot, emoji or "") if emoji else None
+    api_kwargs: dict[str, Any] = {
+        "chat_id": user_id,
+        "name": name[:128],
+        "icon_color": STREAMER_TOPIC_ICON_COLOR,
+    }
+    if custom_id:
+        api_kwargs["icon_custom_emoji_id"] = custom_id
+    try:
+        result = await bot.do_api_request(
+            "createForumTopic",
+            api_kwargs=api_kwargs,
+        )
+    except (BadRequest, TelegramError) as exc:
+        logger.warning(
+            "createForumTopic streamer failed user=%s twitch=%s: %s",
+            user_id,
+            tid,
+            exc,
+        )
+        return None
+    thread_id = _thread_id_from_forum_topic(result)
+    if thread_id is None:
+        logger.warning(
+            "createForumTopic streamer missing thread user=%s twitch=%s result=%r",
+            user_id,
+            tid,
+            result,
+        )
+        return None
+    db.upsert_streamer_topic(
+        user_id,
+        tid,
+        twitch_login=login,
+        message_thread_id=thread_id,
+        enabled=True,
+        icon_emoji=emoji or "",
+        icon_custom_emoji_id=custom_id or "",
+    )
+    _ = lang  # reserved for future localized topic titles
+    return thread_id
+
+
+async def delete_streamer_forum_topic(
+    bot, db, user_id: int, twitch_user_id: str
+) -> bool:
+    """deleteForumTopic + clear DB row. Returns True if Telegram delete succeeded
+    or there was no thread to delete.
+    """
+    tid = str(twitch_user_id or "").strip()
+    if not tid:
+        return True
+    existing = db.get_streamer_topic(user_id, tid)
+    thread_id = None
+    if existing and existing.get("message_thread_id") is not None:
+        try:
+            thread_id = int(existing["message_thread_id"])
+        except (TypeError, ValueError):
+            thread_id = None
+    ok = True
+    if thread_id is not None:
+        try:
+            await bot.delete_forum_topic(
+                chat_id=user_id, message_thread_id=thread_id
+            )
+        except (BadRequest, TelegramError) as exc:
+            logger.warning(
+                "deleteForumTopic streamer failed user=%s twitch=%s thread=%s: %s",
+                user_id,
+                tid,
+                thread_id,
+                exc,
+            )
+            ok = False
+    db.delete_streamer_topic(user_id, tid)
+    return ok
+
+
+async def disable_streamer_topic(
+    bot,
+    db,
+    user_id: int,
+    twitch_user_id: str,
+    *,
+    delete_topic: bool,
+) -> None:
+    """Stop routing to the streamer topic; optionally delete the forum topic."""
+    tid = str(twitch_user_id or "").strip()
+    if not tid:
+        return
+    if delete_topic:
+        await delete_streamer_forum_topic(bot, db, user_id, tid)
+        return
+    db.set_streamer_topic_enabled(user_id, tid, False)
+
+
 async def resolve_alert_thread_id(
     bot,
     db,
@@ -255,16 +487,35 @@ async def resolve_alert_thread_id(
     *,
     lang: str | None = None,
 ) -> int | None:
-    """Thread for this alert: group sub.thread_id, or DM topic when opted in."""
+    """Thread for this alert: group sub.thread_id, or DM topic when opted in.
+
+    DM order: entitled enabled streamer topic → alert-type topic → General.
+    """
     if getattr(sub, "dest_type", None) != "dm":
         return sub.thread_id or None
     if not db.is_topics_enabled(sub.owner_id):
         return None
+    if lang is None:
+        lang = db.get_user_locale(sub.owner_id) or "en"
+
+    twitch_uid = str(getattr(sub, "twitch_user_id", "") or "").strip()
+    if twitch_uid:
+        row = db.get_streamer_topic(sub.owner_id, twitch_uid)
+        if row and row.get("enabled") and row.get("message_thread_id"):
+            from premium import has_feature_sync
+
+            if has_feature_sync(
+                db,
+                sub.owner_id,
+                "advanced_mode",
+                channel=getattr(sub, "twitch_username", None),
+            ):
+                return int(row["message_thread_id"])
+            # Unentitled: keep settings, fall through to type topics.
+
     key = topic_key_for_subscription(sub, alert_type)
     if key is None:
         return None
-    if lang is None:
-        lang = db.get_user_locale(sub.owner_id) or "en"
     return await ensure_user_topic(bot, db, sub.owner_id, key, lang=lang)
 
 

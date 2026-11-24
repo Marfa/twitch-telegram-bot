@@ -575,6 +575,8 @@ from handlers.wizard import (
     receive_drops_game_callback,
     receive_delete_old,
     receive_dest_chat,
+    receive_dest_streamer_topic,
+    receive_dest_streamer_topic_icon,
     receive_dest_type,
     receive_category_filter_callback,
     receive_category_filter_text,
@@ -809,6 +811,8 @@ logger = logging.getLogger(__name__)
     TOP_DONATIONS_TEMPLATE,
     CHAT_BUTTON_ASK,
     DEST_TYPE,
+    DEST_STREAMER_TOPIC,
+    DEST_STREAMER_TOPIC_ICON,
     DEST_CHAT,
     DELETE_OLD,
     DELETE_FAIL_NOTIFY,
@@ -871,7 +875,7 @@ logger = logging.getLogger(__name__)
     GIVEAWAY_WATCH_DISCOUNT,
     GAME_INFO_SEARCH,
     GAME_INFO_PICK,
-) = range(89)
+) = range(91)
 
 def _delay_current_label(minutes: int, lang: str) -> str:
     if minutes <= 0:
@@ -3955,6 +3959,25 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 ),
                 CallbackQueryHandler(
                     receive_dest_type, pattern=r"^dest:(dm|chat|discord|webhook)$"
+                ),
+            ],
+            DEST_STREAMER_TOPIC: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_dest_streamer_topic,
+                    pattern=r"^dest_topic:(toggle|icon|icon_skip|done|delete_yes|delete_no)$",
+                ),
+            ],
+            DEST_STREAMER_TOPIC_ICON: [
+                _wiz_cancel,
+                _wiz_back,
+                CallbackQueryHandler(
+                    receive_dest_streamer_topic,
+                    pattern=r"^dest_topic:icon_skip$",
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_dest_streamer_topic_icon
                 ),
             ],
             DEST_CHAT: [

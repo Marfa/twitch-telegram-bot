@@ -24,7 +24,7 @@ Gates: `has_feature` / `has_feature_sync`, `beta_features.is_enabled` / `grants_
 | `extra_alerts` | Keep only `PREMIUM_FREE_ACTIVE_LIMIT` (5) enabled; excess subscriptions **paused** (settings kept). |
 | `alert_types` | Non-live types: **not editable**; existing rows **kept and paused** (live-only still works per free rules). |
 | `twitch_sync` | Follow auto-sync **paused** (config kept; no sync runs). |
-| `advanced_mode` | Options **not editable** and **not applied in the alert**. Runtime: `premium.subscription_for_delivery` clears unentitled fields at schedule/send (DB unchanged). On pay — same options work again as stored. |
+| `advanced_mode` | Options **not editable** and **not applied in the alert**. Runtime: `premium.subscription_for_delivery` clears unentitled fields at schedule/send (DB unchanged). Per-streamer DM topics stay stored but delivery falls back to alert-type topics until re-entitled. On pay — same options / streamer topics work again as stored. |
 | `schedule_publish` | Schedule publish / Twitch schedule work **unavailable** (config kept). |
 | `alert_history` | UI shows **free window only** (`ALERT_HISTORY_FREE_DAYS`); older rows stay in storage but are **hidden** until paid (`ALERT_HISTORY_PREMIUM_DAYS`). |
 | `deleted_subscriptions_cart` | Cart UI uses **free days** (`DELETED_SUBSCRIPTIONS_CART_FREE_DAYS`); older cart entries **hidden** until paid (premium days). |

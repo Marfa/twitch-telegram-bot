@@ -22,6 +22,9 @@ from i18n import (
     delay_keyboard,
     delete_old_keyboard,
     dest_keyboard,
+    dest_streamer_topic_delete_keyboard,
+    dest_streamer_topic_icon_keyboard,
+    dest_streamer_topic_keyboard,
     drops_catalog_keyboard,
     edit_bool_keyboard,
     edit_game_options_keyboard,
@@ -328,6 +331,17 @@ def _keyboard_samples() -> list[tuple[str, InlineKeyboardMarkup]]:
         ("premium_gate_first", premium_gate_keyboard, {"lang": loc, "first_step": True}),
         ("premium_gate_later", premium_gate_keyboard, {"lang": loc, "first_step": False}),
         ("dest", dest_keyboard, {"lang": loc}),
+        (
+            "dest_streamer_topic",
+            dest_streamer_topic_keyboard,
+            {"lang": loc, "enabled": True, "icon_emoji": "🎮"},
+        ),
+        ("dest_streamer_topic_icon", dest_streamer_topic_icon_keyboard, {"lang": loc}),
+        (
+            "dest_streamer_topic_delete",
+            dest_streamer_topic_delete_keyboard,
+            {"lang": loc},
+        ),
         (
             "advanced_options",
             advanced_options_keyboard,

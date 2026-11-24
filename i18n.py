@@ -1442,6 +1442,79 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def dest_streamer_topic_keyboard(
+    lang: str,
+    *,
+    enabled: bool,
+    icon_emoji: str = "",
+) -> InlineKeyboardMarkup:
+    """Premium advanced_mode: per-streamer DM topic toggle after dest:dm."""
+    mark = "✅ " if enabled else "⬜️ "
+    icon_label = (
+        t("dest_streamer_topic_icon", lang, emoji=icon_emoji)
+        if icon_emoji
+        else t("dest_streamer_topic_icon_none", lang)
+    )
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                mark + t("dest_streamer_topic_toggle", lang),
+                callback_data="dest_topic:toggle",
+            )
+        ],
+    ]
+    if enabled:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"🎨 {icon_label}",
+                    callback_data="dest_topic:icon",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                t("dest_streamer_topic_done", lang),
+                callback_data="dest_topic:done",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def dest_streamer_topic_icon_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("dest_streamer_topic_icon_skip", lang),
+                    callback_data="dest_topic:icon_skip",
+                )
+            ]
+        ]
+    )
+
+
+def dest_streamer_topic_delete_keyboard(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("dest_streamer_topic_delete_yes", lang),
+                    callback_data="dest_topic:delete_yes",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("dest_streamer_topic_delete_no", lang),
+                    callback_data="dest_topic:delete_no",
+                )
+            ],
+        ]
+    )
+
+
 def category_filter_nav_keyboard(
     lang: str, *, has_cats: bool, show_done: bool = True
 ) -> InlineKeyboardMarkup:

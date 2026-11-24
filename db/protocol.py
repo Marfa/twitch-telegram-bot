@@ -468,6 +468,34 @@ class Database(Protocol):
 
     def clear_user_topic_threads(self, user_id: int) -> None: ...
 
+    def get_streamer_topic(
+        self, user_id: int, twitch_user_id: str
+    ) -> dict | None: ...
+
+    def upsert_streamer_topic(
+        self,
+        user_id: int,
+        twitch_user_id: str,
+        *,
+        twitch_login: str = "",
+        message_thread_id: int | None = None,
+        enabled: bool | None = None,
+        icon_emoji: str | None = None,
+        icon_custom_emoji_id: str | None = None,
+    ) -> None: ...
+
+    def set_streamer_topic_enabled(
+        self, user_id: int, twitch_user_id: str, enabled: bool
+    ) -> None: ...
+
+    def clear_streamer_topic_thread(
+        self, user_id: int, twitch_user_id: str
+    ) -> None: ...
+
+    def delete_streamer_topic(self, user_id: int, twitch_user_id: str) -> None: ...
+
+    def count_enabled_streamer_topics(self, user_id: int) -> int: ...
+
     def owner_has_advanced_subscription_options(self, owner_id: int) -> bool: ...
 
     def get_saved_schedule(self, user_id: int) -> tuple[int | None, int | None]: ...

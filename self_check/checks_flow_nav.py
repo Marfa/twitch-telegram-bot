@@ -1283,13 +1283,78 @@ async def _scenario_wizard_template_typo(db) -> None:
         await receive_advanced_options_next(update, ctx)
     update, _query = _cb_update(_FREE_UID, "dest:dm", cap)
     cap.wrap(bot)
+
+    async def _pulse(*_a, **_k):
+        cap.note_pulse()
+
     with patch(
         "handlers.wizard.prem.can_enable_more_async", new=AsyncMock(return_value=True)
+    ), patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)), patch(
+        "bot_helpers._pulse_reply_keyboard", new=_pulse
     ):
-        from handlers.wizard import receive_dest_type
+        from handlers.wizard import receive_dest_streamer_topic, receive_dest_type
 
         await receive_dest_type(update, ctx)
+        cap.assert_turn("wizard_template_typo_no_dest_topic")
+        # Default checkbox ON; turn off so Done finishes without Premium.
+        update, _query = _cb_update(_FREE_UID, "dest_topic:toggle", cap)
+        cap.wrap(bot)
+        await receive_dest_streamer_topic(update, ctx)
+        update, _query = _cb_update(_FREE_UID, "dest_topic:done", cap)
+        cap.wrap(bot)
+        with patch(
+            "handlers.wizard.prem.can_enable_more_async",
+            new=AsyncMock(return_value=True),
+        ):
+            await receive_dest_streamer_topic(update, ctx)
     cap.assert_turn("wizard_template_typo_no_dest")
+
+
+async def _scenario_wizard_dest_streamer_topic(db) -> None:
+    """§2.11 DM → Create streamer topic — Cancel/Back via pulsed wizard Reply."""
+    from handlers.wizard import (
+        _wz,
+        receive_dest_streamer_topic,
+        receive_dest_type,
+    )
+
+    application, bot = _app(db)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    ctx = _ctx(
+        application,
+        {
+            "twitch_username": "streamer",
+            "twitch_user_id": "100",
+            "message_template": "Live {username}",
+            "alert_type": "live",
+        },
+    )
+
+    async def _pulse(*_a, **_k):
+        cap.note_pulse()
+
+    update, _query = _cb_update(_FREE_UID, "dest:dm", cap)
+    cap.wrap(bot)
+    with patch("bot_helpers._pulse_reply_keyboard", new=_pulse), patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)
+    ):
+        state = await receive_dest_type(update, ctx)
+    assert state == _wz()["DEST_STREAMER_TOPIC"]
+    assert ctx.user_data.get("dest_type") == "dm"
+    assert ctx.user_data.get("streamer_topic_enabled") is True
+    cap.assert_turn("wizard_dest_streamer_topic")
+
+    # Toggle ON without Premium → upsell, stay on step.
+    ctx.user_data["streamer_topic_enabled"] = False
+    update, _query = _cb_update(_FREE_UID, "dest_topic:toggle", cap)
+    cap.wrap(bot)
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)
+    ), patch("premium_handlers.send_premium_screen", new=AsyncMock()):
+        state = await receive_dest_streamer_topic(update, ctx)
+    assert state == _wz()["DEST_STREAMER_TOPIC"]
+    assert ctx.user_data.get("streamer_topic_enabled") is False
 
 
 async def _scenario_wizard_dest_discord(db) -> None:
@@ -1399,12 +1464,31 @@ async def _scenario_wizard_finish(db) -> None:
     cap.wrap(bot)
     with patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)):
         await receive_advanced_options_next(update, ctx)
+    # Commit template if still pending (Extras path may leave pending_template).
+    if not ctx.user_data.get("message_template"):
+        ctx.user_data["message_template"] = (
+            ctx.user_data.get("pending_template") or "Live {streamer}"
+        )
     update, _query = _cb_update(_FREE_UID, "dest:dm", cap)
     cap.wrap(bot)
+
+    async def _pulse(*_a, **_k):
+        cap.note_pulse()
+
     with patch(
         "handlers.wizard.prem.can_enable_more_async", new=AsyncMock(return_value=True)
+    ), patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)), patch(
+        "bot_helpers._pulse_reply_keyboard", new=_pulse
     ):
+        from handlers.wizard import receive_dest_streamer_topic
+
         await receive_dest_type(update, ctx)
+        update, _query = _cb_update(_FREE_UID, "dest_topic:toggle", cap)
+        cap.wrap(bot)
+        await receive_dest_streamer_topic(update, ctx)
+        update, _query = _cb_update(_FREE_UID, "dest_topic:done", cap)
+        cap.wrap(bot)
+        await receive_dest_streamer_topic(update, ctx)
     cap.assert_turn("wizard_finish")
 
 
@@ -5475,6 +5559,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_wizard_deep(db)
         await _scenario_wizard_template_typo(db)
         await _scenario_wizard_finish(db)
+        await _scenario_wizard_dest_streamer_topic(db)
         await _scenario_wizard_dest_discord(db)
         await _scenario_wizard_dest_webhook(db)
         await _scenario_wizard_custom_buttons(db)

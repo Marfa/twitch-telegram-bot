@@ -840,6 +840,20 @@ class PostgresDatabase:
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_streamer_topics (
+                    user_id BIGINT NOT NULL,
+                    twitch_user_id TEXT NOT NULL,
+                    twitch_login TEXT NOT NULL DEFAULT '',
+                    message_thread_id BIGINT,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    icon_emoji TEXT NOT NULL DEFAULT '',
+                    icon_custom_emoji_id TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (user_id, twitch_user_id)
+                )
+                """
+            )
             if not had_premium:
                 cur.execute("UPDATE users SET premium_permanent = TRUE")
                 cur.execute(
@@ -4683,6 +4697,151 @@ owner_id, twitch_username, twitch_user_id,
                 "DELETE FROM user_topic_threads WHERE user_id = %s",
                 (user_id,),
             )
+
+    def get_streamer_topic(
+        self, user_id: int, twitch_user_id: str
+    ) -> dict | None:
+        tid = str(twitch_user_id or "").strip()
+        if not tid:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT user_id, twitch_user_id, twitch_login, message_thread_id,
+                       enabled, icon_emoji, icon_custom_emoji_id
+                FROM user_streamer_topics
+                WHERE user_id = %s AND twitch_user_id = %s
+                """,
+                (user_id, tid),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def upsert_streamer_topic(
+        self,
+        user_id: int,
+        twitch_user_id: str,
+        *,
+        twitch_login: str = "",
+        message_thread_id: int | None = None,
+        enabled: bool | None = None,
+        icon_emoji: str | None = None,
+        icon_custom_emoji_id: str | None = None,
+    ) -> None:
+        tid = str(twitch_user_id or "").strip()
+        if not tid:
+            return
+        existing = self.get_streamer_topic(user_id, tid)
+        login = (
+            str(twitch_login or "").strip().lower()
+            or (str(existing.get("twitch_login") or "") if existing else "")
+        )
+        thread = message_thread_id
+        if thread is None and existing and existing.get("message_thread_id") is not None:
+            thread = int(existing["message_thread_id"])
+        en = bool(enabled) if enabled is not None else (
+            bool(existing["enabled"]) if existing else True
+        )
+        emoji = (
+            str(icon_emoji)
+            if icon_emoji is not None
+            else (str(existing.get("icon_emoji") or "") if existing else "")
+        )
+        custom = (
+            str(icon_custom_emoji_id)
+            if icon_custom_emoji_id is not None
+            else (
+                str(existing.get("icon_custom_emoji_id") or "") if existing else ""
+            )
+        )
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO user_streamer_topics (
+                    user_id, twitch_user_id, twitch_login, message_thread_id,
+                    enabled, icon_emoji, icon_custom_emoji_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, twitch_user_id) DO UPDATE SET
+                    twitch_login = EXCLUDED.twitch_login,
+                    message_thread_id = EXCLUDED.message_thread_id,
+                    enabled = EXCLUDED.enabled,
+                    icon_emoji = EXCLUDED.icon_emoji,
+                    icon_custom_emoji_id = EXCLUDED.icon_custom_emoji_id
+                """,
+                (user_id, tid, login, thread, en, emoji, custom),
+            )
+
+    def set_streamer_topic_enabled(
+        self, user_id: int, twitch_user_id: str, enabled: bool
+    ) -> None:
+        tid = str(twitch_user_id or "").strip()
+        if not tid:
+            return
+        existing = self.get_streamer_topic(user_id, tid)
+        if existing is None:
+            self.upsert_streamer_topic(
+                user_id, tid, enabled=enabled
+            )
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE user_streamer_topics
+                SET enabled = %s
+                WHERE user_id = %s AND twitch_user_id = %s
+                """,
+                (bool(enabled), user_id, tid),
+            )
+
+    def clear_streamer_topic_thread(
+        self, user_id: int, twitch_user_id: str
+    ) -> None:
+        tid = str(twitch_user_id or "").strip()
+        if not tid:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                UPDATE user_streamer_topics
+                SET message_thread_id = NULL, enabled = FALSE
+                WHERE user_id = %s AND twitch_user_id = %s
+                """,
+                (user_id, tid),
+            )
+
+    def delete_streamer_topic(self, user_id: int, twitch_user_id: str) -> None:
+        tid = str(twitch_user_id or "").strip()
+        if not tid:
+            return
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                DELETE FROM user_streamer_topics
+                WHERE user_id = %s AND twitch_user_id = %s
+                """,
+                (user_id, tid),
+            )
+
+    def count_enabled_streamer_topics(self, user_id: int) -> int:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT COUNT(*) AS n FROM user_streamer_topics
+                WHERE user_id = %s AND enabled IS TRUE
+                  AND message_thread_id IS NOT NULL
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        return int(row["n"] if row else 0)
 
     def owner_has_advanced_subscription_options(self, owner_id: int) -> bool:
         with self._conn() as conn:
