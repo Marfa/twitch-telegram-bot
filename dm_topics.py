@@ -35,14 +35,19 @@ STREAMER_TOPIC_ICON_COLOR = 0x6FB9F0
 # Telegram General topic in forums / private topic mode.
 GENERAL_TOPIC_ID = 1
 
+# Separate Unicode emoji blocks (not one giant range) — CodeQL py/overly-large-range.
 _EMOJI_RE = re.compile(
     "["
-    "\U0001F300-\U0001F9FF"
-    "\U00002600-\U000027BF"
-    "\U0001FA00-\U0001FAFF"
-    "\U00002300-\U000023FF"
-    "\U0000FE0F"
-    "\U0000200D"
+    "\U0001F300-\U0001F5FF"  # Misc Symbols and Pictographs
+    "\U0001F600-\U0001F64F"  # Emoticons
+    "\U0001F680-\U0001F6FF"  # Transport and Map
+    "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+    "\U0001FA00-\U0001FAFF"  # Symbols and Pictographs Extended-A
+    "\U00002600-\U000026FF"  # Miscellaneous Symbols
+    "\U00002700-\U000027BF"  # Dingbats
+    "\U00002300-\U000023FF"  # Miscellaneous Technical
+    "\U0000FE0F"  # variation selector-16
+    "\U0000200D"  # ZWJ
     "]+",
     flags=re.UNICODE,
 )
