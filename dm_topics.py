@@ -7,7 +7,6 @@ streamer go there; otherwise routing falls back to alert-type topics.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from telegram.error import BadRequest, TelegramError
@@ -35,22 +34,18 @@ STREAMER_TOPIC_ICON_COLOR = 0x6FB9F0
 # Telegram General topic in forums / private topic mode.
 GENERAL_TOPIC_ID = 1
 
-# Separate Unicode emoji blocks (not one giant range) — CodeQL py/overly-large-range.
-_EMOJI_RE = re.compile(
-    "["
-    "\U0001F300-\U0001F5FF"  # Misc Symbols and Pictographs
-    "\U0001F600-\U0001F64F"  # Emoticons
-    "\U0001F680-\U0001F6FF"  # Transport and Map
-    "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
-    "\U0001FA00-\U0001FAFF"  # Symbols and Pictographs Extended-A
-    "\U00002600-\U000026FF"  # Miscellaneous Symbols
-    "\U00002700-\U000027BF"  # Dingbats
-    "\U00002300-\U000023FF"  # Miscellaneous Technical
-    "\U0000FE0F"  # variation selector-16
-    "\U0000200D"  # ZWJ
-    "]+",
-    flags=re.UNICODE,
+# Emoji blocks as codepoint bounds (not a regex class — CodeQL py/overly-large-range).
+_EMOJI_ORD_RANGES: tuple[tuple[int, int], ...] = (
+    (0x1F300, 0x1F5FF),  # Misc Symbols and Pictographs
+    (0x1F600, 0x1F64F),  # Emoticons
+    (0x1F680, 0x1F6FF),  # Transport and Map
+    (0x1F900, 0x1F9FF),  # Supplemental Symbols and Pictographs
+    (0x1FA00, 0x1FAFF),  # Symbols and Pictographs Extended-A
+    (0x2600, 0x26FF),  # Miscellaneous Symbols
+    (0x2700, 0x27BF),  # Dingbats
+    (0x2300, 0x23FF),  # Miscellaneous Technical
 )
+_EMOJI_JOINERS = frozenset({0xFE0F, 0x200D})  # VS16, ZWJ
 
 # Allowed icon_color values only (createForumTopic).
 _TOPIC_ICON_COLOR: dict[str, int] = {
@@ -276,15 +271,33 @@ async def sync_user_topic_icons(bot, db, user_id: int) -> int:
     return updated
 
 
+def _is_emoji_ord(cp: int) -> bool:
+    return any(lo <= cp <= hi for lo, hi in _EMOJI_ORD_RANGES)
+
+
 def extract_topic_emoji(text: str) -> str | None:
     """First emoji grapheme cluster from user text, or None."""
     raw = (text or "").strip()
     if not raw:
         return None
-    match = _EMOJI_RE.search(raw)
-    if not match:
+    start: int | None = None
+    index = 0
+    while index < len(raw):
+        cp = ord(raw[index])
+        if start is None:
+            if _is_emoji_ord(cp):
+                start = index
+                index += 1
+                continue
+            index += 1
+            continue
+        if _is_emoji_ord(cp) or cp in _EMOJI_JOINERS:
+            index += 1
+            continue
+        break
+    if start is None:
         return None
-    return match.group(0)
+    return raw[start:index]
 
 
 async def icon_custom_emoji_id_for_emoji(bot, emoji: str) -> str | None:
