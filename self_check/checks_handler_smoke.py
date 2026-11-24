@@ -122,10 +122,23 @@ async def _smoke_schedule(db) -> None:
         state = await start_stream_schedule(update, ctx)
     assert state == st["STREAM_SCHEDULE_CONFIRM"]
 
+    class _FakeProgress:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *exc):
+            return False
+
+    def _fake_progress(*_a, **_k):
+        return _FakeProgress()
+
     application, bot = _app(db)
     update = _msg_update(_FREE_UID)
     ctx = _ctx(application)
-    with patch("handlers.stream_schedule.beta_features.is_enabled", return_value=True):
+    with (
+        patch("handlers.stream_schedule.beta_features.is_enabled", return_value=True),
+        patch("request_progress.request_progress", side_effect=_fake_progress),
+    ):
         state = await start_stream_schedule(update, ctx)
     assert state == st["STREAM_SCHEDULE_MODE"]
 
@@ -146,6 +159,7 @@ async def _smoke_schedule(db) -> None:
             "handlers.stream_schedule._owner_vacation_active",
             new=AsyncMock(return_value=False),
         ),
+        patch("request_progress.request_progress", side_effect=_fake_progress),
     ):
         state = await start_stream_schedule(update, ctx)
     assert state == st["STREAM_SCHEDULE_MODE"]
@@ -169,6 +183,7 @@ async def _smoke_schedule(db) -> None:
             "handlers.stream_schedule._owner_vacation_active",
             new=AsyncMock(return_value=True),
         ),
+        patch("request_progress.request_progress", side_effect=_fake_progress),
     ):
         state = await start_stream_schedule(update, ctx)
     assert state == st["STREAM_SCHEDULE_MODE"]
@@ -187,7 +202,8 @@ async def _smoke_schedule(db) -> None:
     application, bot = _app(db)
     update = _msg_update(_FREE_UID, text="UTC-5")
     ctx = _ctx(application, {"stream_schedule_tz_resume": "mode"})
-    state = await stream_schedule_tz(update, ctx)
+    with patch("request_progress.request_progress", side_effect=_fake_progress):
+        state = await stream_schedule_tz(update, ctx)
     assert state == st["STREAM_SCHEDULE_MODE"]
     assert db.get_schedule_utc_offset_minutes(_FREE_UID) == -300
     db.set_schedule_utc_offset_minutes(_FREE_UID, 180)

@@ -4177,6 +4177,21 @@ def check_core() -> None:
         assert "Выполняю запрос" in str(sent)
         fail_bot.delete_message.assert_awaited()
 
+        # delay_s: fast exit must not paint (no sticker / draft overhead).
+        reset_rich_support_for_tests()
+        reset_progress_emoji_for_tests()
+        quiet = AsyncMock()
+        quiet.get_sticker_set = AsyncMock(
+            side_effect=RuntimeError("should not run")
+        )
+        quiet.do_api_request = AsyncMock(return_value=True)
+        quiet.send_message = AsyncMock()
+        async with request_progress(quiet, 99, "en", delay_s=0.5):
+            await asyncio.sleep(0.01)
+        quiet.get_sticker_set.assert_not_awaited()
+        quiet.do_api_request.assert_not_awaited()
+        quiet.send_message.assert_not_awaited()
+
     asyncio.run(_progress_roundtrip())
 
     # Schedule cancel: today-only emptied day + suppress during our publish.

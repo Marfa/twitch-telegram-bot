@@ -1311,10 +1311,7 @@ async def _scenario_wizard_template_typo(db) -> None:
 
         await receive_dest_type(update, ctx)
         cap.assert_turn("wizard_template_typo_no_dest_topic")
-        # Default checkbox ON; turn off so Done finishes without Premium.
-        update, _query = _cb_update(_FREE_UID, "dest_topic:toggle", cap)
-        cap.wrap(bot)
-        await receive_dest_streamer_topic(update, ctx)
+        # Default checkbox OFF — Done finishes without Premium / topic create.
         update, _query = _cb_update(_FREE_UID, "dest_topic:done", cap)
         cap.wrap(bot)
         with patch(
@@ -1326,7 +1323,7 @@ async def _scenario_wizard_template_typo(db) -> None:
 
 
 async def _scenario_wizard_dest_streamer_topic(db) -> None:
-    """§2.11 DM → Create streamer topic — Cancel/Back via pulsed wizard Reply."""
+    """§2.11 DM → Create streamer topic — inline Back above Done (default off)."""
     from handlers.wizard import (
         _wz,
         receive_dest_streamer_topic,
@@ -1346,22 +1343,25 @@ async def _scenario_wizard_dest_streamer_topic(db) -> None:
         },
     )
 
-    async def _pulse(*_a, **_k):
-        cap.note_pulse()
-
-    update, _query = _cb_update(_FREE_UID, "dest:dm", cap)
+    update, query = _cb_update(_FREE_UID, "dest:dm", cap)
     cap.wrap(bot)
-    with patch("bot_helpers._pulse_reply_keyboard", new=_pulse), patch(
+    with patch(
         "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)
     ):
         state = await receive_dest_type(update, ctx)
     assert state == _wz()["DEST_STREAMER_TOPIC"]
     assert ctx.user_data.get("dest_type") == "dm"
-    assert ctx.user_data.get("streamer_topic_enabled") is True
+    assert ctx.user_data.get("streamer_topic_enabled") is False
+    markup = query.edit_message_text.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    cbs = [b.callback_data or "" for row in markup.inline_keyboard for b in row]
+    assert "dest_topic:back" in cbs
+    assert "dest_topic:done" in cbs
+    assert "dest_topic:icon" not in cbs  # icon only when checkbox on
+    assert cbs.index("dest_topic:back") < cbs.index("dest_topic:done")
     cap.assert_turn("wizard_dest_streamer_topic")
 
     # Toggle ON without Premium → upsell, stay on step.
-    ctx.user_data["streamer_topic_enabled"] = False
     update, _query = _cb_update(_FREE_UID, "dest_topic:toggle", cap)
     cap.wrap(bot)
     with patch(
@@ -1370,6 +1370,13 @@ async def _scenario_wizard_dest_streamer_topic(db) -> None:
         state = await receive_dest_streamer_topic(update, ctx)
     assert state == _wz()["DEST_STREAMER_TOPIC"]
     assert ctx.user_data.get("streamer_topic_enabled") is False
+
+    # Back → destination picker.
+    update, _query = _cb_update(_FREE_UID, "dest_topic:back", cap)
+    cap.wrap(bot)
+    state = await receive_dest_streamer_topic(update, ctx)
+    assert state == _wz()["DEST_TYPE"]
+    assert "dest_type" not in ctx.user_data
 
 
 async def _scenario_wizard_dest_discord(db) -> None:
@@ -1487,20 +1494,13 @@ async def _scenario_wizard_finish(db) -> None:
     update, _query = _cb_update(_FREE_UID, "dest:dm", cap)
     cap.wrap(bot)
 
-    async def _pulse(*_a, **_k):
-        cap.note_pulse()
-
     with patch(
         "handlers.wizard.prem.can_enable_more_async", new=AsyncMock(return_value=True)
-    ), patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)), patch(
-        "bot_helpers._pulse_reply_keyboard", new=_pulse
-    ):
+    ), patch("handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)):
         from handlers.wizard import receive_dest_streamer_topic
 
         await receive_dest_type(update, ctx)
-        update, _query = _cb_update(_FREE_UID, "dest_topic:toggle", cap)
-        cap.wrap(bot)
-        await receive_dest_streamer_topic(update, ctx)
+        # Default checkbox OFF — Done finishes without Premium / topic create.
         update, _query = _cb_update(_FREE_UID, "dest_topic:done", cap)
         cap.wrap(bot)
         await receive_dest_streamer_topic(update, ctx)

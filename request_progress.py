@@ -103,14 +103,20 @@ async def request_progress(
     lang: str,
     *,
     message_thread_id: int | None = None,
+    delay_s: float = 0.0,
 ) -> AsyncIterator[None]:
-    """Show a single in-progress indicator until the block exits."""
+    """Show a single in-progress indicator until the block exits.
+
+    Work inside the ``async with`` starts immediately. If ``delay_s`` > 0, the
+    indicator appears only when the block is still running after that delay
+    (fast paths stay silent — no sticker/draft round-trip overhead).
+    """
     started = time.monotonic()
     draft_id = random.randint(1, 2_147_483_647)
     stop = asyncio.Event()
     fallback_msg: Message | None = None
     use_rich = True
-    emoji_id = await _resolve_progress_emoji_id(bot)
+    emoji_id: str | None = None
 
     async def _push_rich(elapsed: float) -> bool:
         html_body = progress_thinking_html(
@@ -143,17 +149,33 @@ async def request_progress(
         except TelegramError:
             logger.debug("progress fallback edit failed", exc_info=True)
 
-    # Initial paint.
-    try:
-        if not await _push_rich(0.0):
+    async def _paint_initial() -> bool:
+        nonlocal use_rich, emoji_id
+        if stop.is_set():
+            return False
+        emoji_id = await _resolve_progress_emoji_id(bot)
+        if stop.is_set():
+            return False
+        try:
+            if not await _push_rich(time.monotonic() - started):
+                use_rich = False
+                await _push_fallback(time.monotonic() - started)
+        except Exception:
+            logger.debug("rich progress draft failed; using classic", exc_info=True)
             use_rich = False
-            await _push_fallback(0.0)
-    except Exception:
-        logger.debug("rich progress draft failed; using classic", exc_info=True)
-        use_rich = False
-        await _push_fallback(0.0)
+            await _push_fallback(time.monotonic() - started)
+        return True
 
     async def _loop() -> None:
+        nonlocal use_rich
+        if delay_s > 0:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=delay_s)
+                return
+            except asyncio.TimeoutError:
+                pass
+        if not await _paint_initial():
+            return
         while not stop.is_set():
             try:
                 await asyncio.wait_for(stop.wait(), timeout=_REFRESH_S)

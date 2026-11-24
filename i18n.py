@@ -1587,6 +1587,14 @@ def dest_streamer_topic_keyboard(
     rows.append(
         [
             InlineKeyboardButton(
+                t("dest_streamer_topic_back", lang),
+                callback_data="dest_topic:back",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
                 t("dest_streamer_topic_done", lang),
                 callback_data="dest_topic:done",
             )

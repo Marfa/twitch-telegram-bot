@@ -577,9 +577,11 @@ async def start_channel_stats(
         sync_optional_jobs(context.application.job_queue, db)
         track = db.get_channel_stats_track(user_id) or track
 
-    await context.bot.send_message(chat, t("channel_stats_building", lang))
+    from request_progress import request_progress
+
     try:
-        await _deliver_card(context.bot, db, twitch, user_id, lang, track)
+        async with request_progress(context.bot, chat, lang, delay_s=0.4):
+            await _deliver_card(context.bot, db, twitch, user_id, lang, track)
     except Exception:
         logger.exception("channel_stats card failed owner=%s", user_id)
         await context.bot.send_message(
@@ -647,8 +649,11 @@ async def complete_channel_stats_oauth(
     await application.bot.send_message(
         owner_id, t("channel_stats_linked", lang, channel=display)
     )
+    from request_progress import request_progress
+
     try:
-        await _deliver_card(application.bot, db, twitch, owner_id, lang, track)
+        async with request_progress(application.bot, owner_id, lang, delay_s=0.4):
+            await _deliver_card(application.bot, db, twitch, owner_id, lang, track)
     except Exception:
         logger.exception("channel_stats card after oauth owner=%s", owner_id)
         await application.bot.send_message(

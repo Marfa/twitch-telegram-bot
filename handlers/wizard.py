@@ -3945,24 +3945,18 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 def _streamer_topic_init_flags(context: ContextTypes.DEFAULT_TYPE, db: Database, user_id: int) -> None:
-    """Default checkbox ON for new streamers; keep existing enabled/icon when set."""
-    from dm_topics import STREAMER_TOPIC_LIMIT, streamer_topic_can_enable
-
+    """Default checkbox OFF for new streamers; keep existing enabled/icon when set."""
     twitch_uid = str(context.user_data.get("twitch_user_id") or "").strip()
     row = db.get_streamer_topic(user_id, twitch_uid) if twitch_uid else None
     if "streamer_topic_enabled" not in context.user_data:
         if row is not None:
             context.user_data["streamer_topic_enabled"] = bool(row.get("enabled"))
-        elif twitch_uid and not streamer_topic_can_enable(db, user_id, twitch_uid):
-            # At product cap for a new streamer — default off so Done still works.
-            context.user_data["streamer_topic_enabled"] = False
         else:
-            context.user_data["streamer_topic_enabled"] = True
+            context.user_data["streamer_topic_enabled"] = False
     if "streamer_topic_icon" not in context.user_data:
         context.user_data["streamer_topic_icon"] = (
             str(row.get("icon_emoji") or "") if row else ""
         )
-    _ = STREAMER_TOPIC_LIMIT
 
 
 async def _go_streamer_topic_prompt(
@@ -3971,9 +3965,7 @@ async def _go_streamer_topic_prompt(
     lang: str,
     *,
     edit_query=None,
-    pulse_wizard: bool = True,
 ) -> int:
-    from bot_helpers import _pulse_reply_keyboard
     from dm_topics import STREAMER_TOPIC_LIMIT, streamer_topic_slots_used
 
     db: Database = context.application.bot_data["db"]
@@ -3999,8 +3991,6 @@ async def _go_streamer_topic_prompt(
             await context.bot.send_message(chat_id, text, reply_markup=markup)
     else:
         await context.bot.send_message(chat_id, text, reply_markup=markup)
-    if pulse_wizard:
-        await _pulse_reply_keyboard(context.bot, chat_id, _wizard(lang))
     _set_wizard_back(context, _wz()["DEST_STREAMER_TOPIC"])
     return _wz()["DEST_STREAMER_TOPIC"]
 
@@ -4053,7 +4043,7 @@ async def receive_dest_streamer_topic(
         await query.answer()
         context.user_data["streamer_topic_enabled"] = turning_on
         return await _go_streamer_topic_prompt(
-            update, context, lang, edit_query=query, pulse_wizard=False
+            update, context, lang, edit_query=query
         )
 
     if action == "icon":
@@ -4068,8 +4058,26 @@ async def receive_dest_streamer_topic(
     if action == "icon_skip":
         await query.answer()
         return await _go_streamer_topic_prompt(
-            update, context, lang, edit_query=query, pulse_wizard=False
+            update, context, lang, edit_query=query
         )
+
+    if action == "back":
+        await query.answer()
+        for key in (
+            "streamer_topic_enabled",
+            "streamer_topic_icon",
+            "dest_type",
+            "pending_chat_id",
+            "pending_thread_id",
+            "delete_previous",
+            "notify_delete_fail",
+            "pin_message",
+            "discord_webhook",
+            "webhook_url",
+            "webhook_secret",
+        ):
+            context.user_data.pop(key, None)
+        return await _go_dest_prompt(update, context, lang)
 
     if action in ("delete_yes", "delete_no"):
         from dm_topics import disable_streamer_topic
@@ -4145,7 +4153,7 @@ async def receive_dest_streamer_topic(
             t("dest_streamer_topic_limit", lang, limit=STREAMER_TOPIC_LIMIT),
         )
         return await _go_streamer_topic_prompt(
-            update, context, lang, edit_query=query, pulse_wizard=False
+            update, context, lang, edit_query=query
         )
 
     await ensure_bot_topic_settings(context.bot)
@@ -4215,10 +4223,7 @@ async def receive_dest_streamer_topic_icon(
         if custom
         else "dest_streamer_topic_icon_fallback"
     )
-    await update.effective_message.reply_text(
-        t(note_key, lang, emoji=emoji),
-        reply_markup=_wizard(lang),
-    )
+    await update.effective_message.reply_text(t(note_key, lang, emoji=emoji))
     return await _go_streamer_topic_prompt(update, context, lang)
 
 

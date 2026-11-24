@@ -174,11 +174,17 @@ def run() -> None:
         )
         sk = dest_streamer_topic_keyboard(loc, enabled=True, icon_emoji="🎮")
         assert sk.inline_keyboard[0][0].callback_data == "dest_topic:toggle"
-        assert any(
-            (b.callback_data or "") == "dest_topic:done"
-            for row in sk.inline_keyboard
-            for b in row
-        )
+        cbs = [b.callback_data or "" for row in sk.inline_keyboard for b in row]
+        assert "dest_topic:icon" in cbs
+        assert "dest_topic:back" in cbs
+        assert "dest_topic:done" in cbs
+        assert cbs.index("dest_topic:back") < cbs.index("dest_topic:done")
+        sk_off = dest_streamer_topic_keyboard(loc, enabled=False)
+        cbs_off = [
+            b.callback_data or "" for row in sk_off.inline_keyboard for b in row
+        ]
+        assert "dest_topic:icon" not in cbs_off
+        assert t("dest_streamer_topic_back", loc)
 
     live = SimpleNamespace(
         notify_on_live=True,

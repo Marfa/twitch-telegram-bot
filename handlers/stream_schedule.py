@@ -991,13 +991,19 @@ async def start_stream_schedule(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=stream_schedule_confirm_keyboard(lang),
         )
         return STREAM_SCHEDULE_CONFIRM
-    await update.effective_message.reply_text(
-        await _stream_schedule_mode_text(
+    from request_progress import request_progress
+
+    chat_id = reply_chat_id(update)
+    # delay_s: don't pay sticker/draft cost when Twitch preview is already fast.
+    async with request_progress(context.bot, chat_id, lang, delay_s=0.4):
+        mode_text = await _stream_schedule_mode_text(
             db,
             context.application.bot_data["twitch"],
             user_id,
             lang,
-        ),
+        )
+    await update.effective_message.reply_text(
+        mode_text,
         parse_mode=ParseMode.HTML,
         reply_markup=stream_schedule_mode_keyboard(lang),
     )
@@ -1063,13 +1069,18 @@ async def stream_schedule_tz(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=stream_schedule_confirm_keyboard(lang),
         )
         return STREAM_SCHEDULE_CONFIRM
-    await update.effective_message.reply_text(
-        await _stream_schedule_mode_text(
+    from request_progress import request_progress
+
+    chat_id = reply_chat_id(update)
+    async with request_progress(context.bot, chat_id, lang, delay_s=0.4):
+        mode_text = await _stream_schedule_mode_text(
             db,
             context.application.bot_data["twitch"],
             user_id,
             lang,
-        ),
+        )
+    await update.effective_message.reply_text(
+        mode_text,
         parse_mode=ParseMode.HTML,
         reply_markup=stream_schedule_mode_keyboard(lang),
     )

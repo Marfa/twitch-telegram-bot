@@ -4029,7 +4029,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                 _wiz_back,
                 CallbackQueryHandler(
                     receive_dest_streamer_topic,
-                    pattern=r"^dest_topic:(toggle|icon|icon_skip|done|delete_yes|delete_no)$",
+                    pattern=r"^dest_topic:(toggle|icon|icon_skip|done|back|delete_yes|delete_no)$",
                 ),
             ],
             DEST_STREAMER_TOPIC_ICON: [
