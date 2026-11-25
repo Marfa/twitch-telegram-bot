@@ -647,6 +647,29 @@ def topics_intro_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def topics_support_delete_keyboard(
+    lang: str, *, from_intro: bool = False
+) -> InlineKeyboardMarkup:
+    """Ask whether to delete Telegram topics when turning topic support off."""
+    prefix = "topics:intro_delete_" if from_intro else "topics:delete_"
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    t("topics_support_delete_yes", lang),
+                    callback_data=prefix + "yes",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    t("topics_support_delete_no", lang),
+                    callback_data=prefix + "no",
+                )
+            ],
+        ]
+    )
+
+
 def auth_tokens_menu(lang: str) -> ReplyKeyboardMarkup:
     """Legacy reply keyboard. Prefer auth_tokens_menu_inline."""
     return _reply_keyboard(

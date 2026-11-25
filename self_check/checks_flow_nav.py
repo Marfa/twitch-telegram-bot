@@ -4471,12 +4471,19 @@ async def _scenario_inline_nav_panels(db) -> None:
 
 
 async def _scenario_bot_settings_topics(db) -> None:
-    """§8 — Settings → Bot settings → Topic support (checkbox on demand)."""
+    """§8 — Settings → Bot settings → Topic support (checkbox + delete ask)."""
     from handlers.settings import (
+        on_topics_delete_choice,
+        on_topics_toggle,
         open_bot_settings_menu,
         open_settings_menu,
         open_topics_support_menu,
     )
+
+    db.upsert_user(_FREE_UID)
+    db.set_user_locale(_FREE_UID, "ru")
+    db.set_topics_enabled(_FREE_UID, True)
+    db.set_user_topic_thread(_FREE_UID, "live", 42)
 
     application, bot = _app(db)
     cap = _BotCapture()
@@ -4524,6 +4531,54 @@ async def _scenario_bot_settings_topics(db) -> None:
     ]
     assert "topics:toggle" in inline_cbs
     cap.assert_turn("bot_settings_topics")
+
+    # Disable with stored topics → ask to delete Telegram topics (like streamer).
+    update, query = _cb_update(_FREE_UID, "topics:toggle", cap)
+    await on_topics_toggle(update, ctx)
+    assert db.is_topics_enabled(_FREE_UID) is True  # still on until yes/no
+    ask_text = query.edit_message_text.await_args.args[0]
+    assert ask_text == t("topics_support_delete_ask", "ru")
+    ask_cbs = [
+        b.callback_data or ""
+        for row in query.edit_message_text.await_args.kwargs[
+            "reply_markup"
+        ].inline_keyboard
+        for b in row
+    ]
+    assert ask_cbs == ["topics:delete_yes", "topics:delete_no"]
+    cap.assert_turn("bot_settings_topics_delete_ask")
+
+    update, query = _cb_update(_FREE_UID, "topics:delete_no", cap)
+    await on_topics_delete_choice(update, ctx)
+    assert db.is_topics_enabled(_FREE_UID) is False
+    assert db.get_user_topic_thread(_FREE_UID, "live") == 42  # kept
+    off_text = query.edit_message_text.await_args.args[0]
+    assert off_text == t("topics_support_off", "ru")
+    off_cbs = [
+        b.callback_data or ""
+        for row in query.edit_message_text.await_args.kwargs[
+            "reply_markup"
+        ].inline_keyboard
+        for b in row
+    ]
+    assert "topics:toggle" in off_cbs
+    assert "menu_bot_settings:show" in off_cbs
+    cap.assert_turn("bot_settings_topics_delete_no")
+
+    # Re-enable path seeds topics; disable again and choose delete_yes.
+    db.set_topics_enabled(_FREE_UID, True)
+    update, query = _cb_update(_FREE_UID, "topics:toggle", cap)
+    await on_topics_toggle(update, ctx)
+    cap.assert_turn("bot_settings_topics_delete_ask_again")
+    bot.delete_forum_topic = AsyncMock()
+    update, query = _cb_update(_FREE_UID, "topics:delete_yes", cap)
+    await on_topics_delete_choice(update, ctx)
+    assert db.is_topics_enabled(_FREE_UID) is False
+    assert db.get_user_topic_thread(_FREE_UID, "live") is None
+    deleted_text = query.edit_message_text.await_args.args[0]
+    assert deleted_text == t("topics_support_off_deleted", "ru")
+    bot.delete_forum_topic.assert_awaited()
+    cap.assert_turn("bot_settings_topics_delete_yes")
 
 
 async def _scenario_topics_menu_from_live_topic(db) -> None:

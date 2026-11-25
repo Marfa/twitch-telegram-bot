@@ -472,6 +472,8 @@ class Database(Protocol):
         self, user_id: int, twitch_user_id: str
     ) -> dict | None: ...
 
+    def list_streamer_topics(self, user_id: int) -> list[dict]: ...
+
     def upsert_streamer_topic(
         self,
         user_id: int,

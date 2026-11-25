@@ -4298,6 +4298,20 @@ owner_id, twitch_username, twitch_user_id,
             return None
         return dict(row)
 
+    def list_streamer_topics(self, user_id: int) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id, twitch_user_id, twitch_login, message_thread_id,
+                       enabled, icon_emoji, icon_custom_emoji_id
+                FROM user_streamer_topics
+                WHERE user_id = ?
+                ORDER BY twitch_login, twitch_user_id
+                """,
+                (user_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def upsert_streamer_topic(
         self,
         user_id: int,

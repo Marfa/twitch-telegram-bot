@@ -497,6 +497,46 @@ async def disable_streamer_topic(
     db.set_streamer_topic_enabled(user_id, tid, False)
 
 
+def user_has_stored_forum_topics(db, user_id: int) -> bool:
+    """True if alert-type or streamer topic thread ids are stored for this user."""
+    if user_alert_topic_thread_ids(db, user_id):
+        return True
+    for row in db.list_streamer_topics(user_id):
+        if row.get("message_thread_id") is not None:
+            return True
+    return False
+
+
+async def delete_all_user_forum_topics(bot, db, user_id: int) -> None:
+    """Remove all alert-type and streamer forum topics in Telegram + clear DB."""
+    for key in TOPIC_KEYS:
+        existing = db.get_user_topic_thread(user_id, key)
+        if existing is None:
+            continue
+        try:
+            thread_id = int(existing)
+        except (TypeError, ValueError):
+            continue
+        try:
+            await bot.delete_forum_topic(
+                chat_id=user_id, message_thread_id=thread_id
+            )
+        except (BadRequest, TelegramError) as exc:
+            logger.warning(
+                "deleteForumTopic alert failed user=%s key=%s thread=%s: %s",
+                user_id,
+                key,
+                thread_id,
+                exc,
+            )
+        _icons_applied.discard((int(user_id), key))
+    db.clear_user_topic_threads(user_id)
+    for row in list(db.list_streamer_topics(user_id)):
+        tid = str(row.get("twitch_user_id") or "").strip()
+        if tid:
+            await delete_streamer_forum_topic(bot, db, user_id, tid)
+
+
 async def resolve_alert_thread_id(
     bot,
     db,

@@ -345,8 +345,13 @@ async def open_topics_support_menu(
 
 async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot_helpers import _pulse_reply_keyboard
-    from dm_topics import ensure_all_user_topics, ensure_bot_topic_settings
-    from i18n import topics_support_keyboard
+    from dm_topics import (
+        ensure_all_user_topics,
+        ensure_bot_topic_settings,
+        strip_alert_topic_reply_keyboards,
+        user_has_stored_forum_topics,
+    )
+    from i18n import topics_support_delete_keyboard, topics_support_keyboard
 
     query = update.callback_query
     if not query:
@@ -379,6 +384,15 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         db.set_topics_enabled(user_id, True)
         text = t("topics_support_on", lang)
     else:
+        # Like streamer-topic disable: offer to delete Telegram topics first.
+        if user_has_stored_forum_topics(db, user_id):
+            await query.edit_message_text(
+                t("topics_support_delete_ask", lang),
+                reply_markup=topics_support_delete_keyboard(
+                    lang, from_intro=from_intro
+                ),
+            )
+            return
         db.set_topics_enabled(user_id, False)
         text = t("topics_support_off", lang)
     await query.edit_message_text(
@@ -393,13 +407,53 @@ async def on_topics_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     chat_id = query.message.chat_id if query.message else user_id
     # One-shot strip from Эфир / other alert topics; menu stays in General.
-    from dm_topics import strip_alert_topic_reply_keyboards
-
     if enabled:
         await strip_alert_topic_reply_keyboards(
             context.bot, db, user_id, force=True
         )
     if from_intro:
+        await _pulse_reply_keyboard(
+            context.bot, chat_id, _menu(lang, user_id), db=db, user_id=user_id
+        )
+
+
+async def on_topics_delete_choice(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Disable topic support; optionally delete Telegram forum topics."""
+    from bot_helpers import _pulse_reply_keyboard
+    from dm_topics import delete_all_user_forum_topics
+    from i18n import topics_support_keyboard
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    user_id = query.from_user.id
+    lang = _user_lang(context, user_id)
+    db: Database = context.application.bot_data["db"]
+    data = query.data or ""
+    from_intro = "intro_delete" in data
+    delete_topics = data.endswith("_yes")
+    db.set_topics_enabled(user_id, False)
+    if delete_topics:
+        await delete_all_user_forum_topics(context.bot, db, user_id)
+        text = t("topics_support_off_deleted", lang)
+    else:
+        text = t("topics_support_off", lang)
+    cb = "topics:intro_toggle" if from_intro else "topics:toggle"
+    await query.edit_message_text(
+        text,
+        reply_markup=topics_support_keyboard(
+            lang,
+            enabled=False,
+            callback_data=cb,
+            with_main_menu=from_intro,
+            with_back_bot_settings=not from_intro,
+        ),
+    )
+    if from_intro:
+        chat_id = query.message.chat_id if query.message else user_id
         await _pulse_reply_keyboard(
             context.bot, chat_id, _menu(lang, user_id), db=db, user_id=user_id
         )

@@ -13,6 +13,7 @@ from dm_topics import (
     TOPIC_KEYS,
     _TOPIC_ICON_COLOR,
     _TOPIC_ICON_EMOJI,
+    delete_all_user_forum_topics,
     ensure_all_user_topics,
     ensure_streamer_topic,
     ensure_user_topic,
@@ -28,12 +29,14 @@ from dm_topics import (
     strip_reply_keyboards_from_threads,
     sync_user_topic_icons,
     topic_key_for_subscription,
+    user_has_stored_forum_topics,
 )
 from i18n import (
     btn,
     dest_streamer_topic_keyboard,
     other_menu,
     topics_intro_keyboard,
+    topics_support_delete_keyboard,
     topics_support_keyboard,
     t,
 )
@@ -152,6 +155,10 @@ def run() -> None:
         assert btn("bot_settings", loc)
         assert btn("topics_support", loc)
         assert t("topics_support_toggle", loc)
+        assert t("topics_support_delete_ask", loc)
+        assert t("topics_support_delete_yes", loc)
+        assert t("topics_support_delete_no", loc)
+        assert t("topics_support_off_deleted", loc)
         assert t("topics_intro", loc)
         assert t("dest_streamer_topic_toggle", loc)
         assert t(
@@ -172,6 +179,21 @@ def run() -> None:
             for row in intro.inline_keyboard
             for b in row
         )
+        delete_kb = topics_support_delete_keyboard(loc)
+        delete_cbs = [
+            b.callback_data or "" for row in delete_kb.inline_keyboard for b in row
+        ]
+        assert delete_cbs == ["topics:delete_yes", "topics:delete_no"]
+        intro_delete_kb = topics_support_delete_keyboard(loc, from_intro=True)
+        intro_delete_cbs = [
+            b.callback_data or ""
+            for row in intro_delete_kb.inline_keyboard
+            for b in row
+        ]
+        assert intro_delete_cbs == [
+            "topics:intro_delete_yes",
+            "topics:intro_delete_no",
+        ]
         sk = dest_streamer_topic_keyboard(loc, enabled=True, icon_emoji="🎮")
         assert sk.inline_keyboard[0][0].callback_data == "dest_topic:toggle"
         cbs = [b.callback_data or "" for row in sk.inline_keyboard for b in row]
@@ -419,7 +441,39 @@ async def _check_topic_icons() -> None:
     assert updated == len(TOPIC_KEYS)
     assert bot.edit_forum_topic.await_count == len(TOPIC_KEYS)
 
+    await _check_delete_all_user_forum_topics(bot)
     await _check_streamer_topics(bot, stickers)
+
+
+async def _check_delete_all_user_forum_topics(bot) -> None:
+    db = MagicMock()
+    db.get_user_topic_thread = MagicMock(
+        side_effect=lambda _uid, key: 10 if key == "live" else None
+    )
+    db.list_streamer_topics = MagicMock(
+        return_value=[
+            {
+                "twitch_user_id": "uid1",
+                "message_thread_id": 20,
+                "enabled": True,
+            }
+        ]
+    )
+    assert user_has_stored_forum_topics(db, 7) is True
+    db.clear_user_topic_threads = MagicMock()
+    db.get_streamer_topic = MagicMock(
+        return_value={"message_thread_id": 20, "twitch_user_id": "uid1"}
+    )
+    db.delete_streamer_topic = MagicMock()
+    bot.delete_forum_topic = AsyncMock()
+    await delete_all_user_forum_topics(bot, db, 7)
+    assert bot.delete_forum_topic.await_count >= 2
+    db.clear_user_topic_threads.assert_called_once_with(7)
+    db.delete_streamer_topic.assert_called_once_with(7, "uid1")
+
+    db.get_user_topic_thread = MagicMock(return_value=None)
+    db.list_streamer_topics = MagicMock(return_value=[])
+    assert user_has_stored_forum_topics(db, 7) is False
 
 
 async def _check_streamer_topics(bot, stickers) -> None:

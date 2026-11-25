@@ -387,6 +387,7 @@ from handlers.settings import (
     open_bot_settings_menu,
     open_settings_menu,
     open_topics_support_menu,
+    on_topics_delete_choice,
     on_topics_toggle,
     open_stream_chat,
     open_sys_notifications_menu,
@@ -3205,6 +3206,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         CallbackQueryHandler(
             on_topics_toggle, pattern=r"^topics:(intro_)?toggle$"
+        ),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            on_topics_delete_choice,
+            pattern=r"^topics:(intro_)?delete_(yes|no)$",
         ),
         group=0,
     )
