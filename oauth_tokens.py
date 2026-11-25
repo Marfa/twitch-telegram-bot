@@ -221,7 +221,11 @@ def apply_oauth_success_tokens(
 
 
 def revoke_twitch_oauth_tokens(db: Database, owner_id: int) -> None:
-    """User-initiated wipe of Twitch feature tokens (sync, chat, whispers, …)."""
+    """User-initiated clear of Twitch OAuth secrets (settings/history kept).
+
+    Clears refresh tokens and marks stores for reauth; pauses sync-imported
+    alerts and whispers so ``restore_after_twitch_oauth`` can re-enable them.
+    """
     db.revoke_user_twitch_oauth_tokens(owner_id)
     db.pause_for_twitch_reauth(owner_id)
 

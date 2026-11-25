@@ -828,7 +828,7 @@ class Database(Protocol):
     ) -> None: ...
 
     def revoke_user_twitch_oauth_tokens(self, owner_id: int) -> None:
-        """Delete Twitch feature tokens (sync, chat, whispers, drops, follow monitor)."""
+        """Clear Twitch OAuth secrets; keep feature settings + follow history."""
         ...
 
     def revoke_user_donationalerts_oauth_tokens(self, owner_id: int) -> None:
@@ -836,7 +836,7 @@ class Database(Protocol):
         ...
 
     def revoke_user_oauth_tokens(self, owner_id: int) -> None:
-        """Delete Twitch feature tokens + DonationAlerts auth for owner."""
+        """Clear Twitch OAuth secrets + DonationAlerts auth for owner."""
         ...
 
     def list_owners_needing_twitch_reauth(self) -> list[int]:

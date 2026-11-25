@@ -6284,10 +6284,11 @@ owner_id, twitch_username, twitch_user_id,
                     (datetime.now(timezone.utc).isoformat(), owner_id),
                 )
             else:
+                # Preserve notify_* — premium-beta-pause: settings stay, runtime pauses.
                 conn.execute(
                     """
                     UPDATE follow_monitor
-                    SET enabled = 0, notify_follow = 0, notify_unfollow = 0
+                    SET enabled = 0
                     WHERE owner_id = ?
                     """,
                     (owner_id,),
@@ -6460,17 +6461,45 @@ owner_id, twitch_username, twitch_user_id,
             )
 
     def revoke_user_twitch_oauth_tokens(self, owner_id: int) -> None:
+        """Clear Twitch OAuth secrets; keep feature settings + follow history.
+
+        Caller should run ``pause_for_twitch_reauth`` so sync-subs / whispers
+        can be restored after the next fan-out.
+        """
         with self._conn() as conn:
-            conn.execute("DELETE FROM twitch_sync WHERE owner_id = ?", (owner_id,))
             conn.execute(
-                "DELETE FROM follow_monitor_events WHERE owner_id = ?", (owner_id,)
+                """
+                UPDATE twitch_sync
+                SET refresh_token = '', needs_reauth = 1
+                WHERE owner_id = ?
+                """,
+                (owner_id,),
+            )
+            # Keep enabled / notify_* / baseline / events / followers.
+            conn.execute(
+                """
+                UPDATE follow_monitor
+                SET refresh_token = '', needs_reauth = 1
+                WHERE owner_id = ?
+                """,
+                (owner_id,),
             )
             conn.execute(
-                "DELETE FROM follow_monitor_followers WHERE owner_id = ?", (owner_id,)
+                """
+                UPDATE whisper_alerts
+                SET refresh_token = '', eventsub_id = ''
+                WHERE owner_id = ?
+                """,
+                (owner_id,),
             )
-            conn.execute("DELETE FROM follow_monitor WHERE owner_id = ?", (owner_id,))
-            conn.execute("DELETE FROM whisper_alerts WHERE owner_id = ?", (owner_id,))
-            conn.execute("DELETE FROM chat_auth WHERE owner_id = ?", (owner_id,))
+            conn.execute(
+                """
+                UPDATE chat_auth
+                SET refresh_token = ''
+                WHERE owner_id = ?
+                """,
+                (owner_id,),
+            )
             conn.execute(
                 """
                 UPDATE drops_auth

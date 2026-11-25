@@ -446,8 +446,34 @@ def check_db_premium() -> None:
         hits = db.search_follow_monitor(21, "ali")
         assert any(h["login"] == "alice" for h in hits)
         assert db.has_any_enabled_follow_monitor() is True
+        db.set_follow_monitor_notify(21, notify_follow=True, notify_unfollow=True)
         db.set_follow_monitor_enabled(21, False)
-        assert db.get_follow_monitor(21).enabled is False
+        fm_off = db.get_follow_monitor(21)
+        assert fm_off is not None and fm_off.enabled is False
+        # Disable must preserve alert toggles (premium-beta-pause).
+        assert fm_off.notify_follow is True and fm_off.notify_unfollow is True
+        db.set_follow_monitor_enabled(21, True)
+        from oauth_tokens import revoke_twitch_oauth_tokens
+
+        # Settings revoke clears secrets only — history + enabled/notify stay.
+        revoke_twitch_oauth_tokens(db, 21)
+        fm_rev = db.get_follow_monitor(21)
+        assert fm_rev is not None and fm_rev.enabled is True
+        assert fm_rev.notify_follow is True and fm_rev.notify_unfollow is True
+        assert fm_rev.needs_reauth is True and fm_rev.refresh_token == ""
+        assert db.count_follow_monitor_events(21, event_type="follow") == 1
+        assert db.count_follow_monitor_followers(21) == 2
+        db.fan_out_twitch_oauth_token(
+            21,
+            twitch_user_id="tw-fm",
+            twitch_login="streamer",
+            refresh_token="fmtok2",
+        )
+        fm_rest = db.get_follow_monitor(21)
+        assert fm_rest is not None and fm_rest.enabled is True
+        assert fm_rest.needs_reauth is False and fm_rest.refresh_token == "fmtok2"
+        assert fm_rest.notify_follow is True and fm_rest.notify_unfollow is True
+        assert db.count_follow_monitor_events(21, event_type="follow") == 1
         from token_crypto import encrypt_secret, decrypt_secret, try_decrypt_secret
 
         assert decrypt_secret(encrypt_secret("secret-token")) == "secret-token"
