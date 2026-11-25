@@ -93,6 +93,18 @@ def _http_rate_limit_allow(
         return True
 
 
+def _http_rate_limit_refund(bucket_key: str) -> None:
+    """Give back the newest hit of a bucket, for a request that spent nothing.
+
+    A caller records its hit before a later check refuses it, so a refusal must
+    not use up the caller's own window.
+    """
+    with _HTTP_RL_LOCK:
+        hits = _HTTP_RL_HITS.get(bucket_key)
+        if hits:
+            hits.pop()
+
+
 def _http_rate_limits_admit(buckets: list[tuple[str, int, float]]) -> str | None:
     """Admit one request through several buckets as a whole.
 
