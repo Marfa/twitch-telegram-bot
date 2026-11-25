@@ -212,6 +212,9 @@ def main() -> None:
     from .checks_request_context import run as check_request_context
 
     check_request_context()
+    from .checks_helix_budget import run as check_helix_budget
+
+    check_helix_budget()
     print("ok")
 
 

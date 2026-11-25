@@ -5,7 +5,9 @@ import json
 import logging
 import random
 import re
+import threading
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
 from pathlib import Path
@@ -264,12 +266,28 @@ _TRANSIENT_REQUEST_ERRORS = (
 _TRANSIENT_STATUS_CODES = frozenset({500, 502, 503, 504})
 
 
-def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
-    """Seconds to sleep after HTTP 429 (Retry-After / Ratelimit-Reset / backoff)."""
+def _retry_after_seconds(
+    resp: requests.Response,
+    attempt: int,
+    *,
+    max_wait: float | None = _RATE_LIMIT_MAX_WAIT_SEC,
+) -> float:
+    """Seconds after HTTP 429 (Retry-After / Ratelimit-Reset / backoff).
+
+    The retry sleep loop keeps the default cap so one caller cannot block for
+    minutes. Pass ``max_wait=None`` when recording a shared Helix dry period so
+    callers shed until Twitch's own reset, not an earlier local ceiling.
+    """
+    def _clamp(wait: float) -> float:
+        wait = max(0.5, float(wait))
+        if max_wait is None:
+            return wait
+        return min(float(max_wait), wait)
+
     ra = (resp.headers.get("Retry-After") or "").strip()
     if ra:
         try:
-            return min(_RATE_LIMIT_MAX_WAIT_SEC, max(0.5, float(ra)))
+            return _clamp(float(ra))
         except ValueError:
             pass
     reset = (
@@ -281,10 +299,10 @@ def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
         try:
             wait = float(reset) - time.time()
             if wait > 0:
-                return min(_RATE_LIMIT_MAX_WAIT_SEC, wait + 0.25)
+                return _clamp(wait + 0.25)
         except ValueError:
             pass
-    return min(_RATE_LIMIT_MAX_WAIT_SEC, float(2 ** attempt))
+    return _clamp(float(2 ** attempt))
 
 
 def _transient_backoff_seconds(attempt: int) -> float:
@@ -297,9 +315,121 @@ def _deadline_too_close(deadline: float | None, wait: float) -> bool:
     return deadline is not None and time.monotonic() + wait >= deadline
 
 
+# One app token gives this process Helix points per minute, and every Helix
+# caller shares that one bucket: the go-live poll, eventsub, drops, the follow
+# monitor, clips, multihost, schedule and whispers. TwitchClient owns the window
+# below so a burst in one caller cannot spend the share the others need.
+_HELIX_API_PREFIX = "https://api.twitch.tv/helix/"
+# Twitch publishes no per-response point cost, so one request counts as one
+# point. Refine this weight when a real 429 shows an endpoint costs more.
+_HELIX_POINTS_PER_REQUEST = 1
+_HELIX_BUDGET_POINTS = 800
+_HELIX_BUDGET_WINDOW_SEC = 60.0
+# The go-live poll runs on a fixed schedule and must finish its tick, so only a
+# priority caller may spend this share. It covers the poll's chunks and its
+# retries over a whole window.
+_HELIX_BUDGET_RESERVE_POINTS = 200
+
+
+class HelixBudgetExhausted(RuntimeError):
+    """The shared Helix app-token budget has no room for this request.
+
+    Raised before the network call. A caller that serves a person turns it into
+    its own refusal (chat_webapp answers HTTP 429), and a caller on a deadline
+    lets its run end instead of waiting on an empty bucket.
+    """
+
+    def __init__(self, *, points: int, retry_after: float) -> None:
+        self.points = points
+        self.retry_after = max(1.0, float(retry_after))
+        super().__init__(
+            f"Helix app-token budget exhausted: {points} point(s) needed, "
+            f"room in {self.retry_after:.0f}s"
+        )
+
+
+class _HelixBudget:
+    """Sliding window of the Helix points this process spends with its app token.
+
+    Every governed request takes its points from this window before the network
+    call, so the window is the one owner of the bucket. A caller marked
+    `priority` (the go-live poll) may also spend the reserved share; every other
+    caller sheds with `HelixBudgetExhausted` while only the reserve is left. A
+    429 from Twitch (`drained`) records the reset the server reports and sheds
+    locally until then, instead of sleeping and retrying into the same bucket.
+    """
+
+    def __init__(
+        self,
+        *,
+        points: int = _HELIX_BUDGET_POINTS,
+        window_sec: float = _HELIX_BUDGET_WINDOW_SEC,
+        reserve: int = _HELIX_BUDGET_RESERVE_POINTS,
+    ) -> None:
+        self._points = max(1, int(points))
+        self._window_sec = max(1.0, float(window_sec))
+        self._reserve = max(0, min(int(reserve), self._points - 1))
+        self._lock = threading.Lock()
+        self._spent: deque[tuple[float, int]] = deque()
+        self._used = 0
+        self._dry_until = 0.0
+
+    def _trim(self, now: float) -> None:
+        cutoff = now - self._window_sec
+        while self._spent and self._spent[0][0] <= cutoff:
+            self._used -= self._spent.popleft()[1]
+
+    def _headroom(self, priority: bool) -> int:
+        ceiling = self._points if priority else self._points - self._reserve
+        return ceiling - self._used
+
+    def _wait_for(self, points: int, priority: bool) -> float:
+        """Seconds until the window frees `points` for this class of caller."""
+        need = points - self._headroom(priority)
+        freed = 0
+        now = time.monotonic()
+        for started, spent in self._spent:
+            freed += spent
+            if freed >= need:
+                return started + self._window_sec - now
+        return self._window_sec
+
+    def admit(self, points: int, *, priority: bool = False) -> None:
+        """Take `points` from the window, or raise `HelixBudgetExhausted`."""
+        want = max(1, int(points))
+        with self._lock:
+            now = time.monotonic()
+            self._trim(now)
+            if now < self._dry_until:
+                raise HelixBudgetExhausted(
+                    points=want, retry_after=self._dry_until - now
+                )
+            if self._headroom(priority) >= want:
+                self._spent.append((now, want))
+                self._used += want
+                return
+            raise HelixBudgetExhausted(
+                points=want, retry_after=self._wait_for(want, priority)
+            )
+
+    def drained(self, retry_after: float) -> None:
+        """Twitch answered 429: shed every caller until the reported reset."""
+        until = time.monotonic() + max(1.0, float(retry_after))
+        with self._lock:
+            self._dry_until = max(self._dry_until, until)
+            # The server counted more spend than this window knows (another
+            # process uses the same app token), so the count starts again at the
+            # reset instead of underspending for the rest of the window.
+            self._spent.clear()
+            self._used = 0
+
+
 def _install_rate_limit_backoff(
     session: requests.Session,
     on_unauthorized: Any | None = None,
+    *,
+    budget: _HelixBudget | None = None,
+    is_app_token_request: Any | None = None,
 ) -> None:
     """Wrap Session.request: refresh a rejected token once on 401, retry on
     429 with Retry-After / exponential backoff, and retry transient network
@@ -310,11 +440,24 @@ def _install_rate_limit_backoff(
     A caller that must finish by a fixed time passes `_deadline` (monotonic
     seconds). Each attempt's timeout is capped at the time left, and a retry whose
     wait would end past the deadline does not run.
+
+    `is_app_token_request(method, url, headers)` marks the requests that spend
+    the app token's Helix bucket. Each of those takes its points from `budget`
+    before the network call and sheds with `HelixBudgetExhausted` when the window
+    has no room, and a 429 response fills the budget from the server's reset
+    instead of sleeping through a retry chain. A caller marked with `_priority`
+    may draw the reserve that the go-live poll needs.
     """
     orig = session.request
 
     def request(method: str, url: str, **kwargs: Any) -> requests.Response:
         deadline: float | None = kwargs.pop("_deadline", None)
+        priority = bool(kwargs.pop("_priority", False))
+        governed = (
+            budget is not None
+            and is_app_token_request is not None
+            and bool(is_app_token_request(method, url, kwargs.get("headers")))
+        )
         last: requests.Response | None = None
         token_refreshed = False
         for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
@@ -329,6 +472,8 @@ def _install_rate_limit_backoff(
                 timeout = kwargs.get("timeout")
                 if isinstance(timeout, (int, float)):
                     kwargs["timeout"] = min(float(timeout), remaining)
+            if governed:
+                budget.admit(_HELIX_POINTS_PER_REQUEST, priority=priority)
             try:
                 last = orig(method, url, **kwargs)
             except _TRANSIENT_REQUEST_ERRORS as exc:
@@ -380,6 +525,17 @@ def _install_rate_limit_backoff(
                 )
                 time.sleep(wait)
                 continue
+            if governed and last.status_code == 429:
+                wait = _retry_after_seconds(last, attempt, max_wait=None)
+                budget.drained(wait)
+                logger.warning(
+                    "HTTP 429 method=%s url=%s — Helix app-credential budget "
+                    "dry for %.0fs, shed to callers",
+                    method,
+                    url,
+                    wait,
+                )
+                return last
             wait = _retry_after_seconds(last, attempt)
             if (
                 last.status_code != 429
@@ -405,7 +561,13 @@ def _install_rate_limit_backoff(
 class TwitchClient:
     def __init__(self) -> None:
         self._session = requests.Session()
-        _install_rate_limit_backoff(self._session, self._refresh_app_token_headers)
+        self._budget = _HelixBudget()
+        _install_rate_limit_backoff(
+            self._session,
+            self._refresh_app_token_headers,
+            budget=self._budget,
+            is_app_token_request=self._is_app_token_request,
+        )
         self._igdb_db: Any | None = None
         self._token = ""
         self._token_expires = 0.0
@@ -480,6 +642,19 @@ class TwitchClient:
             "Client-ID": TWITCH_CLIENT_ID,
             "Authorization": f"Bearer {self._ensure_token()}",
         }
+
+    def _is_app_token_request(self, method: str, url: str, headers: Any) -> bool:
+        """True when this request spends the shared Helix app-token bucket.
+
+        A user-token Helix call (chat send, clips, schedule write) and the
+        token and IGDB endpoints have their own buckets, so the governor leaves
+        them alone.
+        """
+        if not self._token or not (url or "").startswith(_HELIX_API_PREFIX):
+            return False
+        return bool(headers) and headers.get("Authorization") == (
+            f"Bearer {self._token}"
+        )
 
     def get_user(self, login: str) -> dict[str, Any] | None:
         return self.get_users_by_login([login]).get(login.lower())
@@ -582,7 +757,11 @@ class TwitchClient:
         return twitchdrops_app_game_url(game_slug)
 
     def get_live_streams(
-        self, user_ids: list[str], *, budget_sec: float | None = None
+        self,
+        user_ids: list[str],
+        *,
+        budget_sec: float | None = None,
+        priority: bool = False,
     ) -> dict[str, dict[str, Any]]:
         """Helix allows at most 100 user_id params per /streams request.
 
@@ -590,6 +769,10 @@ class TwitchClient:
         60 s check_streams tick). Every chunk and its retry chain stop at that
         deadline, and an exhausted budget raises instead of returning partial
         data, so the caller keeps its previous live state for the next tick.
+
+        `priority` marks the go-live poll: its chunks may draw the share of the
+        app-token budget that `_HelixBudget` reserves, so a burst in a
+        user-facing caller cannot empty the bucket before the tick runs.
         """
         if not user_ids:
             return {}
@@ -617,6 +800,7 @@ class TwitchClient:
                 params=params,
                 timeout=15 if remaining is None else max(1.0, min(15.0, remaining)),
                 _deadline=deadline,
+                _priority=priority,
             )
             resp.raise_for_status()
             for stream in resp.json().get("data", []):

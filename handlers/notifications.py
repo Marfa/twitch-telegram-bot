@@ -878,8 +878,14 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         helix_budget_sec = max(10.0, float(CHECK_INTERVAL) / 2)
         try:
+            # Priority consumer of the app-token budget in twitch.py: this poll
+            # draws the reserve, so a burst in a user-facing caller cannot make
+            # the tick abort and skip the go-live alerts.
             live_streams = await asyncio.to_thread(
-                twitch.get_live_streams, user_ids, budget_sec=helix_budget_sec
+                twitch.get_live_streams,
+                user_ids,
+                budget_sec=helix_budget_sec,
+                priority=True,
             )
         except Exception as exc:
             logger.exception("Twitch poll failed")

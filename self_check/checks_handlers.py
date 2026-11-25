@@ -2682,26 +2682,36 @@ def check_handlers() -> None:
             status, body = cw.api_resolve(token=read_token, query="marfapr")
             assert status == 429 and body["error"] == "rate_limited"
             assert read_twitch.helix_calls == spent
-        # The shared window caps the read traffic of every Mini App user.
+        # The per-user window stays, so one client loop cannot spend the share
+        # that other users' reads and the rest of the bot need.
         reset_http_rate_limits_for_tests()
-        assert all(
-            cw._chat_read_allowed(5000 + i, path="/app/chat/api/online")
-            for i in range(cw._CHAT_READ_GLOBAL_LIMIT)
-        )
-        assert not cw._chat_read_allowed(5000, path="/app/chat/api/online")
-        # A read that the shared window sheds spends none of that user'''s own
-        # quota: fill the shared window from other users, shed one user through
-        # it, drain the shared window, and the user is admitted at once.
-        reset_http_rate_limits_for_tests()
-        assert all(
-            cw._chat_read_allowed(6000 + i, path="/app/chat/api/online")
-            for i in range(cw._CHAT_READ_GLOBAL_LIMIT)
-        )
         for _ in range(cw._CHAT_READ_LIMIT):
-            assert not cw._chat_read_allowed(779, path="/app/chat/api/online")
-        with patch.object(
-            cw, "_CHAT_READ_GLOBAL_LIMIT", cw._CHAT_READ_GLOBAL_LIMIT * 4
+            assert cw._chat_read_allowed(5000, path="/app/chat/api/online")
+        assert not cw._chat_read_allowed(5000, path="/app/chat/api/online")
+        # A drained user does not shed another user: the shared spend is the
+        # Helix app-token budget in twitch.py, not a counter in chat_webapp.
+        assert cw._chat_read_allowed(5001, path="/app/chat/api/online")
+        reset_http_rate_limits_for_tests()
+
+        # A read that the shared Helix budget sheds answers HTTP 429 with the
+        # wait the budget reports, and spends no Twitch call.
+        class _DryBudgetTwitch(_CountingTwitch):
+            def get_users_by_login(self, logins):
+                from twitch import HelixBudgetExhausted
+
+                raise HelixBudgetExhausted(points=1, retry_after=7.4)
+
+        with patch.object(cw, "_db", cdb), patch.object(
+            cw, "_twitch", _DryBudgetTwitch()
         ):
+            status, body = cw.api_resolve(token=read_token, query="drylane")
+            assert status == 429 and body["error"] == "rate_limited", (status, body)
+            assert body["retry_after"] == 8
+            # A shed read spends none of that user's own window: the refusal is
+            # the budget's, so many shed reads leave the user admitted.
+            for _ in range(cw._CHAT_READ_LIMIT + 1):
+                status, body = cw.api_resolve(token=read_token, query="drylane")
+                assert status == 429 and body["error"] == "rate_limited"
             assert cw._chat_read_allowed(779, path="/app/chat/api/online")
         reset_http_rate_limits_for_tests()
 

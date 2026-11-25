@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import random
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from config import PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
 from i18n import SUPPORTED_LOCALES
 from premium import get_status, list_promo_channel_logins
+from twitch import HelixBudgetExhausted
 
 logger = logging.getLogger(__name__)
 
@@ -397,40 +399,44 @@ def _chat_send_allowed(user_id: int) -> bool:
     )
 
 
-# The read endpoints spend Helix points from the shared app-token bucket that
-# stream polling also uses: api_online costs 5 without the full plan (2 with
-# it), api_resolve costs 2. Bound them per Telegram user and across all Mini App
-# users, so one client loop cannot stall alert polling. Both shed before any
-# Helix call.
+# The read endpoints spend Helix points from the app-token budget that
+# TwitchClient owns in twitch.py: api_online costs 5 without the full plan (2
+# with it), api_resolve costs 2. That one window now sheds a burst across every
+# Mini App user and keeps the share that stream polling needs, so this module
+# only caps one Telegram user: a client loop must not take the whole share that
+# other users' reads and the rest of the bot need.
 _CHAT_READ_LIMIT = 20
 _CHAT_READ_WINDOW_SEC = 60.0
-_CHAT_READ_GLOBAL_LIMIT = 60
-_CHAT_READ_GLOBAL_WINDOW_SEC = 60.0
 
 
 def _chat_read_allowed(user_id: int, *, path: str) -> bool:
-    """Record one Mini App read; False when its user or the shared window is full."""
-    from health import _http_rate_limits_admit, _note_http_rate_limited
+    """Record one Mini App read; False when this user's window is full."""
+    from health import _http_rate_limit_allow, _note_http_rate_limited
 
-    rejected = _http_rate_limits_admit(
-        [
-            (f"chat_read:{int(user_id)}", _CHAT_READ_LIMIT, _CHAT_READ_WINDOW_SEC),
-            (
-                "chat_read:shared",
-                _CHAT_READ_GLOBAL_LIMIT,
-                _CHAT_READ_GLOBAL_WINDOW_SEC,
-            ),
-        ]
-    )
-    if rejected is None:
+    if _http_rate_limit_allow(
+        f"chat_read:{int(user_id)}",
+        limit=_CHAT_READ_LIMIT,
+        window_sec=_CHAT_READ_WINDOW_SEC,
+    ):
         return True
-    if rejected == "chat_read:shared":
-        _note_http_rate_limited(
-            "chat_read_shared", path, _CHAT_READ_GLOBAL_WINDOW_SEC
-        )
-    else:
-        _note_http_rate_limited("chat_read", path, _CHAT_READ_WINDOW_SEC)
+    _note_http_rate_limited("chat_read", path, _CHAT_READ_WINDOW_SEC)
     return False
+
+
+def _budget_shed(
+    exc: HelixBudgetExhausted, *, path: str, bucket: str
+) -> tuple[int, dict[str, Any]]:
+    """Answer a Mini App request that the shared Helix budget sheds with 429."""
+    from health import _http_rate_limit_refund, _note_http_rate_limited
+
+    # The request spent no Helix points, so it must not use up the caller's own
+    # read or send window either.
+    _http_rate_limit_refund(bucket)
+    _note_http_rate_limited("helix_budget", path, _CHAT_READ_WINDOW_SEC)
+    code, payload = _err(429, "rate_limited")
+    # ceil so the client does not retry before the shared budget frees a slot
+    payload["retry_after"] = max(1, int(math.ceil(exc.retry_after)))
+    return code, payload
 
 
 def _profile_image_url(profile: dict[str, Any] | None) -> str:
@@ -571,6 +577,10 @@ def api_online(*, init_data: str = "", token: str = "") -> tuple[int, dict[str, 
             "subscribed": subscribed,
             "live": len(streams),
         }
+    except HelixBudgetExhausted as exc:
+        return _budget_shed(
+            exc, path="/app/chat/api/online", bucket=f"chat_read:{user_id}"
+        )
     except Exception:
         logger.exception("chat api_online failed user=%s", user_id)
         return _err(502, "twitch_error")
@@ -611,6 +621,10 @@ def api_resolve(
             "viewer_count": int((stream or {}).get("viewer_count") or 0),
             "profile_image_url": _profile_image_url(profile),
         }
+    except HelixBudgetExhausted as exc:
+        return _budget_shed(
+            exc, path="/app/chat/api/resolve", bucket=f"chat_read:{int(user['id'])}"
+        )
     except Exception:
         logger.exception("chat api_resolve failed login=%s", login)
         return _err(502, "twitch_error")
@@ -681,7 +695,12 @@ def api_send(
                 "chat send rate limited user=%s channel=%s", user_id, login
             )
         return code, payload
-    broadcaster = _twitch.get_user(login)
+    try:
+        broadcaster = _twitch.get_user(login)
+    except HelixBudgetExhausted as exc:
+        return _budget_shed(
+            exc, path="/app/chat/api/send", bucket=f"chat_send:{user_id}"
+        )
     if not broadcaster:
         return _err(404, "not_found")
     try:
