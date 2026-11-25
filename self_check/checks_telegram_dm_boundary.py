@@ -1,6 +1,7 @@
-"""One Telegram delivery boundary: every DM is a per-recipient outcome.
+"""One Telegram delivery boundary: every DM / alert is a per-recipient outcome.
 
-``bot_helpers._send_dm_html`` is the single delivery boundary for system DMs.
+``bot_helpers._send_dm_html`` is the boundary for system DMs;
+``handlers.delivery._send_notification`` is the boundary for alerts.
 A transport error (``NetworkError`` / ``TimedOut``) must come back as that
 recipient's "failed" outcome, so one failed send never ends a fan-out loop and
 never ends a ``check_streams`` tick.
@@ -8,6 +9,8 @@ never ends a ``check_streams`` tick.
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from telegram.error import Forbidden, NetworkError, RetryAfter, TimedOut
@@ -159,8 +162,74 @@ def _check_pay_and_grace_senders_return_outcome() -> None:
     asyncio.run(_run())
 
 
+def _check_alert_send_transport_error() -> None:
+    """A transport error stays with its destination and leaves the tick running."""
+    from db import open_database
+    from handlers import delivery
+
+    async def _run() -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = open_database(Path(td) / "alert_boundary.db")
+            uid = 601
+            db.upsert_user(uid)
+            db.set_user_locale(uid, "en")
+            first_id = db.add_subscription(
+                uid, "streamer", "tw1", "{username} live", "dm", uid, None
+            )
+            second_id = db.add_subscription(
+                uid, "other", "tw2", "{username} live", "dm", uid, None
+            )
+            first = next(
+                s for s in db.get_subscriptions_by_owner(uid) if s.id == first_id
+            )
+            second = next(
+                s for s in db.get_subscriptions_by_owner(uid) if s.id == second_id
+            )
+
+            bot = AsyncMock()
+            bot.send_message = AsyncMock(
+                side_effect=NetworkError("httpx.ConnectError")
+            )
+            bot.send_photo = AsyncMock(
+                side_effect=NetworkError("httpx.ConnectError")
+            )
+            bot.get_me = AsyncMock(
+                return_value=MagicMock(username="testbot", id=1)
+            )
+            outcomes: list[str] = []
+
+            def _record(**kwargs) -> None:
+                outcomes.append(str(kwargs.get("outcome") or ""))
+
+            with patch.object(delivery.metrics, "record_alert_delivery", _record):
+                assert (
+                    await delivery._send_notification(bot, db, first, "hi")
+                ) is False
+            assert outcomes == ["failed"], outcomes
+            # Inner path would raise; the boundary must not.
+            try:
+                await delivery._send_notification_inner(bot, db, first, "hi")
+            except NetworkError:
+                pass
+            else:
+                raise AssertionError(
+                    "_send_notification_inner must still raise NetworkError"
+                )
+
+            bot.send_message = AsyncMock(
+                return_value=MagicMock(message_id=42)
+            )
+            bot.send_photo = AsyncMock(return_value=MagicMock(message_id=42))
+            assert (
+                await delivery._send_notification(bot, db, second, "hi again")
+            ) is True
+
+    asyncio.run(_run())
+
+
 def run() -> None:
     _check_boundary()
+    _check_alert_send_transport_error()
     _check_growth_report_fanout()
     _check_premium_expiry_loops()
     _check_pay_and_grace_senders_return_outcome()
