@@ -68,6 +68,42 @@ def run() -> None:
         assert 1.0 <= exc.retry_after <= 25.0
     assert len(calls) == 1
 
+    # Twitch's reset must outlive the sleep-loop 60 s cap: a Retry-After of
+    # 120 s keeps the dry period at 120 s so callers shed instead of hitting
+    # the same 429 again after a minute.
+    long_calls: list[str] = []
+
+    class _LongDrySession:
+        def request(self, method: str, url: str, **kwargs: Any):
+            import requests
+
+            long_calls.append(url)
+            resp = requests.Response()
+            resp.status_code = 429
+            resp.url = url
+            resp.headers["Retry-After"] = "120"
+            resp._content = b"{}"
+            return resp
+
+    long_budget = _HelixBudget(points=10, window_sec=60.0, reserve=4)
+    long_session = _LongDrySession()
+    _install_rate_limit_backoff(
+        long_session,
+        budget=long_budget,
+        is_app_token_request=lambda method, url, headers: True,
+    )
+    assert long_session.request(
+        "GET", "https://api.twitch.tv/helix/streams", headers={"X": "y"}
+    ).status_code == 429
+    try:
+        long_session.request(
+            "GET", "https://api.twitch.tv/helix/streams", headers={"X": "y"}
+        )
+        raise AssertionError("a 120 s Twitch reset must keep the budget dry")
+    except HelixBudgetExhausted as exc:
+        assert 110.0 <= exc.retry_after <= 120.0, exc.retry_after
+    assert len(long_calls) == 1
+
     # The app token's Helix calls are governed; a user-token Helix call and the
     # token and IGDB endpoints keep their own buckets.
     client = TwitchClient()

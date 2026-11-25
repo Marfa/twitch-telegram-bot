@@ -2706,7 +2706,7 @@ def check_handlers() -> None:
         ):
             status, body = cw.api_resolve(token=read_token, query="drylane")
             assert status == 429 and body["error"] == "rate_limited", (status, body)
-            assert body["retry_after"] == 7
+            assert body["retry_after"] == 8
             # A shed read spends none of that user's own window: the refusal is
             # the budget's, so many shed reads leave the user admitted.
             for _ in range(cw._CHAT_READ_LIMIT + 1):

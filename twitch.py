@@ -266,12 +266,28 @@ _TRANSIENT_REQUEST_ERRORS = (
 _TRANSIENT_STATUS_CODES = frozenset({500, 502, 503, 504})
 
 
-def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
-    """Seconds to sleep after HTTP 429 (Retry-After / Ratelimit-Reset / backoff)."""
+def _retry_after_seconds(
+    resp: requests.Response,
+    attempt: int,
+    *,
+    max_wait: float | None = _RATE_LIMIT_MAX_WAIT_SEC,
+) -> float:
+    """Seconds after HTTP 429 (Retry-After / Ratelimit-Reset / backoff).
+
+    The retry sleep loop keeps the default cap so one caller cannot block for
+    minutes. Pass ``max_wait=None`` when recording a shared Helix dry period so
+    callers shed until Twitch's own reset, not an earlier local ceiling.
+    """
+    def _clamp(wait: float) -> float:
+        wait = max(0.5, float(wait))
+        if max_wait is None:
+            return wait
+        return min(float(max_wait), wait)
+
     ra = (resp.headers.get("Retry-After") or "").strip()
     if ra:
         try:
-            return min(_RATE_LIMIT_MAX_WAIT_SEC, max(0.5, float(ra)))
+            return _clamp(float(ra))
         except ValueError:
             pass
     reset = (
@@ -283,10 +299,10 @@ def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
         try:
             wait = float(reset) - time.time()
             if wait > 0:
-                return min(_RATE_LIMIT_MAX_WAIT_SEC, wait + 0.25)
+                return _clamp(wait + 0.25)
         except ValueError:
             pass
-    return min(_RATE_LIMIT_MAX_WAIT_SEC, float(2 ** attempt))
+    return _clamp(float(2 ** attempt))
 
 
 def _transient_backoff_seconds(attempt: int) -> float:
@@ -510,7 +526,7 @@ def _install_rate_limit_backoff(
                 time.sleep(wait)
                 continue
             if governed and last.status_code == 429:
-                wait = _retry_after_seconds(last, attempt)
+                wait = _retry_after_seconds(last, attempt, max_wait=None)
                 budget.drained(wait)
                 logger.warning(
                     "HTTP 429 method=%s url=%s — Helix app-credential budget "

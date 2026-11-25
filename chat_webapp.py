@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import random
 import time
 from pathlib import Path
@@ -433,7 +434,8 @@ def _budget_shed(
     _http_rate_limit_refund(bucket)
     _note_http_rate_limited("helix_budget", path, _CHAT_READ_WINDOW_SEC)
     code, payload = _err(429, "rate_limited")
-    payload["retry_after"] = max(1, int(round(exc.retry_after)))
+    # ceil so the client does not retry before the shared budget frees a slot
+    payload["retry_after"] = max(1, int(math.ceil(exc.retry_after)))
     return code, payload
 
 
