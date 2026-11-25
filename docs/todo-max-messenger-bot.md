@@ -1,10 +1,11 @@
 # TODO: Универсальный webhook-destination + тонкий бот MAX
 
-Дата: 2026-11-10 (обновлено: фазы **1–2** готовы)  
-Статус: **фазы 1–2 ✅** (TG Webhook dest + контракт/docs/sample receiver + `max_api.py` без UI); Max-бот / UX «Привязать Max» — ждут токен (фазы 0, 3–6).  
+Дата: 2026-11-10 (обновлено: 2026-11-25 — бот Max на модерации)  
+Статус: **фазы 1–2 ✅**; фаза **0 в процессе** — профиль партнёров верифицирован, бот создан (тип «Добавление в чаты»), **на модерации**; после «Опубликован» + токен → фазы 3–6.  
 Связанный код: `outbound_webhook.py`, `max_api.py`, `handlers/delivery.py`, wizard dest / `subscriptions`  
-Доки: контракт [`outbound-webhook.md`](outbound-webhook.md); Max — [создание бота](https://dev.max.ru/docs/chatbots/bots-create/create/), [Bot API](https://dev.max.ru/docs-api), [POST /subscriptions](https://dev.max.ru/docs-api/methods/POST/subscriptions/)  
-Контекст: вся настройка алертов остаётся в Telegram; destination **Webhook** (универсальный URL); бот MAX — онбординг + привязка куда слать + приём нашего webhook.
+Доки: контракт [`outbound-webhook.md`](outbound-webhook.md); Max — [создание бота](https://dev.max.ru/docs/chatbots/bots-create/create/), [управление / токен](https://dev.max.ru/docs/chatbots/bots-create/manage/), [Bot API](https://dev.max.ru/docs-api), [POST /subscriptions](https://dev.max.ru/docs-api/methods/POST/subscriptions/)  
+Контекст: вся настройка алертов остаётся в Telegram; destination **Webhook** (универсальный URL); бот MAX — онбординг + привязка куда слать + приём нашего webhook.  
+Ассет аватара для Max: [`assets/max-bot-logo-500.png`](../assets/max-bot-logo-500.png) (500×500).
 
 Связано (другой контракт payload): Discord Incoming Webhook уже в коде (`dest_type=discord`) — не универсальный JSON; этот файл про общий HTTPS webhook (+ Max).
 
@@ -21,7 +22,7 @@
 | 5 | Пользователи/чаты Max **отдельные**; миграции TG→Max нет; одна Postgres ок |
 | 6 | Первый официальный consumer webhook — **наш Max-бот**; тот же контракт — Make, свой сервер и т.д. |
 | 7 | Копия UI Max / рублёвый Premium на Max — **сняты** с этого плана (см. «Не в scope») |
-| 8 | Профиля MAX для партнёров пока нет → Max-часть после модерации и токена |
+| 8 | Профиль MAX для партнёров верифицирован; бот создан (тип «Добавление в чаты»), на модерации → Max-часть после «Опубликован» и токена `MAX_BOT_TOKEN` |
 | 9 | Реальная оплата на Max не нужна в этой схеме (Premium = Telegram Stars / как сейчас) |
 
 ---
@@ -125,7 +126,7 @@ Max-сторона (**не сделано**):
 
 | Фаза | Содержание | Статус |
 |------|------------|--------|
-| **0. Доступ Max** | Профиль партнёров → бот → модерация → токен `MAX_BOT_TOKEN` | ❌ блокер для 3–5 |
+| **0. Доступ Max** | Профиль партнёров ✅ → бот создан (тип «Добавление в чаты») ✅ → **на модерации** → токен `MAX_BOT_TOKEN` + в настройках разрешить добавление в групповые чаты | 🟡 блокер для 3–5 (ждём модерацию ≤48ч раб. дней) |
 | **1. Webhook dest в TG** | UI dest, URL/secret, POST delivery, тест, SSRF, notice, i18n, flow-nav | ✅ в коде |
 | **2. Контракт + docs** | schema + README + [`docs/outbound-webhook.md`](outbound-webhook.md) + [`examples/outbound_webhook_receiver.py`](../examples/outbound_webhook_receiver.py) | ✅ |
 | **3. Max каркас** | таблицы, `/start`, link code, webhook receiver, send в ЛС | ❌ после 0 |
@@ -139,7 +140,7 @@ Max-сторона (**не сделано**):
 
 ## Что осталось сделать (короткий backlog)
 
-1. **Фаза 0:** профиль MAX для партнёров → создать бота → модерация → положить `MAX_BOT_TOKEN` в `.env` / VPS.
+1. **Фаза 0 (остаток):** дождаться статуса «Опубликован» → скопировать токен → `MAX_BOT_TOKEN` в local `.env` + VPS → в настройках бота разрешить добавление в групповые чаты.
 2. **Фаза 3:** тонкий Max-бот — таблицы, `/start` + link code, HTTP receiver нашего контракта, send в ЛС через Max API; subscribe webhook через `max_api.subscribe`.
 3. **Фаза 4:** dest группа/канал + права + отвязка в Max.
 4. **Фаза 5:** в TG wizard «Привязать Max» (код / deep link) без ручного URL.
@@ -178,7 +179,7 @@ Max-сторона (**не сделано**):
 - Чужие приёмники ломаются / дублируют — `delivery_id` + тест при setup; пример verify: `docs/outbound-webhook.md`.  
 - Max 2 msg/s — очередь на приёмнике (фаза 3).  
 - Пользователь ждёт «полноценный бот в Max» — продуктово это **доставка**, не второй UI.  
-- Без профиля Max фазы 3–5 ждут; фаза 1 уже без Max.
+- Бот Max на модерации — фазы 3–5 ждут токен; фаза 1 уже без Max.
 
 ---
 
@@ -198,5 +199,7 @@ Max-сторона (**не сделано**):
 
 - [x] Имя dest в UI: **Webhook** + i18n (ru/en/uk/it)  
 - [x] JSON schema + заголовок подписи (`X-Bot-Signature`)  
-- [ ] (Max) профиль партнёров + токен, когда понадобится фаза 3  
+- [x] (Max) профиль партнёров верифицирован; бот создан, на модерации  
+- [ ] (Max) токен после «Опубликован» → `MAX_BOT_TOKEN` (фаза 3)  
+
 - [x] Не путать с отменённой «копией UI Max» — этот файл канон  
