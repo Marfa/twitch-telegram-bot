@@ -22,7 +22,7 @@ English: [README.en.md](README.en.md)
 | Типы оповещений | Начало стрима · смена категории · предстоящий (Twitch schedule) · окончание стрима · Drops · оповещение по игре · выход релизов (IGDB) · раздачи игр (GamerPower + ITAD) |
 | Куда слать | Личка, канал/группа/сообщество (с темами), Discord или универсальный HTTPS Webhook (JSON + HMAC) |
 | Канал Twitch | Ссылка, `m.twitch.tv` или username; ссылка в ЛС вне мастера → предложение создать оповещение |
-| Текст | Шаблон с плейсхолдерами; примеры `{username}`, `{game}`, `{name}` — [полный список](https://bot.themarfa.name/placeholders?lang=ru). **Очистка названия** — в «Дополнительно» при создании и в меню редактора при правке: убирает из `{name}` `@стримеров` (если канал есть на Twitch) и `!команды` (по умолчанию выкл) |
+| Текст | Шаблон с плейсхолдерами; примеры `{username}`, `{game}`, `{name}` — [полный список](https://twitchbot.games/placeholders?lang=ru). **Очистка названия** — в «Дополнительно» при создании и в меню редактора при правке: убирает из `{name}` `@стримеров` (если канал есть на Twitch) и `!команды` (по умолчанию выкл) |
 | 🎲 Оповещение по игре | В **➕ Новая подписка** (под Drops): поиск стримов или оповещение; категория → фильтры (теги / зрители / язык / 18+) → **realtime или ежечасный дайджест**; live → иначе VOD; в **📋 Мои подписки** — отдельная категория |
 | 📅 Выход релизов | **➕ Новая подписка** → под «Оповещение по игре»; поиск в IGDB (локальный dump, при отсутствии — live API); даты/платформы (если даты нет — создаём всё равно, подтянем позже); за N дней; общий лимит 5 активных; пауза после оповещения по всем выбранным платформам; на карточке для **ru** — «Купить» → https://gglead.org/go22483 |
 | 🎁 Раздачи игр | **➕ Новая подписка** → под «Выход релизов»; магазины + платформы (GamerPower + IsThereAnyDeal); опционально минимальный % скидки (ITAD deals от N%); карточки по 5 (фото+текст, скидка после дат, магазин / стримы, «Показать ещё»); о новых — короткая сводка + «Подробности»; **Оповестить о раздаче** — ждать раздачу/скидку выбранной игры (платформы IGDB + % скидки), затем пауза |
@@ -140,7 +140,7 @@ python main.py
 
 На каждом шаге доступны **« Назад** и **Отмена** (inline); **Главное меню** остаётся на нижней reply-клавиатуре. При редактировании подписки — те же Назад/Отмена.
 
-**Шаблон сообщения** — в мастере показаны примеры `{username}`, `{game}`, `{name}`. Полный список плейсхолдеров (в т.ч. `started_at`, `viewer_count`, `viewer_avg`, `viewer_peak`, `thumbnail_url`, `tags`, `{game_description}`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=ru) (прод: `https://bot.themarfa.name`). **Очистка названия**: при создании — на экране **Дополнительно**; при правке — в меню редактора (те же подписи, что в «Дополнительно»). Включает очистку `{name}` — убираются `@username`, если такой стример есть на Twitch, и команды вида `!команда`. По умолчанию снято.
+**Шаблон сообщения** — в мастере показаны примеры `{username}`, `{game}`, `{name}`. Полный список плейсхолдеров (в т.ч. `started_at`, `viewer_count`, `viewer_avg`, `viewer_peak`, `thumbnail_url`, `tags`, `{game_description}`, …): [`PUBLIC_BASE_URL/placeholders`](https://twitchbot.games/placeholders?lang=ru) (прод: `https://twitchbot.games`). **Очистка названия**: при создании — на экране **Дополнительно**; при правке — в меню редактора (те же подписи, что в «Дополнительно»). Включает очистку `{name}` — убираются `@username`, если такой стример есть на Twitch, и команды вида `!команда`. По умолчанию снято.
 
 
 **Группа или сообщество** — отправьте:
@@ -310,9 +310,9 @@ python main.py
 
 Ручной запуск: Actions → **Deploy VPS** → **Run workflow**.
 
-Публичный HTTPS — **nginx** на VPS (`bot.themarfa.name` → `127.0.0.1:8080`). В `compose.vps.yml` порт бота опубликован только на localhost (`127.0.0.1:8080:8080`), снаружи `:8080` не слушается. Для Mini App nginx задаёт `limit_req` по IP клиента на `/app/` и `/app/chat/api/` (образец: [`deploy/nginx/`](deploy/nginx/)); `/health` и `/health/c/` без лимита (PingZen).
+Публичный HTTPS — **nginx** на VPS (`twitchbot.games` через Cloudflare Proxied → `127.0.0.1:8080`). В `compose.vps.yml` порт бота опубликован только на localhost (`127.0.0.1:8080:8080`), снаружи `:8080` не слушается. Для Mini App nginx задаёт `limit_req` по IP клиента на `/app/` и `/app/chat/api/` (образец: [`deploy/nginx/`](deploy/nginx/)); `/health` и `/health/c/` без лимита (PingZen).
 
-В `.env` на VPS нужны `POSTGRES_PASSWORD` (Postgres из `compose.vps.yml`), `PUBLIC_BASE_URL` для OAuth (например `https://bot.themarfa.name`), и флаги `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (в исходниках по умолчанию выключены). Опционально `AIVEN_DATABASE_URL` — холодное зеркало Postgres на Aiven (бот на него не переключается).
+В `.env` на VPS нужны `POSTGRES_PASSWORD` (Postgres из `compose.vps.yml`), `PUBLIC_BASE_URL` для OAuth (например `https://twitchbot.games`), и флаги `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (в исходниках по умолчанию выключены). Опционально `AIVEN_DATABASE_URL` — холодное зеркало Postgres на Aiven (бот на него не переключается).
 
 ### Локально / Docker
 
@@ -347,7 +347,7 @@ python main.py
 | `PREMIUM_TWITCH_LOGIN` | Twitch-логин для бесплатного Premium за саб (по умолчанию `marfapr`) |
 | `REFERRAL_COMMISSION_PERCENT` | Комиссия партнёра с Stars Premium, % (по умолчанию 10) |
 | `REFERRAL_WITHDRAW_MIN_STARS` | Минимум для заявки на вывод, Stars (по умолчанию 500) |
-| `PUBLIC_BASE_URL` | Публичный HTTPS origin: [лендинг](https://bot.themarfa.name/) (`/`), OAuth (`…/oauth/twitch/callback`), плейсхолдеры (`…/placeholders`), [инструкция](https://bot.themarfa.name/guide?lang=ru) (`…/guide`), [webhook](https://bot.themarfa.name/webhook) (`…/webhook`), sitemap/robots. Прод: `https://bot.themarfa.name` |
+| `PUBLIC_BASE_URL` | Публичный HTTPS origin: [лендинг](https://twitchbot.games/) (`/`), OAuth (`…/oauth/twitch/callback`), плейсхолдеры (`…/placeholders`), [инструкция](https://twitchbot.games/guide?lang=ru) (`…/guide`), [webhook](https://twitchbot.games/webhook) (`…/webhook`), sitemap/robots. Прод: `https://twitchbot.games` |
 | `TOKEN_ENCRYPTION_KEY` | Опционально: Fernet-ключ для refresh token (иначе из `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Порт health/OAuth (по умолчанию 8080) |
 | `DEEPL_API_KEY` | DeepL — авто-перевод админ-рассылок на язык получателя |
@@ -435,7 +435,7 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 
 ## Twitch и конфиденциальность
 
-Бот **не аффилирован** с Twitch Interactive, Inc., не одобрен и не спонсируется ею. Данные Helix используются только для функций бота (оповещения, импорт, расписание, чат и т.д.), не продаются как датасет. Перед OAuth бот показывает краткое privacy-уведомление; подробности: [`/privacy`](https://bot.themarfa.name/privacy?lang=ru).
+Бот **не аффилирован** с Twitch Interactive, Inc., не одобрен и не спонсируется ею. Данные Helix используются только для функций бота (оповещения, импорт, расписание, чат и т.д.), не продаются как датасет. Перед OAuth бот показывает краткое privacy-уведомление; подробности: [`/privacy`](https://twitchbot.games/privacy?lang=ru).
 
 Метаданные игр (случайный подбор, игнор жанров/издателей, обложки, релизы) предоставлены [IGDB.com](https://www.igdb.com) (*Games metadata is powered by IGDB.com*); бот хранит нужные CSV-дампы локально и обновляет их раз в сутки.
 

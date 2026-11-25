@@ -6,4 +6,4 @@ Disallow: /oauth/
 Disallow: /hooks/
 Disallow: /app/
 
-Sitemap: https://bot.themarfa.name/sitemap.xml
+Sitemap: https://twitchbot.games/sitemap.xml

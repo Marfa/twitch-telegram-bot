@@ -542,7 +542,7 @@ flowchart TD
 
 Текст: трудности / оплата / идеи → @immarfa + ваш user id; ссылки Twitch / Telegram / сайт / [статус](https://pingzen.dev/status/bot-themarfa); предложение сначала открыть инструкцию; атрибуция: *Games metadata is powered by* [IGDB.com](https://www.igdb.com) (локальные CSV-дампы, суточный sync; Commercial Addendum).
 
-Inline под сообщением: **`Справка`** → `PUBLIC_BASE_URL/guide?lang=ru` (прод: https://bot.themarfa.name/guide). Если `PUBLIC_BASE_URL` пуст — Reply главное меню (без URL-кнопки).
+Inline под сообщением: **`Справка`** → `PUBLIC_BASE_URL/guide?lang=ru` (прод: https://twitchbot.games/guide). Если `PUBLIC_BASE_URL` пуст — Reply главное меню (без URL-кнопки).
 
 Reply-клавиатура главного меню не сбрасывается (сообщение с Inline). END.
 

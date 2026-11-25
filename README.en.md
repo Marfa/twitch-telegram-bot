@@ -22,7 +22,7 @@
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (GamerPower + ITAD) |
 | Destinations | DM, channel/group/community (with topics), Discord, or a universal HTTPS Webhook (JSON + HMAC) |
 | Twitch channel | Link, `m.twitch.tv`, or username; a link in DM outside a wizard → offer to create an alert |
-| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://bot.themarfa.name/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
+| Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://twitchbot.games/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+) → **realtime or hourly digest**; live → else VOD; own category in **📋 My subscriptions** |
 | 📅 Release alerts | **➕ New subscription** under Game alert; IGDB search (local dump, live API on miss); dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform; on the card for **ru** — “Buy” → https://gglead.org/go22483 |
 | 🎁 Game giveaways | **➕ New subscription** under Release alerts; stores + platforms (GamerPower + IsThereAnyDeal); optional minimum discount % (ITAD deals from N%+); cards 5 at a time (photo+caption, discount after dates, store / streams, “Show more”); new games as a short summary + “Details”; **Notify about giveaway** — wait for a giveaway/discount of a chosen game (IGDB platforms + discount %), then pause |
@@ -140,7 +140,7 @@ For **upcoming stream**, after the channel and schedule check — template and s
 
 Each step has **Back** and **Cancel** (inline); the **Main menu** stays on the bottom reply keyboard. When editing a subscription — the same Back/Cancel.
 
-**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `viewer_avg`, `viewer_peak`, `thumbnail_url`, `tags`, `{game_description}`, …): [`PUBLIC_BASE_URL/placeholders`](https://bot.themarfa.name/placeholders?lang=en) (prod: `https://bot.themarfa.name`). **Clean title**: on create — **Extras**; on edit — edit menu (same labels as Extras). Strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default.
+**Message template** — the wizard shows examples `{username}`, `{game}`, `{name}`. Full placeholder list (including `started_at`, `viewer_count`, `viewer_avg`, `viewer_peak`, `thumbnail_url`, `tags`, `{game_description}`, …): [`PUBLIC_BASE_URL/placeholders`](https://twitchbot.games/placeholders?lang=en) (prod: `https://twitchbot.games`). **Clean title**: on create — **Extras**; on edit — edit menu (same labels as Extras). Strips streamer mentions and commands from `{name}`: removes `@username` when that streamer exists on Twitch, and `!command`-style tokens. Off by default.
 
 
 **Group or community** — send:
@@ -310,9 +310,9 @@ On push to `main`, GitHub Actions SSHs in, runs `git fetch` + `reset --hard orig
 
 Manual run: Actions → **Deploy VPS** → **Run workflow**.
 
-Public HTTPS is terminated by **nginx** on the VPS (`bot.themarfa.name` → `127.0.0.1:8080`). `compose.vps.yml` publishes the bot port on localhost only (`127.0.0.1:8080:8080`); `:8080` is not reachable from the internet. nginx applies per-client `limit_req` on Mini App `/app/` and `/app/chat/api/` (sample: [`deploy/nginx/`](deploy/nginx/)); `/health` and `/health/c/` are unlimited (PingZen).
+Public HTTPS is terminated by **nginx** on the VPS (`twitchbot.games` via Cloudflare Proxied → `127.0.0.1:8080`). `compose.vps.yml` publishes the bot port on localhost only (`127.0.0.1:8080:8080`); `:8080` is not reachable from the internet. nginx applies per-client `limit_req` on Mini App `/app/` and `/app/chat/api/` (sample: [`deploy/nginx/`](deploy/nginx/)); `/health` and `/health/c/` are unlimited (PingZen).
 
-VPS `.env` needs `POSTGRES_PASSWORD` (Postgres via `compose.vps.yml`), `PUBLIC_BASE_URL` for OAuth (e.g. `https://bot.themarfa.name`), and `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (off by default in source). Optional `AIVEN_DATABASE_URL` — cold Postgres mirror on Aiven (the bot does not use it).
+VPS `.env` needs `POSTGRES_PASSWORD` (Postgres via `compose.vps.yml`), `PUBLIC_BASE_URL` for OAuth (e.g. `https://twitchbot.games`), and `ENABLE_PREMIUM=1`, `ENABLE_HELP=1`, `ENABLE_PARTNER=1` (off by default in source). Optional `AIVEN_DATABASE_URL` — cold Postgres mirror on Aiven (the bot does not use it).
 
 ### Local / Docker
 
@@ -347,7 +347,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `PREMIUM_TWITCH_LOGIN` | Twitch login for free Premium via sub (default `marfapr`) |
 | `REFERRAL_COMMISSION_PERCENT` | Partner commission on Stars Premium, % (default 10) |
 | `REFERRAL_WITHDRAW_MIN_STARS` | Minimum withdrawal request, Stars (default 500) |
-| `PUBLIC_BASE_URL` | Public HTTPS origin: [landing](https://bot.themarfa.name/) (`/`), OAuth (`…/oauth/twitch/callback`), placeholders (`…/placeholders`), [user guide](https://bot.themarfa.name/guide?lang=en) (`…/guide`), [webhook](https://bot.themarfa.name/webhook) (`…/webhook`), sitemap/robots. Prod: `https://bot.themarfa.name` |
+| `PUBLIC_BASE_URL` | Public HTTPS origin: [landing](https://twitchbot.games/) (`/`), OAuth (`…/oauth/twitch/callback`), placeholders (`…/placeholders`), [user guide](https://twitchbot.games/guide?lang=en) (`…/guide`), [webhook](https://twitchbot.games/webhook) (`…/webhook`), sitemap/robots. Prod: `https://twitchbot.games` |
 | `TOKEN_ENCRYPTION_KEY` | Optional Fernet key for refresh tokens (else derived from `TELEGRAM_BOT_TOKEN`) |
 | `PORT` | Health/OAuth port (default 8080) |
 | `DEEPL_API_KEY` | DeepL — auto-translate admin broadcasts to recipient language |
@@ -433,7 +433,7 @@ Twitch Helix poll ~60 s, Statuspage (Twitch, PostHog, Cursor, Polylane API) ~120
 
 ## Twitch and privacy
 
-This bot is **not affiliated with**, endorsed by, or sponsored by Twitch Interactive, Inc. Helix data is used only to power bot features (alerts, import, schedule, chat, etc.) and is not sold as a dataset. OAuth prompts include a short privacy notice; details: [`/privacy`](https://bot.themarfa.name/privacy?lang=en).
+This bot is **not affiliated with**, endorsed by, or sponsored by Twitch Interactive, Inc. Helix data is used only to power bot features (alerts, import, schedule, chat, etc.) and is not sold as a dataset. OAuth prompts include a short privacy notice; details: [`/privacy`](https://twitchbot.games/privacy?lang=en).
 
 Games metadata (lucky pick, ignore genres/publishers, covers, releases) is powered by [IGDB.com](https://www.igdb.com); the bot keeps the needed CSV dumps locally and refreshes them about once a day.
 
