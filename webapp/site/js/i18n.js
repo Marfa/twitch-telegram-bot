@@ -17,6 +17,7 @@
       hero_title: "Never miss a stream you care about.",
       hero_cta_bot: "Open in Telegram",
       hero_cta_guide: "Read the guide",
+      hero_scroll: "Scroll Down",
       about_title: "What the bot does",
       about_lead:
         "Pick a Twitch channel, choose when to notify, and where to send it. The bot watches Helix and delivers the message you configured — DM, channel, Discord, or a signed webhook.",
@@ -104,6 +105,7 @@
       hero_title: "Не пропустите стрим, который ждёте.",
       hero_cta_bot: "Открыть в Telegram",
       hero_cta_guide: "Читать инструкцию",
+      hero_scroll: "Листайте вниз",
       about_title: "Что умеет бот",
       about_lead:
         "Выберите канал Twitch, момент оповещения и куда слать. Бот смотрит Helix и доставляет сообщение туда, куда вы указали — в личку, канал, Discord или подписанный webhook.",
@@ -191,6 +193,7 @@
       hero_title: "Не пропустіть стрім, на який чекаєте.",
       hero_cta_bot: "Відкрити в Telegram",
       hero_cta_guide: "Читати інструкцію",
+      hero_scroll: "Гортайте вниз",
       about_title: "Що вміє бот",
       about_lead:
         "Оберіть канал Twitch, момент сповіщення і куди надсилати. Бот стежить за Helix і доставляє повідомлення туди, куди ви вказали.",
@@ -278,6 +281,7 @@
       hero_title: "Non perdere lo stream che aspetti.",
       hero_cta_bot: "Apri in Telegram",
       hero_cta_guide: "Leggi la guida",
+      hero_scroll: "Scorri in basso",
       about_title: "Cosa fa il bot",
       about_lead:
         "Scegli un canale Twitch, quando avvisare e dove inviare. Il bot guarda Helix e consegna il messaggio dove indichi tu.",
