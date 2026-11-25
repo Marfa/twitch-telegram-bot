@@ -474,6 +474,18 @@ def check_db_premium() -> None:
         assert fm_rest.needs_reauth is False and fm_rest.refresh_token == "fmtok2"
         assert fm_rest.notify_follow is True and fm_rest.notify_unfollow is True
         assert db.count_follow_monitor_events(21, event_type="follow") == 1
+        # fan_out upserts users — drop owner 21 so later count_new_users_since stays 1.
+        with db._conn() as conn:
+            for table in (
+                "follow_monitor_events",
+                "follow_monitor_followers",
+                "follow_monitor",
+                "twitch_sync",
+                "whisper_alerts",
+                "chat_auth",
+            ):
+                conn.execute(f"DELETE FROM {table} WHERE owner_id = 21")
+            conn.execute("DELETE FROM users WHERE user_id = 21")
         from token_crypto import encrypt_secret, decrypt_secret, try_decrypt_secret
 
         assert decrypt_secret(encrypt_secret("secret-token")) == "secret-token"
