@@ -92,6 +92,7 @@
   "topics_support_delete_ask": "Topics will be disabled. Alerts go to the main chat again.\n\nDelete the Telegram topics too? Message history in them will be lost.",
   "topics_support_delete_yes": "🗑 Delete topics",
   "topics_support_delete_no": "Keep topics, just disable",
+  "topics_support_delete_failed": "⚠️ Topics disabled, but Telegram kept some topics. Turn topic support on and off again to retry deleting them.",
   "topics_support_create_failed": "Could not create topics. Try again later.",
   "topics_intro": "The bot now supports topics. Stream alerts can go to a matching topic by type. With Premium Advanced options you can also create a private-chat topic per streamer (up to 5).\n\nEnable topics now? You can change this later in Settings → Bot settings → Topic support.",
   "topic_name_live": "Live",
