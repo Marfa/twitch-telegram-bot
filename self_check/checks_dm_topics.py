@@ -6,6 +6,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from telegram.error import BadRequest, NetworkError
+
 from bot_helpers import send_reply_keyboard_menu
 from dm_topics import (
     GENERAL_TOPIC_ID,
@@ -460,16 +462,40 @@ async def _check_delete_all_user_forum_topics(bot) -> None:
         ]
     )
     assert user_has_stored_forum_topics(db, 7) is True
-    db.clear_user_topic_threads = MagicMock()
+    db.clear_user_topic_thread = MagicMock()
     db.get_streamer_topic = MagicMock(
         return_value={"message_thread_id": 20, "twitch_user_id": "uid1"}
     )
     db.delete_streamer_topic = MagicMock()
+    db.set_streamer_topic_enabled = MagicMock()
     bot.delete_forum_topic = AsyncMock()
-    await delete_all_user_forum_topics(bot, db, 7)
+    failed = await delete_all_user_forum_topics(bot, db, 7)
+    assert failed == []
     assert bot.delete_forum_topic.await_count >= 2
-    db.clear_user_topic_threads.assert_called_once_with(7)
+    db.clear_user_topic_thread.assert_called_once_with(7, "live")
     db.delete_streamer_topic.assert_called_once_with(7, "uid1")
+
+    # A topic Telegram no longer has counts as deleted, so its stale id is dropped.
+    db.clear_user_topic_thread.reset_mock()
+    db.delete_streamer_topic.reset_mock()
+    bot.delete_forum_topic = AsyncMock(
+        side_effect=BadRequest("Message thread not found")
+    )
+    failed = await delete_all_user_forum_topics(bot, db, 7)
+    assert failed == []
+    db.clear_user_topic_thread.assert_called_once_with(7, "live")
+    db.delete_streamer_topic.assert_called_once_with(7, "uid1")
+
+    # A transient refusal keeps every stored thread id and reports the failures,
+    # so the settings flow can offer the delete again instead of claiming it.
+    db.clear_user_topic_thread.reset_mock()
+    db.delete_streamer_topic.reset_mock()
+    bot.delete_forum_topic = AsyncMock(side_effect=NetworkError("timed out"))
+    failed = await delete_all_user_forum_topics(bot, db, 7)
+    assert failed == ["live", "uid1"]
+    db.clear_user_topic_thread.assert_not_called()
+    db.delete_streamer_topic.assert_not_called()
+    db.set_streamer_topic_enabled.assert_called_once_with(7, "uid1", False)
 
     db.get_user_topic_thread = MagicMock(return_value=None)
     db.list_streamer_topics = MagicMock(return_value=[])

@@ -4690,6 +4690,17 @@ owner_id, twitch_username, twitch_user_id,
                 (user_id, topic_key, int(message_thread_id)),
             )
 
+    def clear_user_topic_thread(self, user_id: int, topic_key: str) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                DELETE FROM user_topic_threads
+                WHERE user_id = %s AND topic_key = %s
+                """,
+                (user_id, topic_key),
+            )
+
     def clear_user_topic_threads(self, user_id: int) -> None:
         with self._conn() as conn:
             cur = self._cursor(conn)

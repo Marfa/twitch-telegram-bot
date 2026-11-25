@@ -13,6 +13,12 @@ from telegram.error import BadRequest, TelegramError
 
 logger = logging.getLogger(__name__)
 
+
+def _topic_already_gone(exc: BaseException) -> bool:
+    """True when Telegram says the forum topic no longer exists."""
+    err = str(exc).lower()
+    return "thread not found" in err or "topic_id_invalid" in err
+
 # Product topic keys ↔ createForumTopic names (via i18n topic_name_*).
 TOPIC_KEYS: tuple[str, ...] = (
     "live",
@@ -447,8 +453,11 @@ async def ensure_streamer_topic(
 async def delete_streamer_forum_topic(
     bot, db, user_id: int, twitch_user_id: str
 ) -> bool:
-    """deleteForumTopic + clear DB row. Returns True if Telegram delete succeeded
-    or there was no thread to delete.
+    """deleteForumTopic + clear DB row.
+
+    Returns True when Telegram deleted the topic or the topic no longer exists,
+    and False when Telegram refused a topic that still exists; a refusal keeps
+    the stored thread id so the next attempt can reach it.
     """
     tid = str(twitch_user_id or "").strip()
     if not tid:
@@ -460,7 +469,6 @@ async def delete_streamer_forum_topic(
             thread_id = int(existing["message_thread_id"])
         except (TypeError, ValueError):
             thread_id = None
-    ok = True
     if thread_id is not None:
         try:
             await bot.delete_forum_topic(
@@ -474,9 +482,13 @@ async def delete_streamer_forum_topic(
                 thread_id,
                 exc,
             )
-            ok = False
+            if not _topic_already_gone(exc):
+                # Telegram kept the topic: stop routing to it and keep its
+                # thread id so the next delete attempt can reach it.
+                db.set_streamer_topic_enabled(user_id, tid, False)
+                return False
     db.delete_streamer_topic(user_id, tid)
-    return ok
+    return True
 
 
 async def disable_streamer_topic(
@@ -507,8 +519,14 @@ def user_has_stored_forum_topics(db, user_id: int) -> bool:
     return False
 
 
-async def delete_all_user_forum_topics(bot, db, user_id: int) -> None:
-    """Remove all alert-type and streamer forum topics in Telegram + clear DB."""
+async def delete_all_user_forum_topics(bot, db, user_id: int) -> list[str]:
+    """Remove all alert-type and streamer forum topics in Telegram + clear DB.
+
+    Returns the topic keys and streamer ids whose Telegram delete failed. Only a
+    topic that is gone from Telegram loses its stored thread id, so a topic that
+    Telegram refused stays reachable for the next attempt.
+    """
+    failed: list[str] = []
     for key in TOPIC_KEYS:
         existing = db.get_user_topic_thread(user_id, key)
         if existing is None:
@@ -529,12 +547,16 @@ async def delete_all_user_forum_topics(bot, db, user_id: int) -> None:
                 thread_id,
                 exc,
             )
+            if not _topic_already_gone(exc):
+                failed.append(key)
+                continue
         _icons_applied.discard((int(user_id), key))
-    db.clear_user_topic_threads(user_id)
+        db.clear_user_topic_thread(user_id, key)
     for row in list(db.list_streamer_topics(user_id)):
         tid = str(row.get("twitch_user_id") or "").strip()
-        if tid:
-            await delete_streamer_forum_topic(bot, db, user_id, tid)
+        if tid and not await delete_streamer_forum_topic(bot, db, user_id, tid):
+            failed.append(tid)
+    return failed
 
 
 async def resolve_alert_thread_id(

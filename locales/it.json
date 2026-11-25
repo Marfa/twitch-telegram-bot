@@ -92,6 +92,7 @@
   "topics_support_delete_ask": "I topic verranno disattivati. Gli avvisi torneranno nella chat principale.\n\nEliminare anche i topic su Telegram? La cronologia dei messaggi andrà persa.",
   "topics_support_delete_yes": "🗑 Elimina topic",
   "topics_support_delete_no": "Tieni i topic, solo disattiva",
+  "topics_support_delete_failed": "⚠️ Topic disattivati, ma alcuni topic sono rimasti in Telegram. Riattiva e disattiva di nuovo il supporto ai topic per riprovare a eliminarli.",
   "topics_support_create_failed": "Impossibile creare i topic. Riprova più tardi.",
   "topics_intro": "Il bot ora supporta i topic. Gli avvisi sugli stream possono andare nel topic corrispondente per tipo. Con le opzioni avanzate Premium puoi anche creare un topic in chat privata per streamer (fino a 5).\n\nAttivare i topic ora? Puoi cambiarlo in Impostazioni → Impostazioni bot → Supporto topic.",
   "topic_name_live": "Live",

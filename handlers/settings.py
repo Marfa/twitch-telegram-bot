@@ -437,8 +437,11 @@ async def on_topics_delete_choice(
     delete_topics = data.endswith("_yes")
     db.set_topics_enabled(user_id, False)
     if delete_topics:
-        await delete_all_user_forum_topics(context.bot, db, user_id)
-        text = t("topics_support_off_deleted", lang)
+        failed = await delete_all_user_forum_topics(context.bot, db, user_id)
+        text = t(
+            "topics_support_delete_failed" if failed else "topics_support_off_deleted",
+            lang,
+        )
     else:
         text = t("topics_support_off", lang)
     cb = "topics:intro_toggle" if from_intro else "topics:toggle"
