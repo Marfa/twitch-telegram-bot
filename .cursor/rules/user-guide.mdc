@@ -7,7 +7,7 @@ alwaysApply: false
 # User guide (`/guide`)
 
 Files: [`webapp/guide/ru.html`](webapp/guide/ru.html), [`webapp/guide/en.html`](webapp/guide/en.html)  
-Served at `PUBLIC_BASE_URL/guide?lang=ru|en` (prod: https://bot.themarfa.name/guide).  
+Served at `PUBLIC_BASE_URL/guide?lang=ru|en` (prod: https://twitchbot.games/guide).  
 Entry from bot: **❓ Помощь** / `/feedback` → inline **Справка** / **Guide**.
 
 ## When to update

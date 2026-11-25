@@ -50,6 +50,16 @@ Device sync = `git pull` of ciphertext + Bitwarden for the private key. No Resil
 
 **Bitwarden item title:** native name is `dotenvx (02A 49E)`-style (short public key). Do **not** rename to `DOTENV_PRIVATE_KEY` — that string is only the field in `.env.keys` / env. `bitwarden pull` needs a **local custody UUID** from a prior `bitwarden up` on this machine; otherwise `bw get password <item-id>` → `.env.keys` (never print the key). After UI vault edits: `bw sync`.
 
+## Keep `.env` current (domain / public URLs)
+
+After any cutover of the public origin (or when `PUBLIC_BASE_URL` / related callback hosts change in prod):
+
+1. **Local encrypted `.env` must match** the live canonical origin — do not leave an old host in `PUBLIC_BASE_URL` after git pull / deploy.
+2. Set with `dotenvx set PUBLIC_BASE_URL "https://<canonical-origin>"` (today: `https://twitchbot.games`), then commit/push ciphertext when other devices need it.
+3. Confirm decrypt when Bitwarden is unlocked (`dotenvx get PUBLIC_BASE_URL` → exact apex HTTPS, no trailing slash). If vault is locked and decrypt fails, still `dotenvx set` the correct value and ask the user to unlock/verify.
+4. Same turn: VPS plaintext `.env` + bot recreate if the key is already in prod (see [`twitch-client-secret.mdc`](twitch-client-secret.mdc)).
+5. Treat stale `PUBLIC_BASE_URL` as a bug: OAuth redirects, guide links, DA/Twitch callbacks, sitemap/robots canonical all derive from it.
+
 ## Agent must — day-to-day
 
 1. Load only via `dotenv_loader` / `config.py` — no second parser.
@@ -66,6 +76,7 @@ Device sync = `git pull` of ciphertext + Bitwarden for the private key. No Resil
 7. After first encrypt / rotate: `export BW_SESSION="$(bw unlock --raw)"` → `dotenvx bitwarden up` (removes `.env.keys`). Remind the user if `.env.keys` is still on disk.
 8. Refuse committing `.env.keys`, plaintext secrets, `BW_SESSION`. Log only counts/prefixes/lengths.
 9. Docker: no `.env` / `.env.keys` in the image (`.dockerignore`). Never treat git ciphertext as VPS runtime env.
+10. After domain / `PUBLIC_BASE_URL` changes: keep local + VPS `.env` in sync (section above) — do not leave old hosts.
 
 ## Agent must — second PC / new clone
 

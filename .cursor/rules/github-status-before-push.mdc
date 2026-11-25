@@ -22,7 +22,7 @@ Before every `git push` (and before `gh workflow run` that depends on Actions ru
 
 Deploy already rolls back when `/health` does not become ready (`scripts/vps-deploy.sh`). That does **not** mean production is fine while Actions still shows Running/queued.
 
-On any half-deploy, crash-loop, or 502/503 on `https://bot.themarfa.name/health`:
+On any half-deploy, crash-loop, or 502/503 on `https://twitchbot.games/health`:
 
 1. Inspect the live container immediately — `docker compose -f compose.vps.yml logs --tail=80 bot` (via HostKey/SSH). Do **not** wait for a green Actions run.
 2. Fix or roll forward on the VPS; treat Actions UI as advisory during a GitHub outage.
