@@ -1140,7 +1140,7 @@ def check_core() -> None:
     # First alert: placeholder MP4 + background upgrade (not blocking ~30s capture).
     import handlers.delivery as _delivery
 
-    _send_src = _inspect.getsource(_delivery._send_notification)
+    _send_src = _inspect.getsource(_delivery._send_notification_inner)
     assert "build_preview_placeholder_mp4" in _send_src
     assert "peek_shared_preview" in _send_src
     assert "schedule_preview_upgrade" in _send_src

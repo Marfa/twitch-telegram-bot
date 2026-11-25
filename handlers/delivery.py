@@ -11,7 +11,7 @@ from typing import Any
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, WebAppInfo
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter
 
 import analytics
 import metrics
@@ -2001,6 +2001,47 @@ def _delivery_log_extra(
 
 
 async def _send_notification(
+    bot,
+    db: Database,
+    sub: Subscription,
+    text: str,
+    *args,
+    **kwargs,
+) -> bool:
+    """Deliver one alert; a Telegram transport error stays that destination's failure.
+
+    ``check_streams`` calls this once per subscription with no ``try`` of its own,
+    so an unreachable chat must come back as ``False`` instead of ending the tick.
+    """
+    started = time.monotonic()
+    try:
+        return await _send_notification_inner(bot, db, sub, text, *args, **kwargs)
+    except NetworkError as exc:
+        # BadRequest subclasses NetworkError in PTB — leave that path to the inner
+        # handler (unreachable / typo / parse). TimedOut stays here as transport.
+        if isinstance(exc, BadRequest):
+            raise
+        # The alert may already be delivered, so the send is not repeated.
+        alert_type = str(kwargs.get("alert_type") or "live")
+        logger.warning(
+            "Cannot reach %s: %s",
+            sub.chat_id,
+            exc,
+            extra=_delivery_log_extra(
+                sub,
+                alert_type=alert_type,
+                outcome="failed",
+                stream_id=str(kwargs.get("stream_id") or ""),
+                duration_ms=int((time.monotonic() - started) * 1000),
+            ),
+        )
+        metrics.record_alert_delivery(
+            alert_type=alert_type, dest_type=sub.dest_type, outcome="failed"
+        )
+        return False
+
+
+async def _send_notification_inner(
     bot,
     db: Database,
     sub: Subscription,
