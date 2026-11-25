@@ -212,8 +212,26 @@ def run() -> None:
 
     asyncio.run(_check_topic_icons())
     asyncio.run(_check_menu_keyboard_goes_to_general())
+    _check_coerce_accepts_any_locale_main()
     _check_private_ui_general_gate()
     asyncio.run(_check_reply_text_from_topic_goes_to_general())
+
+
+def _check_coerce_accepts_any_locale_main() -> None:
+    """Pulse without lang= must keep a non-English main_menu sticky."""
+    from bot_helpers import _coerce_main_reply_keyboard, _menu
+
+    ru = _menu("ru", 7)
+    with patch("bot_helpers.logger") as log:
+        out = _coerce_main_reply_keyboard(ru, chat_id=7)
+        assert out is ru or out.keyboard == ru.keyboard
+        log.warning.assert_not_called()
+
+        coerced = _coerce_main_reply_keyboard(
+            other_menu("ru"), chat_id=7, user_id=7, lang="ru"
+        )
+        assert coerced.keyboard == _menu("ru", 7).keyboard
+        log.warning.assert_called_once()
 
 
 async def _check_menu_keyboard_goes_to_general() -> None:
