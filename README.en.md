@@ -357,6 +357,7 @@ Leave `DATABASE_URL` unset — SQLite is used (`DATABASE_PATH`, volume in `compo
 | `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback on CAPS / NOT_ENOUGH_TOKENS error code (default `gemini-2.5-flash-image`; empty = no fallback) |
 | `ISTHEREANYDEAL_API_KEY` | (opt.) IsThereAnyDeal game giveaways; without it only GamerPower is used |
 | `YOUTUBE_API_KEY` | (opt.) YouTube Data API v3 — Multistream live checks (Google Cloud → API key) |
+| `YOUTUBE_SEARCH_CALLS_PER_DAY` | YouTube search calls a day shared by all polled channels, default 90 (`search.list` costs 100 quota units) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Preview/MP4 refresh interval while live (default 1800) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Analytics off if unset |
 | `POSTHOG_HOST` | Ingestion host (default `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |

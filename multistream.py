@@ -4,13 +4,15 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 
-from config import YOUTUBE_API_KEY
+from config import YOUTUBE_API_KEY, YOUTUBE_SEARCH_CALLS_PER_DAY
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +226,7 @@ def all_channels_online(channels: list[MultistreamChannel]) -> bool:
         return True
     for ch in channels:
         try:
-            if not _is_online(ch):
+            if not _is_online(ch, fresh=True):
                 return False
         except Exception:
             logger.exception(
@@ -279,7 +281,7 @@ def multistream_placeholders(
             out[url_key] = _canonical_stream_url(ch)
             continue
         try:
-            online, stream_url = _live_state(ch)
+            online, stream_url = _live_state(ch, fresh=True)
         except Exception:
             logger.exception(
                 "Multistream placeholder failed platform=%s id=%s",
@@ -302,15 +304,19 @@ def _canonical_stream_url(ch: MultistreamChannel) -> str:
     return (ch.url or "").strip()
 
 
-def _live_state(ch: MultistreamChannel) -> tuple[bool, str]:
-    """Return (online, current_stream_url). URL falls back to canonical live page."""
+def _live_state(ch: MultistreamChannel, *, fresh: bool = False) -> tuple[bool, str]:
+    """Return (online, current_stream_url). URL falls back to canonical live page.
+
+    ``fresh`` asks for a new probe instead of the cached YouTube answer, for a
+    one-shot decision such as the multistream gate.
+    """
     canon = _canonical_stream_url(ch)
     if ch.platform == "goodgame":
         return _goodgame_online(ch.channel_id), canon
     if ch.platform == "vkplay":
         return _vkplay_online(ch.channel_id), canon
     if ch.platform == "youtube":
-        video_id = _youtube_live_video_id(ch.channel_id)
+        video_id = _youtube_live_video_id(ch.channel_id, fresh=fresh)
         if video_id:
             return True, f"https://www.youtube.com/watch?v={video_id}"
         return False, canon
@@ -320,9 +326,9 @@ def _live_state(ch: MultistreamChannel) -> tuple[bool, str]:
     return False, canon
 
 
-def _is_online(ch: MultistreamChannel) -> bool:
+def _is_online(ch: MultistreamChannel, *, fresh: bool = False) -> bool:
     try:
-        online, _ = _live_state(ch)
+        online, _ = _live_state(ch, fresh=fresh)
         return online
     except Exception:
         return False
@@ -437,11 +443,102 @@ def _parse_youtube(parsed, raw: str) -> MultistreamChannel | None:
     )
 
 
+# search.list costs 100 units, so the default 10,000-unit day allows about 100
+# search calls; the alert poll reuses a channel's last answer to stay inside it.
+_YOUTUBE_SEARCH_WINDOW_SEC = 86400.0
+_YOUTUBE_LIVE_PROBE_MIN_INTERVAL_SEC = 600.0
+# A 429 means the project quota is spent: retry with a growing pause and keep
+# the last known state meanwhile.
+_YOUTUBE_QUOTA_PAUSE_SEC = 900.0
+_YOUTUBE_QUOTA_PAUSE_MAX_SEC = 21600.0
+
+
+class YouTubeSearchQuotaExhausted(RuntimeError):
+    """The YouTube search allowance has no room for another call right now."""
+
+
+class YouTubeSearchBudget:
+    """Rolling one-day window over the YouTube search calls this process makes.
+
+    search.list spends a large share of the daily project quota, so the calls
+    are counted over a rolling 24 hours; any calendar day then also stays under
+    the allowance, without reading the provider's Pacific-midnight reset.
+    ``spend`` refuses the call before the network request, and a 429 pauses the
+    window so a spent quota is not asked again every poll tick.
+    """
+
+    def __init__(self) -> None:
+        self._calls: deque[float] = deque()
+        self._pause_until = 0.0
+        self._consecutive_429 = 0
+
+    def _forget_old(self, now: float) -> None:
+        horizon = now - _YOUTUBE_SEARCH_WINDOW_SEC
+        while self._calls and self._calls[0] <= horizon:
+            self._calls.popleft()
+
+    def wait_seconds(self, limit: int) -> float:
+        """Seconds until one more call fits in the window; 0 when it fits now."""
+        now = time.monotonic()
+        if self._pause_until > now:
+            return self._pause_until - now
+        self._forget_old(now)
+        if len(self._calls) < max(1, limit):
+            return 0.0
+        return max(0.001, self._calls[0] + _YOUTUBE_SEARCH_WINDOW_SEC - now)
+
+    def spend(self, limit: int) -> None:
+        wait = self.wait_seconds(limit)
+        if wait > 0:
+            raise YouTubeSearchQuotaExhausted(
+                f"YouTube search allowance spent: {len(self._calls)} call(s) "
+                f"in 24h, room in {wait:.0f}s"
+            )
+        self._calls.append(time.monotonic())
+
+    def succeeded(self) -> None:
+        self._consecutive_429 = 0
+        self._pause_until = 0.0
+
+    def got_429(self) -> None:
+        self._consecutive_429 += 1
+        pause = min(
+            _YOUTUBE_QUOTA_PAUSE_MAX_SEC,
+            _YOUTUBE_QUOTA_PAUSE_SEC * (2 ** (self._consecutive_429 - 1)),
+        )
+        self._pause_until = time.monotonic() + pause
+        logger.warning(
+            "YouTube search quota 429 — pausing search probes for %.0fs", pause
+        )
+
+
+youtube_search_budget = YouTubeSearchBudget()
+# channel id -> (monotonic probe time, live video id, or None when offline)
+youtube_live_cache: dict[str, tuple[float, str | None]] = {}
+# channel id -> monotonic time of its latest probe request, for the interval
+_youtube_live_seen: dict[str, float] = {}
+
+
+def youtube_live_probe_interval(now: float) -> float:
+    """Seconds between probes of one channel so the allowance covers them all."""
+    horizon = now - _YOUTUBE_SEARCH_WINDOW_SEC
+    for cid, seen in list(_youtube_live_seen.items()):
+        if seen < horizon:
+            del _youtube_live_seen[cid]
+    channels = max(1, len(_youtube_live_seen))
+    per_channel = _YOUTUBE_SEARCH_WINDOW_SEC * channels / max(
+        1, YOUTUBE_SEARCH_CALLS_PER_DAY
+    )
+    return max(_YOUTUBE_LIVE_PROBE_MIN_INTERVAL_SEC, per_channel)
+
+
 def _youtube_api_get(path: str, params: dict[str, Any]) -> dict[str, Any] | None:
     key = (YOUTUBE_API_KEY or "").strip()
     if not key:
         logger.warning("YOUTUBE_API_KEY unset — cannot resolve/check YouTube multistream")
         return None
+    if path == "search":
+        youtube_search_budget.spend(YOUTUBE_SEARCH_CALLS_PER_DAY)
     params = dict(params)
     params["key"] = key
     try:
@@ -457,7 +554,11 @@ def _youtube_api_get(path: str, params: dict[str, Any]) -> dict[str, Any] | None
                 resp.status_code,
                 (resp.text or "")[:200],
             )
+            if path == "search" and resp.status_code == 429:
+                youtube_search_budget.got_429()
             return None
+        if path == "search":
+            youtube_search_budget.succeeded()
         data = resp.json()
         return data if isinstance(data, dict) else None
     except Exception:
@@ -491,15 +592,21 @@ def _youtube_resolve_username(username: str) -> str | None:
 
 def _youtube_resolve_for_custom(custom: str) -> str | None:
     # Best-effort: search channels by exact custom URL name.
-    data = _youtube_api_get(
-        "search",
-        {
-            "part": "snippet",
-            "type": "channel",
-            "q": custom,
-            "maxResults": 5,
-        },
-    )
+    try:
+        data = _youtube_api_get(
+            "search",
+            {
+                "part": "snippet",
+                "type": "channel",
+                "q": custom,
+                "maxResults": 5,
+            },
+        )
+    except YouTubeSearchQuotaExhausted:
+        logger.warning(
+            "YouTube search allowance spent — cannot resolve custom URL %s", custom
+        )
+        return None
     for item in (data or {}).get("items") or []:
         if not isinstance(item, dict):
             continue
@@ -589,28 +696,46 @@ def _vkplay_online(slug: str) -> bool:
     return False
 
 
-def _youtube_live_video_id(channel_id: str) -> str | None:
+def _youtube_live_video_id(channel_id: str, *, fresh: bool = False) -> str | None:
     """Return live video id, or None when the channel is offline.
 
-    Raises when the YouTube API call fails so live-alert polling can keep the
-    previous state instead of treating a blip as offline.
+    Reuses the last answer for `youtube_live_probe_interval` seconds so the
+    daily search allowance covers every channel the bot polls. Raises when the
+    YouTube API call fails so live-alert polling can keep the previous state
+    instead of treating a blip as offline.
     """
-    data = _youtube_api_get(
-        "search",
-        {
-            "part": "snippet",
-            "channelId": channel_id,
-            "type": "video",
-            "eventType": "live",
-            "maxResults": 1,
-        },
-    )
+    now = time.monotonic()
+    _youtube_live_seen[channel_id] = now
+    cached = youtube_live_cache.get(channel_id)
+    if (
+        not fresh
+        and cached is not None
+        and now - cached[0] < youtube_live_probe_interval(now)
+    ):
+        return cached[1]
+    try:
+        data = _youtube_api_get(
+            "search",
+            {
+                "part": "snippet",
+                "channelId": channel_id,
+                "type": "video",
+                "eventType": "live",
+                "maxResults": 1,
+            },
+        )
+    except YouTubeSearchQuotaExhausted as exc:
+        if cached is not None:
+            logger.debug("YouTube live probe deferred for %s: %s", channel_id, exc)
+            return cached[1]
+        raise RuntimeError("YouTube live probe deferred") from exc
     if data is None:
         raise RuntimeError("YouTube live probe failed")
     items = data.get("items") or []
-    if not items or not isinstance(items[0], dict):
-        return None
-    vid = str((items[0].get("id") or {}).get("videoId") or "").strip()
+    vid = ""
+    if items and isinstance(items[0], dict):
+        vid = str((items[0].get("id") or {}).get("videoId") or "").strip()
+    youtube_live_cache[channel_id] = (time.monotonic(), vid or None)
     return vid or None
 
 
