@@ -25,9 +25,13 @@ _TITLE_RE = re.compile(
     r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL
 )
 
+# Primary Telegram username; landing CTAs append ?start=site for PostHog.
+BOT_TELEGRAM_PRIMARY = "https://t.me/twitchbot_game"
+BOT_TELEGRAM_FROM_SITE = f"{BOT_TELEGRAM_PRIMARY}?start=site"
+
 _UI = {
     "en": {
-        "brand": "Twitch → Telegram",
+        "brand": "Twitch X Telegram",
         "nav_home": "Home",
         "nav_guide": "Guide",
         "nav_webhook": "Webhook",
@@ -47,7 +51,7 @@ _UI = {
         "footer_github": "GitHub",
         "footer_donate": "Donate",
         "footer_crypto": "Crypto donate",
-        "footer_copy": "© Marfa — Twitch → Telegram bot",
+        "footer_copy": "© Marfa — Twitch X Telegram",
         "footer_design": "Design by",
         "guide_hero": "User guide",
         "guide_lead": "How to set up alerts, destinations, Premium, and everyday menus.",
@@ -55,7 +59,7 @@ _UI = {
         "webhook_lead": "HTTPS JSON delivery contract with HMAC for integrators.",
     },
     "ru": {
-        "brand": "Twitch → Telegram",
+        "brand": "Twitch X Telegram",
         "nav_home": "Главная",
         "nav_guide": "Инструкция",
         "nav_webhook": "Webhook",
@@ -75,7 +79,7 @@ _UI = {
         "footer_github": "GitHub",
         "footer_donate": "Донат",
         "footer_crypto": "Донат криптой",
-        "footer_copy": "© Marfa — Twitch → Telegram бот",
+        "footer_copy": "© Marfa — Twitch X Telegram",
         "footer_design": "Дизайн",
         "guide_hero": "Инструкция",
         "guide_lead": "Как настроить оповещения, куда слать, Premium и повседневные меню.",
@@ -83,7 +87,7 @@ _UI = {
         "webhook_lead": "Контракт HTTPS JSON + HMAC для интеграторов.",
     },
     "uk": {
-        "brand": "Twitch → Telegram",
+        "brand": "Twitch X Telegram",
         "nav_home": "Головна",
         "nav_guide": "Інструкція",
         "nav_webhook": "Webhook",
@@ -103,7 +107,7 @@ _UI = {
         "footer_github": "GitHub",
         "footer_donate": "Донат",
         "footer_crypto": "Донат криптою",
-        "footer_copy": "© Marfa — Twitch → Telegram бот",
+        "footer_copy": "© Marfa — Twitch X Telegram",
         "footer_design": "Дизайн",
         "guide_hero": "Інструкція",
         "guide_lead": "Як налаштувати сповіщення, куди надсилати, Premium і меню.",
@@ -111,7 +115,7 @@ _UI = {
         "webhook_lead": "Контракт HTTPS JSON + HMAC для інтеграторів.",
     },
     "it": {
-        "brand": "Twitch → Telegram",
+        "brand": "Twitch X Telegram",
         "nav_home": "Home",
         "nav_guide": "Guida",
         "nav_webhook": "Webhook",
@@ -131,7 +135,7 @@ _UI = {
         "footer_github": "GitHub",
         "footer_donate": "Donazione",
         "footer_crypto": "Donazione crypto",
-        "footer_copy": "© Marfa — bot Twitch → Telegram",
+        "footer_copy": "© Marfa — Twitch X Telegram",
         "footer_design": "Design di",
         "guide_hero": "Guida",
         "guide_lead": "Come configurare avvisi, destinazioni, Premium e i menu.",
@@ -354,7 +358,7 @@ def wrap_doc_page(
       <li{nav["webhook"]}><a href="/webhook?lang={esc(lang)}">{esc(u["nav_webhook"])}</a></li>
     </ul>
     {switch}
-    <a href="https://t.me/twitch2telegram_bot" class="button button-primary cta">{esc(u["nav_start"])}</a>
+    <a href="{esc(BOT_TELEGRAM_FROM_SITE)}" class="button button-primary cta">{esc(u["nav_start"])}</a>
   </nav>
   <a class="header-menu-toggle" href="#"><span>Menu</span></a>
 </header>

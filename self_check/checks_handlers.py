@@ -48,6 +48,7 @@ from bot import (
     _parse_segment_start,
     _parse_watch_viewers,
     _premium_gate_text,
+    _start_arg_kind,
     _twitch_vod_url,
     _vod_id_from_videos,
     _watch_channel_refs,
@@ -896,6 +897,10 @@ def check_handlers() -> None:
         assert db.get_user_start_arg(20) == "referral"
         db.set_user_start_arg(20, "share")
         assert db.get_user_start_arg(20) == "share"
+        assert _start_arg_kind(["site"]) == "website"
+        assert _start_arg_kind(["ref_1"]) == "referral"
+        assert _start_arg_kind(None) == ""
+        assert _start_arg_kind([]) == ""
         apply_stars_payment(
             db, 20, charge_id="pay1", until_unix=10**12, stars_paid=100
         )

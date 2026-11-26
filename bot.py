@@ -1191,6 +1191,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "start_arg": start_arg,
         "is_first_start": is_first_start,
     }
+    if start_arg == "website":
+        started_props["from_website"] = True
     if topics_variant is not None:
         started_props["topics_default_variant"] = topics_variant
     analytics.capture(user_id, "bot_started", started_props)
@@ -1209,6 +1211,9 @@ def _start_arg_kind(args: list[str] | None) -> str:
     if not args:
         return ""
     raw = (args[0] or "").strip()
+    # Landing CTAs use https://t.me/<bot>?start=site
+    if raw == "site":
+        return "website"
     if raw.startswith("ref_"):
         return "referral"
     if raw.startswith("share_"):

@@ -5,7 +5,7 @@
 
   var STRINGS = {
     en: {
-      meta_title: "Twitch → Telegram bot — stream alerts",
+      meta_title: "Twitch X Telegram — stream alerts",
       meta_desc:
         "Get Twitch live, category, schedule, and end-of-stream alerts in Telegram, Discord, or your HTTPS webhook. Free plan + Premium Stars.",
       nav_home: "Home",
@@ -88,12 +88,12 @@
       footer_github: "GitHub",
       footer_donate: "Donate",
       footer_crypto: "Crypto donate",
-      footer_copy: "© Marfa — Twitch → Telegram bot",
+      footer_copy: "© Marfa — Twitch X Telegram",
       footer_design: "Design by",
       doc_back: "Home",
     },
     ru: {
-      meta_title: "Twitch → Telegram бот — оповещения о стримах",
+      meta_title: "Twitch X Telegram — оповещения о стримах",
       meta_desc:
         "Оповещения о старте, смене категории, расписании и конце стрима Twitch в Telegram, Discord или на ваш HTTPS webhook. Бесплатно и Premium за Stars.",
       nav_home: "Главная",
@@ -176,12 +176,12 @@
       footer_github: "GitHub",
       footer_donate: "Донат",
       footer_crypto: "Донат криптой",
-      footer_copy: "© Marfa — Twitch → Telegram бот",
+      footer_copy: "© Marfa — Twitch X Telegram",
       footer_design: "Дизайн",
       doc_back: "Главная",
     },
     uk: {
-      meta_title: "Twitch → Telegram бот — сповіщення про стріми",
+      meta_title: "Twitch X Telegram — сповіщення про стріми",
       meta_desc:
         "Сповіщення про старт, зміну категорії, розклад і кінець стріму Twitch у Telegram, Discord або на ваш HTTPS webhook.",
       nav_home: "Головна",
@@ -264,12 +264,12 @@
       footer_github: "GitHub",
       footer_donate: "Донат",
       footer_crypto: "Донат криптою",
-      footer_copy: "© Marfa — Twitch → Telegram бот",
+      footer_copy: "© Marfa — Twitch X Telegram",
       footer_design: "Дизайн",
       doc_back: "Головна",
     },
     it: {
-      meta_title: "Bot Twitch → Telegram — avvisi live",
+      meta_title: "Twitch X Telegram — avvisi live",
       meta_desc:
         "Avvisi Twitch (live, categoria, schedule, fine stream) su Telegram, Discord o il tuo webhook HTTPS. Piano gratis + Premium con Stars.",
       nav_home: "Home",
@@ -352,7 +352,7 @@
       footer_github: "GitHub",
       footer_donate: "Donazione",
       footer_crypto: "Donazione crypto",
-      footer_copy: "© Marfa — bot Twitch → Telegram",
+      footer_copy: "© Marfa — Twitch X Telegram",
       footer_design: "Design di",
       doc_back: "Home",
     },

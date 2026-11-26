@@ -3909,8 +3909,12 @@ def check_core() -> None:
         guide_html = _guide_page(guide_loc)
         assert guide_html is not None
         assert b"<nav" in guide_html
-        assert b"twitch2telegram_bot" in guide_html
         assert b"twitchbot_game" in guide_html
+        assert b"twitch2telegram_bot" in guide_html
+        # Primary username is listed first.
+        assert guide_html.find(b"twitchbot_game") < guide_html.find(
+            b"twitch2telegram_bot"
+        )
     assert _guide_page("xx") is not None  # falls back to default locale
 
     from i18n import (
