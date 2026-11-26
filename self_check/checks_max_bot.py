@@ -12,9 +12,24 @@ from token_crypto import encrypt_secret
 
 
 def run() -> None:
+    _check_ca_bundle()
     _check_crud_and_ingest()
     _check_bootstrap_subscribe()
     _check_parse_ingest_path()
+
+
+def _check_ca_bundle() -> None:
+    from pathlib import Path
+
+    import max_api
+
+    root = Path(max_api.__file__).resolve().parent / "certs" / "russian_trusted_root_ca.pem"
+    assert root.is_file(), f"missing {root}"
+    text = root.read_text(encoding="utf-8")
+    assert "BEGIN CERTIFICATE" in text
+    verify = max_api._tls_verify()
+    assert isinstance(verify, str) and Path(verify).is_file()
+
 
 
 def _check_crud_and_ingest() -> None:

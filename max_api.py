@@ -3,7 +3,9 @@
 Docs: https://dev.max.ru/docs-api/methods/POST/subscriptions/
 Base: https://platform-api2.max.ru
 
-No Telegram UI — call from ops / future Max receiver bootstrap.
+TLS: platform-api2.max.ru uses Russian Trusted CA (Mintsifry). Standard
+certifi alone fails; we append ``certs/russian_trusted_root_ca.pem``.
+
 Never log the access token or webhook secret.
 """
 from __future__ import annotations
@@ -11,14 +13,20 @@ from __future__ import annotations
 import logging
 import os
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 
+import certifi
 import requests
 
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://platform-api2.max.ru"
 _SECRET_RE = re.compile(r"^[a-zA-Z0-9_-]{5,256}$")
+_RU_ROOT = Path(__file__).resolve().parent / "certs" / "russian_trusted_root_ca.pem"
+_verify_path: str | None = None
+_default_session: requests.Session | None = None
 
 
 class MaxApiError(Exception):
@@ -34,6 +42,32 @@ class MaxApiError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.code = code
+
+
+def _tls_verify() -> str | bool:
+    """certifi + Russian Trusted Root (Max / Mintsifry)."""
+    global _verify_path
+    if _verify_path and Path(_verify_path).is_file():
+        return _verify_path
+    if not _RU_ROOT.is_file():
+        logger.warning("Missing %s — Max TLS may fail", _RU_ROOT.name)
+        return True
+    combined = Path(certifi.where()).read_text(encoding="utf-8")
+    combined += "\n" + _RU_ROOT.read_text(encoding="utf-8")
+    fd, path = tempfile.mkstemp(prefix="max_ca_", suffix=".pem")
+    os.close(fd)
+    Path(path).write_text(combined, encoding="utf-8")
+    _verify_path = path
+    return path
+
+
+def _http(session: requests.Session | None = None) -> requests.Session:
+    global _default_session
+    if session is not None:
+        return session
+    if _default_session is None:
+        _default_session = requests.Session()
+    return _default_session
 
 
 def _access_token() -> str:
@@ -85,12 +119,13 @@ def get_me(
     session: requests.Session | None = None,
 ) -> dict[str, Any]:
     """GET /me — bot identity."""
-    http = session or requests
+    http = _http(session)
     try:
         resp = http.get(
             f"{API_BASE}/me",
             headers=_headers(token),
             timeout=30,
+            verify=_tls_verify(),
         )
     except requests.RequestException as exc:
         raise MaxApiError(str(exc)) from exc
@@ -129,7 +164,7 @@ def send_message(
     if attachments is not None:
         body["attachments"] = list(attachments)
 
-    http = session or requests
+    http = _http(session)
     try:
         resp = http.post(
             f"{API_BASE}/messages",
@@ -137,6 +172,7 @@ def send_message(
             params=params,
             json=body,
             timeout=30,
+            verify=_tls_verify(),
         )
     except requests.RequestException as exc:
         raise MaxApiError(str(exc)) from exc
@@ -173,13 +209,14 @@ def subscribe(
             )
         body["secret"] = sec
 
-    http = session or requests
+    http = _http(session)
     try:
         resp = http.post(
             f"{API_BASE}/subscriptions",
             headers=_headers(token),
             json=body,
             timeout=30,
+            verify=_tls_verify(),
         )
     except requests.RequestException as exc:
         raise MaxApiError(str(exc)) from exc
@@ -194,12 +231,13 @@ def list_subscriptions(
     session: requests.Session | None = None,
 ) -> list[dict[str, Any]]:
     """GET /subscriptions — current webhook subscriptions."""
-    http = session or requests
+    http = _http(session)
     try:
         resp = http.get(
             f"{API_BASE}/subscriptions",
             headers=_headers(token),
             timeout=30,
+            verify=_tls_verify(),
         )
     except requests.RequestException as exc:
         raise MaxApiError(str(exc)) from exc
@@ -228,13 +266,14 @@ def unsubscribe(
     endpoint = (url or "").strip()
     if not endpoint.startswith("https://"):
         raise MaxApiError("url must be https://")
-    http = session or requests
+    http = _http(session)
     try:
         resp = http.delete(
             f"{API_BASE}/subscriptions",
             headers=_headers(token),
             params={"url": endpoint},
             timeout=30,
+            verify=_tls_verify(),
         )
     except requests.RequestException as exc:
         raise MaxApiError(str(exc)) from exc
