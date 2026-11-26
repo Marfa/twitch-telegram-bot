@@ -186,13 +186,26 @@ def _check_help_and_commands_payload() -> None:
         "help",
     ]
     assert all(c.get("description") for c in cmds)
-    help_ru = max_bot._help_text("ru")
-    assert "/start" in help_ru and "/link" in help_ru and "/list" in help_ru
-    assert "/unlink" in help_ru and "/help" in help_ru
-    assert "Меню:" in help_ru
-    help_en = max_bot._help_text("en")
-    assert "Available commands:" in help_en
-    assert "Menu:" in help_en
+    # /help == Telegram «❓ Помощь»: feedback copy + @immarfa + guide links
+    with patch("i18n.guide_url", return_value="https://twitchbot.games/guide?lang=ru"):
+        help_ru, atts_ru = max_bot._help_screen("ru", user_id=42)
+    assert "@immarfa" in help_ru
+    assert "42" in help_ru
+    assert "<code>" not in help_ru
+    assert "<a " not in help_ru
+    assert atts_ru
+    link_btns = [
+        b
+        for att in atts_ru
+        for row in (att.get("payload") or {}).get("buttons") or []
+        for b in row
+        if isinstance(b, dict) and b.get("type") == "link"
+    ]
+    urls = [str(b.get("url") or "") for b in link_btns]
+    assert any("t.me/immarfa" in u for u in urls)
+    assert any("guide" in u for u in urls)
+    help_en, _ = max_bot._help_screen("en", user_id=1)
+    assert "developer" in help_en.lower() or "immarfa" in help_en.lower()
 
 
 def _check_payload_plain_text_no_redos() -> None:

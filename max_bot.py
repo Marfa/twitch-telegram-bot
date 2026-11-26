@@ -388,7 +388,12 @@ def _on_message_created(data: dict[str, Any]) -> None:
     cmd, arg = _parse_command(text)
     if cmd == "help":
         lang = _normalize_lang(locale)
-        _throttled_send(chat_id=chat_id, text=_help_text(lang))
+        try:
+            uid = int(sender.get("user_id") or 0)
+        except (TypeError, ValueError):
+            uid = 0
+        text, attachments = _help_screen(lang, user_id=uid)
+        _throttled_send(chat_id=chat_id, text=text, attachments=attachments)
         return
     if cmd in ("link", "start"):
         _link_chat_destination(
@@ -540,7 +545,10 @@ def _handle_dm_command(
         _unlink_from_dm(max_user_id, arg, lang=lang)
         return
     if cmd == "help":
-        _throttled_send(user_id=max_user_id, text=_help_text(lang))
+        text, attachments = _help_screen(lang, user_id=max_user_id)
+        _throttled_send(
+            user_id=max_user_id, text=text, attachments=attachments
+        )
         return
 
 
@@ -916,11 +924,24 @@ def _list_dests_text(*, lang: str, dests: list[Any]) -> str:
     return "\n".join(lines)
 
 
-def _help_text(lang: str) -> str:
-    """Same shape as Telegram ``/help``: commands list + menu bullets (Max surface)."""
-    from i18n import t
+_DEV_TG_URL = "https://t.me/immarfa"
 
-    return t("max_help", lang)
+
+def _help_screen(
+    lang: str, *, user_id: int = 0
+) -> tuple[str, list[dict[str, Any]] | None]:
+    """Same content as Telegram «❓ Помощь» / ``/feedback`` / ``/help``."""
+    from i18n import btn, guide_url, t
+    from translate import telegram_html_to_plain
+
+    text = telegram_html_to_plain(
+        t("feedback", lang, user_id=int(user_id) if user_id else 0)
+    ).strip()
+    rows: list[list[dict[str, Any]]] = [[_btn_link("@immarfa", _DEV_TG_URL)]]
+    guide = guide_url(lang)
+    if guide:
+        rows.append([_btn_link(btn("guide", lang), guide)])
+    return text, _kb(*rows)
 
 
 def _no_dests(lang: str) -> str:

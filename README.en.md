@@ -245,7 +245,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | `/new` | New alert |
 | `/etc` | Other section |
 | `/chat` | Stream chat Mini App (inline button; from Other — WebApp opens immediately) |
-| `/help` | Help |
+| `/help` | Same as ❓ Help / `/feedback` |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |
 | `/when` | When is the stream? In a group (next Twitch schedule slot; witty reply if none). Slash reply is ephemeral (only the caller; status → result; no auto-delete). Multiple streamers — pick buttons. Free-text “When stream?” stays a public reply |

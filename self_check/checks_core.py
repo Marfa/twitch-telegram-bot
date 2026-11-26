@@ -3732,8 +3732,9 @@ def check_core() -> None:
         assert tr("max_cmd_list_desc", loc)
         assert tr("max_cmd_unlink_desc", loc)
         assert tr("max_cmd_help_desc", loc)
-        assert "/start" in tr("max_help", loc)
-        assert "/help" in tr("max_help", loc)
+        fb = tr("feedback", loc, user_id=1)
+        assert "t.me/immarfa" in fb
+        assert "@immarfa" in fb
         assert tr("schedule_live_add_prompt", loc)
         assert tr("setup_schedule_only_done", loc, sub_id=1, twitch_username="x", schedule_reminder_note="r", dest="d", thread_note="")
         assert tr("alert_type_prompt", loc)

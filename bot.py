@@ -1293,10 +1293,11 @@ async def receive_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         except BadRequest:
             pass
     if after == "help":
-        await context.bot.send_message(
+        await _send_feedback_help(
+            context.bot,
             chat_id,
-            _help_text(lang),
-            reply_markup=_menu(lang, query.from_user.id),
+            user_id=query.from_user.id,
+            lang=lang,
         )
         return ConversationHandler.END
     if after == "settings":
@@ -2296,9 +2297,36 @@ async def orphan_stream_schedule_callback(
     await cancel(update, context)
 
 
+async def _send_feedback_help(
+    bot: Any,
+    chat_id: int,
+    *,
+    user_id: int,
+    lang: str,
+) -> None:
+    """Same screen as «❓ Помощь» / ``/feedback`` / ``/help``."""
+    from i18n import btn, guide_keyboard
+
+    analytics.capture(user_id, "feedback_opened")
+    # Reply menu is the escape hatch; guide is a separate inline URL row.
+    await bot.send_message(
+        chat_id,
+        t("feedback", lang, user_id=user_id),
+        reply_markup=_menu(lang, user_id),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+    guide = guide_keyboard(lang)
+    if guide:
+        await bot.send_message(
+            chat_id,
+            btn("guide", lang),
+            reply_markup=guide,
+        )
+
+
 async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from config import show_help_button
-    from i18n import btn, guide_keyboard
 
     if not show_help_button():
         return
@@ -2308,23 +2336,16 @@ async def report_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.effective_message.reply_text(t("please_start", DEFAULT_LOCALE))
         return
     lang = _user_lang(context, user_id)
-    analytics.capture(user_id, "feedback_opened")
-    # Reply menu is the escape hatch; guide is a separate inline URL row.
-    await update.effective_message.reply_text(
-        t("feedback", lang, user_id=user_id),
-        reply_markup=_menu(lang, user_id),
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
+    await _send_feedback_help(
+        context.bot,
+        reply_chat_id(update),
+        user_id=user_id,
+        lang=lang,
     )
-    guide = guide_keyboard(lang)
-    if guide:
-        await update.effective_message.reply_text(
-            btn("guide", lang),
-            reply_markup=guide,
-        )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """``/help`` — same screen as the «❓ Помощь» button / ``/feedback``."""
     db: Database = context.application.bot_data["db"]
     user_id = update.effective_user.id
     if not db.user_exists(user_id):
@@ -2334,9 +2355,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if not lang:
         context.user_data["after_lang"] = "help"
         return await _prompt_language(update)
-    await update.effective_message.reply_text(
-        _help_text(lang),
-        reply_markup=_menu(lang, user_id),
+    await _send_feedback_help(
+        context.bot,
+        reply_chat_id(update),
+        user_id=user_id,
+        lang=lang,
     )
     return ConversationHandler.END
 
