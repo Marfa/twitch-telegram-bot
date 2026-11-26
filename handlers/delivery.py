@@ -565,6 +565,84 @@ def _is_topic_closed_error(exc: BaseException) -> bool:
     return "topic_closed" in _exc_text(exc)
 
 
+# Uncleared forum open/close service lines from our bot (chat_id, thread_id) → message ids.
+# Close lines sometimes refuse delete while the topic stays closed; flush after next reopen.
+_pending_topic_svc_deletes: dict[tuple[int, int], list[int]] = {}
+_PENDING_TOPIC_SVC_CAP = 10
+
+
+def _topic_svc_key(chat_id: int, thread_id: int) -> tuple[int, int]:
+    return (int(chat_id), int(thread_id))
+
+
+def _note_topic_svc_delete(chat_id: int, thread_id: int, message_id: int) -> None:
+    key = _topic_svc_key(chat_id, thread_id)
+    ids = _pending_topic_svc_deletes.setdefault(key, [])
+    mid = int(message_id)
+    if mid not in ids:
+        ids.append(mid)
+    if len(ids) > _PENDING_TOPIC_SVC_CAP:
+        _pending_topic_svc_deletes[key] = ids[-_PENDING_TOPIC_SVC_CAP:]
+
+
+def reset_pending_topic_svc_deletes() -> None:
+    """Test helper — clear stashed topic open/close service message ids."""
+    _pending_topic_svc_deletes.clear()
+
+
+async def _flush_pending_topic_svc_deletes(bot, chat_id: int, thread_id: int) -> None:
+    """Best-effort delete of stashed open/close service lines for this topic."""
+    key = _topic_svc_key(chat_id, thread_id)
+    ids = _pending_topic_svc_deletes.pop(key, [])
+    for mid in ids:
+        try:
+            await delete_chat_message(bot, chat_id, mid, kind="bot_own")
+        except (BadRequest, Forbidden) as exc:
+            logger.info(
+                "Cannot delete stashed topic service msg %s in %s/%s: %s",
+                mid,
+                chat_id,
+                thread_id,
+                exc,
+            )
+            _note_topic_svc_delete(chat_id, thread_id, mid)
+
+
+async def delete_bot_topic_toggle_service_message(update, context) -> None:
+    """Remove our forum topic reopened/closed service lines so they do not clutter."""
+    msg = update.effective_message
+    if not msg:
+        return
+    is_reopened = bool(getattr(msg, "forum_topic_reopened", None))
+    is_closed = bool(getattr(msg, "forum_topic_closed", None))
+    if not is_reopened and not is_closed:
+        return
+    from_user = getattr(msg, "from_user", None)
+    if from_user is None or getattr(from_user, "id", None) != context.bot.id:
+        return
+    from dm_topics import GENERAL_TOPIC_ID
+
+    chat_id = int(msg.chat_id)
+    thread_id = int(getattr(msg, "message_thread_id", None) or GENERAL_TOPIC_ID)
+    # After reopen, also clear a prior close line that could not be deleted while closed.
+    if is_reopened:
+        await _flush_pending_topic_svc_deletes(context.bot, chat_id, thread_id)
+    try:
+        await delete_chat_message(
+            context.bot, chat_id, msg.message_id, kind="bot_own"
+        )
+    except (BadRequest, Forbidden) as exc:
+        logger.info(
+            "Cannot delete topic %s service msg %s in %s/%s: %s",
+            "reopened" if is_reopened else "closed",
+            msg.message_id,
+            chat_id,
+            thread_id,
+            exc,
+        )
+        _note_topic_svc_delete(chat_id, thread_id, msg.message_id)
+
+
 async def _reopen_closed_forum_topic(bot, chat_id: int, thread_id: int) -> bool:
     """Temporarily reopen a closed forum topic. Needs can_manage_topics (or topic creator)."""
     from dm_topics import GENERAL_TOPIC_ID
@@ -576,6 +654,8 @@ async def _reopen_closed_forum_topic(bot, chat_id: int, thread_id: int) -> bool:
             await bot.reopen_forum_topic(
                 chat_id=chat_id, message_thread_id=int(thread_id)
             )
+        # Prior close service line often deletes only after the topic is open again.
+        await _flush_pending_topic_svc_deletes(bot, chat_id, int(thread_id))
         return True
     except (BadRequest, Forbidden) as exc:
         logger.warning(

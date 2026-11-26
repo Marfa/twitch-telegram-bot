@@ -1444,6 +1444,85 @@ async def _smoke_delivery_and_helpers(db) -> None:
     test_bot.close_forum_topic.assert_awaited_once()
     assert test_bot.send_message.await_count == 2
 
+    from handlers.delivery import (
+        delete_bot_topic_toggle_service_message,
+        reset_pending_topic_svc_deletes,
+        _flush_pending_topic_svc_deletes,
+        _pending_topic_svc_deletes,
+    )
+
+    reset_pending_topic_svc_deletes()
+    topic_svc_bot = AsyncMock()
+    topic_svc_bot.id = 42
+    topic_svc_bot.delete_message = AsyncMock()
+    app_topic, _ = _app(db)
+    app_topic.bot = topic_svc_bot
+    ctx_topic = _ctx(app_topic)
+
+    # Our reopen service line → delete immediately.
+    reopen_msg = SimpleNamespace(
+        forum_topic_reopened=object(),
+        forum_topic_closed=None,
+        from_user=SimpleNamespace(id=42),
+        chat_id=-1001,
+        message_id=501,
+        message_thread_id=30,
+    )
+    upd_reopen = MagicMock()
+    upd_reopen.effective_message = reopen_msg
+    with patch(
+        "handlers.delivery.delete_chat_message", new_callable=AsyncMock
+    ) as del_reopen:
+        await delete_bot_topic_toggle_service_message(upd_reopen, ctx_topic)
+        del_reopen.assert_awaited_once()
+        assert del_reopen.await_args.kwargs.get("kind") == "bot_own"
+
+    # Close delete fails → stash; flush after reopen clears it.
+    reset_pending_topic_svc_deletes()
+    close_msg = SimpleNamespace(
+        forum_topic_reopened=None,
+        forum_topic_closed=object(),
+        from_user=SimpleNamespace(id=42),
+        chat_id=-1001,
+        message_id=502,
+        message_thread_id=30,
+    )
+    upd_close = MagicMock()
+    upd_close.effective_message = close_msg
+    with patch(
+        "handlers.delivery.delete_chat_message",
+        new=AsyncMock(side_effect=BadRequest("message can't be deleted")),
+    ):
+        await delete_bot_topic_toggle_service_message(upd_close, ctx_topic)
+    assert (-1001, 30) in _pending_topic_svc_deletes
+    assert 502 in _pending_topic_svc_deletes[(-1001, 30)]
+
+    with patch(
+        "handlers.delivery.delete_chat_message", new_callable=AsyncMock
+    ) as del_flush:
+        await _flush_pending_topic_svc_deletes(topic_svc_bot, -1001, 30)
+        del_flush.assert_awaited()
+    assert (-1001, 30) not in _pending_topic_svc_deletes
+
+    # Foreign admin close/reopen — ignore.
+    foreign_close = SimpleNamespace(
+        forum_topic_reopened=None,
+        forum_topic_closed=object(),
+        from_user=SimpleNamespace(id=999),
+        chat_id=-1001,
+        message_id=503,
+        message_thread_id=30,
+    )
+    upd_foreign = MagicMock()
+    upd_foreign.effective_message = foreign_close
+    with patch(
+        "handlers.delivery.delete_chat_message", new_callable=AsyncMock
+    ) as del_foreign:
+        await delete_bot_topic_toggle_service_message(upd_foreign, ctx_topic)
+        del_foreign.assert_not_awaited()
+
+    reset_pending_topic_svc_deletes()
+
     # Pin service-message cleanup: delete «bot pinned a …» when we pinned.
     bot_id = 42
     pinned_content = SimpleNamespace(message_id=100, from_user=SimpleNamespace(id=bot_id))

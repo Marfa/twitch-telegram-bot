@@ -44,8 +44,9 @@ async def delete_chat_message(
 ) -> None:
     """Delete a message — bot-owned content or a user command only.
 
-    Never call Telegram delete for arbitrary user messages (moderation,
-    chat cleanup, etc.). Every call site must pass an explicit kind.
+    bot_own also covers Telegram service lines for our pin and our
+    forum topic reopen/close. Never call Telegram delete for arbitrary
+    user messages (moderation, chat cleanup, etc.).
     """
     if kind not in _ALLOWED_DELETE_KINDS:
         raise ValueError(

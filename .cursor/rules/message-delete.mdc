@@ -16,7 +16,7 @@ The bot must **never** delete arbitrary chat messages (moderation, cleaning hist
 
 | Kind | Meaning | Examples |
 |---|---|---|
-| `bot_own` | Messages the bot sent (or Telegram service lines for *our* pin) | Alerts (`delete_other_alerts`), keyboard pulse, progress fallback, pin «bot pinned a …» |
+| `bot_own` | Messages the bot sent (or Telegram service lines for *our* pin / topic open·close) | Alerts (`delete_other_alerts`), keyboard pulse, progress fallback, pin «bot pinned a …», forum topic reopened/closed by the bot |
 | `user_command` | Slash / free-text that invokes the bot | `/start ah_*` (schedule `/when`/`/day`/`/week` — **no** auto-delete; keep `is_ephemeral`) |
 
 ## How

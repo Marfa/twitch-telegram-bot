@@ -632,6 +632,7 @@ from handlers.delivery import (
     _send_notification,
     _send_test,
     delete_bot_pin_service_message,
+    delete_bot_topic_toggle_service_message,
     on_stored_template_typo_fix,
     purge_expired_blocked_users,
     purge_inactive_users,
@@ -3007,6 +3008,14 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app.add_handler(
         MessageHandler(
             filters.StatusUpdate.PINNED_MESSAGE, delete_bot_pin_service_message
+        ),
+        group=0,
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.FORUM_TOPIC_REOPENED
+            | filters.StatusUpdate.FORUM_TOPIC_CLOSED,
+            delete_bot_topic_toggle_service_message,
         ),
         group=0,
     )
