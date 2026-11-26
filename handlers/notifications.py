@@ -58,6 +58,325 @@ ALERT_JOB_CATEGORY = "category"
 ALERT_JOB_MULTISTREAM = "multistream"
 ALERT_JOB_LIVE_GAME = "live_game"
 ALERT_JOB_REPEAT = "repeat"
+ALERT_JOB_TRANSPORT = "transport"
+
+# Defer alert sends while Telegram circuit is open / after transport TimedOut.
+TRANSPORT_RETRY_DELAY_SEC = 45
+TRANSPORT_RETRY_MAX_ATTEMPTS = 20
+
+
+def transport_job_name(sub_id: int, alert_type: str, stream_id: str) -> str:
+    sid = (stream_id or "").strip() or "none"
+    at = (alert_type or "live").strip() or "live"
+    return f"transport_{int(sub_id)}_{at}_{sid}"
+
+
+def _jsonable_stream_snapshot(stream: dict | None) -> dict:
+    if not stream:
+        return {}
+    out: dict = {}
+    for key, value in stream.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            out[str(key)] = value
+    return out
+
+
+def enqueue_transport_alert_retry(
+    db: Database,
+    job_queue,
+    *,
+    sub_id: int,
+    alert_type: str,
+    stream_id: str = "",
+    stream: dict | None = None,
+    vod_offset_seconds: int | None = None,
+    transport_attempt: int = 1,
+) -> str:
+    """Persist one deferred alert send per (sub, type, stream). Returns job name."""
+    name = transport_job_name(sub_id, alert_type, stream_id)
+    payload: dict = {
+        "sub_id": int(sub_id),
+        "alert_type": (alert_type or "live").strip() or "live",
+        "stream_id": (stream_id or "").strip(),
+        "transport_attempt": max(1, int(transport_attempt)),
+        "silent_offline": True,
+    }
+    snap = _jsonable_stream_snapshot(stream)
+    if snap:
+        payload["stream_snapshot"] = snap
+    if vod_offset_seconds is not None:
+        payload["vod_offset_seconds"] = int(vod_offset_seconds)
+    if job_queue is None:
+        due = datetime.now(timezone.utc) + timedelta(seconds=TRANSPORT_RETRY_DELAY_SEC)
+        db.upsert_pending_alert_job(
+            name,
+            kind=ALERT_JOB_TRANSPORT,
+            sub_id=int(sub_id),
+            due_at=due.isoformat(),
+            payload=payload,
+        )
+        return name
+    schedule_alert_run_once(
+        job_queue,
+        _send_transport_retry_notification,
+        when=float(TRANSPORT_RETRY_DELAY_SEC),
+        data=payload,
+        name=name,
+        replace_existing=True,
+        db=db,
+        kind=ALERT_JOB_TRANSPORT,
+    )
+    return name
+
+
+def flush_transport_retries(application: Application) -> int:
+    """Re-arm due transport jobs to run soon after the circuit closes."""
+    db: Database | None = application.bot_data.get("db")
+    jq = application.job_queue
+    if db is None or jq is None:
+        return 0
+    application.bot_data["job_queue"] = jq
+    flushed = 0
+    for row in db.list_pending_alert_jobs():
+        if row.kind != ALERT_JOB_TRANSPORT:
+            continue
+        payload = dict(row.payload or {})
+        payload.setdefault("sub_id", row.sub_id)
+        schedule_alert_run_once(
+            jq,
+            _send_transport_retry_notification,
+            when=1.0,
+            data=payload,
+            name=row.job_name,
+            replace_existing=True,
+            db=db,
+            kind=ALERT_JOB_TRANSPORT,
+        )
+        flushed += 1
+    if flushed:
+        logger.info("Flushed %s deferred Telegram transport alert(s)", flushed)
+    return flushed
+
+
+async def probe_telegram_circuit(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic getMe while the circuit is open; flush deferred alerts on recovery."""
+    import telegram_circuit
+
+    if not telegram_circuit.is_open():
+        return
+    if await telegram_circuit.probe_get_me(context.bot, force=True):
+        flush_transport_retries(context.application)
+
+
+async def _send_transport_retry_notification(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Deliver a deferred alert once Telegram looks reachable again."""
+    import telegram_circuit
+    from bot import _render_sub_template
+
+    job_data = dict(context.job.data or {})
+    sub_id = int(job_data.get("sub_id") or 0)
+    alert_type = str(job_data.get("alert_type") or "live")
+    stream_id = str(job_data.get("stream_id") or "")
+    attempt = max(1, int(job_data.get("transport_attempt") or 1))
+    db: Database = context.application.bot_data["db"]
+    twitch: TwitchClient = context.application.bot_data["twitch"]
+    jq = context.application.job_queue
+
+    if telegram_circuit.is_open():
+        await telegram_circuit.probe_get_me(context.bot, force=True)
+    if telegram_circuit.is_open():
+        if attempt >= TRANSPORT_RETRY_MAX_ATTEMPTS:
+            _consume_pending_alert_job(context)
+            logger.warning(
+                "Dropping transport retry after %s attempts sub=%s type=%s stream=%s",
+                attempt,
+                sub_id,
+                alert_type,
+                stream_id,
+            )
+            return
+        job_data["transport_attempt"] = attempt + 1
+        schedule_alert_run_once(
+            jq,
+            _send_transport_retry_notification,
+            when=float(TRANSPORT_RETRY_DELAY_SEC),
+            data=job_data,
+            name=transport_job_name(sub_id, alert_type, stream_id),
+            replace_existing=True,
+            db=db,
+            kind=ALERT_JOB_TRANSPORT,
+        )
+        return
+
+    _consume_pending_alert_job(context)
+    sub = db.get_subscription_by_id(sub_id)
+    if not sub or not sub.enabled:
+        return
+    sub = _sub_for_delivery(db, sub)
+    bot_data = context.application.bot_data
+
+    if alert_type == "end":
+        if not sub.notify_on_end:
+            return
+        try:
+            live_streams = await asyncio.to_thread(
+                twitch.get_live_streams, [sub.twitch_user_id]
+            )
+        except Exception:
+            logger.exception(
+                "Twitch poll failed for transport end retry sub %s", sub_id
+            )
+            if attempt < TRANSPORT_RETRY_MAX_ATTEMPTS:
+                enqueue_transport_alert_retry(
+                    db,
+                    jq,
+                    sub_id=sub_id,
+                    alert_type=alert_type,
+                    stream_id=stream_id,
+                    stream=job_data.get("stream_snapshot")
+                    if isinstance(job_data.get("stream_snapshot"), dict)
+                    else None,
+                    transport_attempt=attempt + 1,
+                )
+            return
+        if sub.twitch_user_id in live_streams:
+            return
+        if is_on_notify_cooldown(sub):
+            return
+        end_stream = _end_stream_from_job(job_data)
+        lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+        username, game, title, extra = _end_alert_template_args(sub, end_stream, lang)
+        text = _render_sub_template(
+            sub,
+            username,
+            game,
+            title,
+            twitch=twitch,
+            stream=end_stream,
+            extra=extra,
+        )
+        text = _with_top_donations_suffix(db, sub, text, end_stream)
+        await _send_notification(
+            context.bot,
+            db,
+            sub,
+            text,
+            alert_type="end",
+            stream=end_stream,
+            stream_id=stream_id,
+            twitch=twitch,
+            bot_data=bot_data,
+            job_queue=jq,
+        )
+        return
+
+    if alert_type == "category":
+        if not _wants_category_change_alert(sub):
+            return
+        try:
+            live_streams = await asyncio.to_thread(
+                twitch.get_live_streams, [sub.twitch_user_id]
+            )
+        except Exception:
+            logger.exception(
+                "Twitch poll failed for transport category retry sub %s", sub_id
+            )
+            if attempt < TRANSPORT_RETRY_MAX_ATTEMPTS:
+                enqueue_transport_alert_retry(
+                    db,
+                    jq,
+                    sub_id=sub_id,
+                    alert_type=alert_type,
+                    stream_id=stream_id,
+                    vod_offset_seconds=job_data.get("vod_offset_seconds"),
+                    transport_attempt=attempt + 1,
+                )
+            return
+        if sub.twitch_user_id not in live_streams:
+            return
+        if is_on_notify_cooldown(sub):
+            return
+        stream = live_streams[sub.twitch_user_id]
+        username = stream.get("user_login", stream.get("user_name", ""))
+        game = stream.get("game_name", "")
+        title = stream.get("title", "")
+        if await _should_skip_ignored_alert(
+            sub, db, twitch, game, title, stream.get("game_id")
+        ):
+            return
+        if _should_skip_category_filter(sub, stream.get("game_id")):
+            return
+        text = _render_sub_template(
+            sub, username, game, title, twitch=twitch, stream=stream
+        )
+        vod_off = job_data.get("vod_offset_seconds")
+        await _send_notification(
+            context.bot,
+            db,
+            sub,
+            text,
+            alert_type="category",
+            stream=stream,
+            stream_id=stream_id or str(stream.get("id") or ""),
+            vod_offset_seconds=int(vod_off) if vod_off is not None else _vod_offset_seconds(stream),
+            twitch=twitch,
+            bot_data=bot_data,
+            job_queue=jq,
+        )
+        return
+
+    # Default: live (and category-watch digests that used alert_type=live).
+    if not sub.notify_on_live and not is_category_watch_sub(sub):
+        return
+    try:
+        live_streams = await asyncio.to_thread(
+            twitch.get_live_streams, [sub.twitch_user_id]
+        )
+    except Exception:
+        logger.exception(
+            "Twitch poll failed for transport live retry sub %s", sub_id
+        )
+        if attempt < TRANSPORT_RETRY_MAX_ATTEMPTS:
+            enqueue_transport_alert_retry(
+                db,
+                jq,
+                sub_id=sub_id,
+                alert_type="live",
+                stream_id=stream_id,
+                transport_attempt=attempt + 1,
+            )
+        return
+    if sub.twitch_user_id not in live_streams:
+        return
+    if is_on_notify_cooldown(sub):
+        return
+    stream = live_streams[sub.twitch_user_id]
+    username = stream.get("user_login", stream.get("user_name", ""))
+    game = stream.get("game_name", "")
+    title = stream.get("title", "")
+    if await _should_skip_ignored_alert(
+        sub, db, twitch, game, title, stream.get("game_id")
+    ):
+        return
+    if _should_skip_category_filter(sub, stream.get("game_id")):
+        return
+    text = _render_sub_template(
+        sub, username, game, title, twitch=twitch, stream=stream
+    )
+    await _send_notification(
+        context.bot,
+        db,
+        sub,
+        text,
+        alert_type="live",
+        stream=stream,
+        stream_id=stream_id or str(stream.get("id") or ""),
+        twitch=twitch,
+        bot_data=bot_data,
+        job_queue=jq,
+    )
 
 
 def _sub_for_delivery(db: Database, sub: Subscription) -> Subscription:
@@ -405,6 +724,7 @@ def restore_pending_alert_jobs(application: Application) -> int:
         ALERT_JOB_MULTISTREAM: _send_delayed_notification,
         ALERT_JOB_LIVE_GAME: _send_delayed_notification,
         ALERT_JOB_REPEAT: _send_repeat_notification,
+        ALERT_JOB_TRANSPORT: _send_transport_retry_notification,
     }
     now = datetime.now(timezone.utc)
     restored = 0
@@ -836,6 +1156,12 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
 
     db: Database = context.application.bot_data["db"]
+    import telegram_circuit
+
+    if telegram_circuit.is_open():
+        if await telegram_circuit.probe_get_me(context.bot):
+            flush_transport_retries(context.application)
+
     await _notify_premium_expiries(context, db)
 
     paused_unentitled = await prem.expire_unentitled_alerts(context.bot, db)

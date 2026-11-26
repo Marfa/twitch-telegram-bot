@@ -2000,6 +2000,43 @@ def _delivery_log_extra(
     return extra
 
 
+def _notification_stream_id(**kwargs) -> str:
+    stream_id = str(kwargs.get("stream_id") or "").strip()
+    if stream_id:
+        return stream_id
+    stream = kwargs.get("stream")
+    if isinstance(stream, dict):
+        return str(stream.get("id") or "").strip()
+    return ""
+
+
+def _enqueue_transport_retry_for_sub(
+    db: Database,
+    sub: Subscription,
+    *,
+    alert_type: str,
+    stream_id: str,
+    kwargs: dict,
+) -> None:
+    from handlers.notifications import enqueue_transport_alert_retry
+
+    bot_data = kwargs.get("bot_data")
+    job_queue = kwargs.get("job_queue")
+    if job_queue is None and isinstance(bot_data, dict):
+        job_queue = bot_data.get("job_queue")
+    stream = kwargs.get("stream") if isinstance(kwargs.get("stream"), dict) else None
+    vod = kwargs.get("vod_offset_seconds")
+    enqueue_transport_alert_retry(
+        db,
+        job_queue,
+        sub_id=sub.id,
+        alert_type=alert_type,
+        stream_id=stream_id,
+        stream=stream,
+        vod_offset_seconds=int(vod) if vod is not None else None,
+    )
+
+
 async def _send_notification(
     bot,
     db: Database,
@@ -2012,7 +2049,36 @@ async def _send_notification(
 
     ``check_streams`` calls this once per subscription with no ``try`` of its own,
     so an unreachable chat must come back as ``False`` instead of ending the tick.
+
+    When the Telegram circuit is open, the send is deferred via pending_alert_jobs
+    instead of calling the API. After a transport TimedOut/ConnectError the alert
+    is also enqueued (rare duplicate possible if Telegram accepted the first try).
     """
+    import telegram_circuit
+
+    alert_type = str(kwargs.get("alert_type") or "live")
+    stream_id = _notification_stream_id(**kwargs)
+    # Discord / webhook destinations do not use the Telegram circuit.
+    dest = getattr(sub, "dest_type", "") or ""
+    if dest not in ("discord", "webhook") and not telegram_circuit.allow_send():
+        _enqueue_transport_retry_for_sub(
+            db, sub, alert_type=alert_type, stream_id=stream_id, kwargs=kwargs
+        )
+        logger.info(
+            "Deferred alert to %s — Telegram circuit open",
+            sub.chat_id,
+            extra=_delivery_log_extra(
+                sub,
+                alert_type=alert_type,
+                outcome="deferred",
+                stream_id=stream_id,
+            ),
+        )
+        metrics.record_alert_delivery(
+            alert_type=alert_type, dest_type=sub.dest_type, outcome="deferred"
+        )
+        return False
+
     started = time.monotonic()
     try:
         return await _send_notification_inner(bot, db, sub, text, *args, **kwargs)
@@ -2021,8 +2087,12 @@ async def _send_notification(
         # handler (unreachable / typo / parse). TimedOut stays here as transport.
         if isinstance(exc, BadRequest):
             raise
-        # The alert may already be delivered, so the send is not repeated.
-        alert_type = str(kwargs.get("alert_type") or "live")
+        if dest not in ("discord", "webhook") and telegram_circuit.is_transport_failure(
+            exc
+        ):
+            _enqueue_transport_retry_for_sub(
+                db, sub, alert_type=alert_type, stream_id=stream_id, kwargs=kwargs
+            )
         logger.warning(
             "Cannot reach %s: %s",
             sub.chat_id,
@@ -2031,7 +2101,7 @@ async def _send_notification(
                 sub,
                 alert_type=alert_type,
                 outcome="failed",
-                stream_id=str(kwargs.get("stream_id") or ""),
+                stream_id=stream_id,
                 duration_ms=int((time.monotonic() - started) * 1000),
             ),
         )

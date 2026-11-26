@@ -164,10 +164,13 @@ def _check_pay_and_grace_senders_return_outcome() -> None:
 
 def _check_alert_send_transport_error() -> None:
     """A transport error stays with its destination and leaves the tick running."""
+    import telegram_circuit
     from db import open_database
     from handlers import delivery
+    from handlers.notifications import transport_job_name
 
     async def _run() -> None:
+        telegram_circuit.reset_for_tests()
         with tempfile.TemporaryDirectory() as td:
             db = open_database(Path(td) / "alert_boundary.db")
             uid = 601
@@ -203,9 +206,13 @@ def _check_alert_send_transport_error() -> None:
 
             with patch.object(delivery.metrics, "record_alert_delivery", _record):
                 assert (
-                    await delivery._send_notification(bot, db, first, "hi")
+                    await delivery._send_notification(
+                        bot, db, first, "hi", stream_id="s1"
+                    )
                 ) is False
             assert outcomes == ["failed"], outcomes
+            job = transport_job_name(first.id, "live", "s1")
+            assert db.has_pending_alert_job(job), "transport fail must enqueue retry"
             # Inner path would raise; the boundary must not.
             try:
                 await delivery._send_notification_inner(bot, db, first, "hi")
@@ -225,11 +232,67 @@ def _check_alert_send_transport_error() -> None:
             ) is True
 
     asyncio.run(_run())
+    telegram_circuit.reset_for_tests()
+
+
+def _check_circuit_open_defers_without_send() -> None:
+    """Open circuit skips Telegram send and enqueues one pending transport job."""
+    import telegram_circuit
+    from db import open_database
+    from handlers import delivery
+    from handlers.notifications import transport_job_name
+
+    async def _run() -> None:
+        telegram_circuit.reset_for_tests()
+        telegram_circuit.note_failure(TimedOut())
+        telegram_circuit.note_failure(TimedOut())
+        assert telegram_circuit.is_open()
+        with tempfile.TemporaryDirectory() as td:
+            db = open_database(Path(td) / "circuit_defer.db")
+            uid = 701
+            db.upsert_user(uid)
+            db.set_user_locale(uid, "en")
+            sub_id = db.add_subscription(
+                uid, "streamer", "tw1", "{username} live", "dm", uid, None
+            )
+            sub = next(s for s in db.get_subscriptions_by_owner(uid) if s.id == sub_id)
+            bot = AsyncMock()
+            bot.send_message = AsyncMock(return_value=MagicMock(message_id=99))
+            outcomes: list[str] = []
+
+            def _record(**kwargs) -> None:
+                outcomes.append(str(kwargs.get("outcome") or ""))
+
+            with patch.object(delivery.metrics, "record_alert_delivery", _record):
+                assert (
+                    await delivery._send_notification(
+                        bot, db, sub, "hi", alert_type="live", stream_id="abc"
+                    )
+                ) is False
+            assert bot.send_message.await_count == 0, "open circuit must not send"
+            assert outcomes == ["deferred"], outcomes
+            name = transport_job_name(sub.id, "live", "abc")
+            assert db.has_pending_alert_job(name)
+            # Same key replaces — still one row.
+            with patch.object(delivery.metrics, "record_alert_delivery", _record):
+                await delivery._send_notification(
+                    bot, db, sub, "hi again", alert_type="live", stream_id="abc"
+                )
+            pending = [
+                r
+                for r in db.list_pending_alert_jobs()
+                if r.job_name == name
+            ]
+            assert len(pending) == 1, "transport job key must stay unique"
+
+    asyncio.run(_run())
+    telegram_circuit.reset_for_tests()
 
 
 def run() -> None:
     _check_boundary()
     _check_alert_send_transport_error()
+    _check_circuit_open_defers_without_send()
     _check_growth_report_fanout()
     _check_premium_expiry_loops()
     _check_pay_and_grace_senders_return_outcome()

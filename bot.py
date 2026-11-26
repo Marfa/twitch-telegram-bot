@@ -299,6 +299,7 @@ from handlers.notifications import (
     end_cover_stream,
     live_transitions,
     needs_live_game_recheck,
+    probe_telegram_circuit,
 )
 from handlers.when_stream import (
     DAY_SCHEDULE_TEXT_RE,
@@ -2791,6 +2792,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     app = (
         Application.builder()
         .token(token)
+        .connect_timeout(10)
+        .read_timeout(20)
+        .write_timeout(20)
+        .get_updates_read_timeout(30)
         .application_class(traced_application_class())
         .post_init(post_init)
         .build()
@@ -4697,6 +4702,18 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         first=10,
         name=JOB_CHECK_STREAMS,
         job_kwargs=_stream_job_kwargs(JOB_CHECK_STREAMS),
+    )
+    app.job_queue.run_repeating(
+        probe_telegram_circuit,
+        interval=30,
+        first=20,
+        name="probe_telegram_circuit",
+        job_kwargs={
+            "id": "probe_telegram_circuit",
+            "replace_existing": True,
+            "misfire_grace_time": 60,
+            "coalesce": True,
+        },
     )
     # Preview media refreshes every ~30 min; poll every few minutes, not every live tick.
     # Video MP4/GIF capture often exceeds 60s (and can outlive _preview_poll); do not
