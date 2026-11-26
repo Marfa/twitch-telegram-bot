@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from telegram.error import BadRequest, TelegramError
+from telegram.error import BadRequest, Forbidden, TelegramError
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,11 @@ STREAMER_TOPIC_ICON_COLOR = 0x6FB9F0
 
 # Telegram General topic in forums / private topic mode.
 GENERAL_TOPIC_ID = 1
+
+# User noise in private alert topics — persisted in dm_topic_user_messages.
+# Cleared on next alert to that topic, or by age (Telegram ~48h delete limit).
+_PENDING_DM_TOPIC_USER_CAP = 40
+DM_TOPIC_USER_PURGE_AFTER_HOURS = 47
 
 # Emoji blocks as codepoint bounds (not a regex class — CodeQL py/overly-large-range).
 _EMOJI_ORD_RANGES: tuple[tuple[int, int], ...] = (
@@ -751,6 +756,105 @@ def private_ui_should_go_to_general(message) -> bool:
         return int(tid) != GENERAL_TOPIC_ID
     except (TypeError, ValueError):
         return False
+
+
+def note_pending_dm_topic_user_message(
+    db, chat_id: int, thread_id: int, message_id: int
+) -> None:
+    """Persist a user message id in a private alert topic for later delete."""
+    if db is None or int(thread_id) == GENERAL_TOPIC_ID or int(chat_id) <= 0:
+        return
+    db.note_dm_topic_user_message(
+        int(chat_id),
+        int(thread_id),
+        int(message_id),
+        cap=_PENDING_DM_TOPIC_USER_CAP,
+    )
+
+
+async def _delete_dm_topic_user_message(
+    bot, db, chat_id: int, thread_id: int, message_id: int
+) -> None:
+    """Best-effort Telegram delete, then drop the DB row either way."""
+    from bot_helpers import delete_chat_message
+
+    try:
+        await delete_chat_message(
+            bot, chat_id, message_id, kind="dm_topic_user"
+        )
+    except (BadRequest, Forbidden) as exc:
+        logger.info(
+            "Cannot delete DM topic user msg %s in %s/%s: %s",
+            message_id,
+            chat_id,
+            thread_id,
+            exc,
+        )
+    db.remove_dm_topic_user_message(chat_id, thread_id, message_id)
+
+
+async def flush_pending_dm_topic_user_messages(
+    bot, db, chat_id: int, thread_id: int | None
+) -> None:
+    """Best-effort delete of user noise before the next alert in this DM topic."""
+    if (
+        db is None
+        or not thread_id
+        or int(thread_id) == GENERAL_TOPIC_ID
+        or int(chat_id) <= 0
+    ):
+        return
+    tid = int(thread_id)
+    for mid in db.list_dm_topic_user_messages(int(chat_id), tid):
+        await _delete_dm_topic_user_message(bot, db, int(chat_id), tid, mid)
+
+
+async def purge_due_dm_topic_user_messages(context) -> None:
+    """Delete persisted DM topic user noise before Telegram's ~48h window closes."""
+    from datetime import datetime, timedelta, timezone
+
+    db = context.application.bot_data["db"]
+    bot = context.bot
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        hours=DM_TOPIC_USER_PURGE_AFTER_HOURS
+    )
+    due = db.list_due_dm_topic_user_messages(cutoff)
+    if not due:
+        return
+    for chat_id, thread_id, message_id in due:
+        await _delete_dm_topic_user_message(
+            bot, db, chat_id, thread_id, message_id
+        )
+    logger.info("Purged %s aged DM topic user message(s)", len(due))
+
+
+def note_dm_topic_user_message_from_update(update, db) -> None:
+    """If the update is inbound user content in a private alert topic, stash it."""
+    if db is None or getattr(update, "callback_query", None) is not None:
+        return
+    msg = getattr(update, "effective_message", None)
+    if msg is None:
+        return
+    from_user = getattr(msg, "from_user", None)
+    if from_user is None or getattr(from_user, "is_bot", False):
+        return
+    if not private_ui_should_go_to_general(msg):
+        return
+    tid = getattr(msg, "message_thread_id", None)
+    if tid is None:
+        return
+    try:
+        thread_id = int(tid)
+    except (TypeError, ValueError):
+        return
+    chat = getattr(msg, "chat", None) or getattr(update, "effective_chat", None)
+    chat_id = getattr(chat, "id", None)
+    if chat_id is None:
+        return
+    mid = getattr(msg, "message_id", None)
+    if mid is None:
+        return
+    note_pending_dm_topic_user_message(db, int(chat_id), thread_id, int(mid))
 
 
 def _kwargs_for_general_send(kwargs: dict) -> dict:

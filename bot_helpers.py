@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 _BROADCAST_SEND_PAUSE = 0.05
 _PAUSE_NOTIFICATIONS_BETA_ID = "pause-notifications"
 
-# Only these may be deleted — never arbitrary user chat history.
-DeleteKind = Literal["bot_own", "user_command"]
-_ALLOWED_DELETE_KINDS = frozenset({"bot_own", "user_command"})
+# Only these may be deleted — never arbitrary group/channel history.
+DeleteKind = Literal["bot_own", "user_command", "dm_topic_user"]
+_ALLOWED_DELETE_KINDS = frozenset({"bot_own", "user_command", "dm_topic_user"})
 
 
 async def delete_chat_message(
@@ -42,15 +42,16 @@ async def delete_chat_message(
     *,
     kind: DeleteKind,
 ) -> None:
-    """Delete a message — bot-owned content or a user command only.
+    """Delete a message — bot-owned, user command, or DM alert-topic noise.
 
     bot_own also covers Telegram service lines for our pin and our
-    forum topic reopen/close. Never call Telegram delete for arbitrary
-    user messages (moderation, chat cleanup, etc.).
+    forum topic reopen/close. dm_topic_user is private alert topics only
+    (cleared on the next alert send). Never delete arbitrary group history.
     """
     if kind not in _ALLOWED_DELETE_KINDS:
         raise ValueError(
-            f"refusing delete: kind must be bot_own or user_command, got {kind!r}"
+            f"refusing delete: kind must be bot_own, user_command, or "
+            f"dm_topic_user, got {kind!r}"
         )
     await bot.delete_message(chat_id=int(chat_id), message_id=int(message_id))
 

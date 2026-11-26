@@ -1346,6 +1346,7 @@ def check_core() -> None:
     _bot_build = _inspect.getsource(_bot_mod.build_application)
     assert '_stream_job_kwargs("process_scheduled_broadcasts"' in _bot_build
     assert '"purge_stale_previous_messages", misfire_grace=' in _bot_build
+    assert '"purge_due_dm_topic_user_messages", misfire_grace=' in _bot_build
     assert '_stream_job_kwargs("check_posthog_status"' in _bot_build
     assert '_stream_job_kwargs("check_twitch_status"' in _bot_build
     assert '_stream_job_kwargs("check_cursor_status"' in _bot_build

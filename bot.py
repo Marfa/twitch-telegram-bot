@@ -618,6 +618,7 @@ from handlers.wizard import (
     wizard_back,
 )
 
+from dm_topics import purge_due_dm_topic_user_messages
 from handlers.delivery import (
     _TELEGRAM_CAPTION_LIMIT,
     _alert_chat_button_markup,
@@ -2834,14 +2835,21 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     async def track_private_user_interaction(
         update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Record inbound private interaction for yearly inactive-user purge."""
+        """Record inbound private interaction for yearly inactive-user purge.
+
+        Also persists user messages left in private alert topics (cleared on
+        the next alert send or after 47h — Bot API cannot close topics in DMs).
+        """
+        from dm_topics import note_dm_topic_user_message_from_update
+
+        db_local: Database = context.application.bot_data["db"]
+        note_dm_topic_user_message_from_update(update, db_local)
         user = update.effective_user
         if user is None or getattr(user, "is_bot", False) is True:
             return
         chat = update.effective_chat
         if chat is None or chat.type != ChatType.PRIVATE:
             return
-        db_local: Database = context.application.bot_data["db"]
         if not db_local.user_exists(user.id):
             return
         db_local.touch_user_interaction(user.id)
@@ -4823,6 +4831,19 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         name="purge_stale_previous_messages",
         job_kwargs=_stream_job_kwargs(
             "purge_stale_previous_messages", misfire_grace=3600
+        ),
+    )
+    app.job_queue.run_repeating(
+        run_job_with_budget(
+            "purge_due_dm_topic_user_messages",
+            3600,
+            purge_due_dm_topic_user_messages,
+        ),
+        interval=3600,
+        first=225,
+        name="purge_due_dm_topic_user_messages",
+        job_kwargs=_stream_job_kwargs(
+            "purge_due_dm_topic_user_messages", misfire_grace=3600
         ),
     )
     app.job_queue.run_repeating(

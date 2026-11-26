@@ -10,6 +10,7 @@ from telegram.error import BadRequest, NetworkError
 
 from bot_helpers import send_reply_keyboard_menu
 from dm_topics import (
+    DM_TOPIC_USER_PURGE_AFTER_HOURS,
     GENERAL_TOPIC_ID,
     STREAMER_TOPIC_LIMIT,
     TOPIC_KEYS,
@@ -20,10 +21,14 @@ from dm_topics import (
     ensure_streamer_topic,
     ensure_user_topic,
     extract_topic_emoji,
+    flush_pending_dm_topic_user_messages,
     icon_custom_emoji_id_for_emoji,
     icon_custom_emoji_id_for_topic,
     install_private_ui_to_general,
+    note_dm_topic_user_message_from_update,
+    note_pending_dm_topic_user_message,
     private_ui_should_go_to_general,
+    purge_due_dm_topic_user_messages,
     reset_topic_icon_cache_for_tests,
     resolve_alert_thread_id,
     streamer_topic_can_enable,
@@ -133,10 +138,128 @@ def _check_start_offloads_flag_lookup() -> None:
     assert ticks > 5, f"/start blocked the event loop (ticker turns={ticks})"
 
 
+def _check_dm_topic_user_noise_queue() -> None:
+    """User noise in private alert topics is DB-persisted; flush + 47h purge."""
+    import tempfile
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+
+    from db import open_database
+    from telegram.constants import ChatType
+
+    assert DM_TOPIC_USER_PURGE_AFTER_HOURS == 47
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = open_database(Path(tmp) / "dm_topic_noise.db")
+        db.clear_dm_topic_user_messages()
+
+        note_pending_dm_topic_user_message(db, 1001, GENERAL_TOPIC_ID, 10)
+        note_pending_dm_topic_user_message(db, -1001, 42, 11)  # group — ignore
+        assert db.list_dm_topic_user_messages(1001, GENERAL_TOPIC_ID) == []
+        assert db.list_dm_topic_user_messages(-1001, 42) == []
+
+        note_pending_dm_topic_user_message(db, 1001, 42, 20)
+        note_pending_dm_topic_user_message(db, 1001, 42, 21)
+        note_pending_dm_topic_user_message(db, 1001, 42, 20)  # dedupe
+        assert db.list_dm_topic_user_messages(1001, 42) == [20, 21]
+
+        # Inbound user content in a private alert topic → persist.
+        db.clear_dm_topic_user_messages()
+        msg = SimpleNamespace(
+            from_user=SimpleNamespace(is_bot=False, id=7),
+            chat=SimpleNamespace(type=ChatType.PRIVATE, id=1001),
+            is_topic_message=True,
+            message_thread_id=99,
+            message_id=55,
+        )
+        upd = SimpleNamespace(
+            callback_query=None,
+            effective_message=msg,
+            effective_chat=msg.chat,
+        )
+        note_dm_topic_user_message_from_update(upd, db)
+        assert db.list_dm_topic_user_messages(1001, 99) == [55]
+
+        # Callback on a bot alert in a topic — do not stash the carrier.
+        db.clear_dm_topic_user_messages()
+        upd_cb = SimpleNamespace(
+            callback_query=object(),
+            effective_message=msg,
+            effective_chat=msg.chat,
+        )
+        note_dm_topic_user_message_from_update(upd_cb, db)
+        assert db.list_dm_topic_user_messages(1001, 99) == []
+
+        # Flush deletes with dm_topic_user; failed deletes still drop the row.
+        db.clear_dm_topic_user_messages()
+        note_pending_dm_topic_user_message(db, 1001, 42, 30)
+        note_pending_dm_topic_user_message(db, 1001, 42, 31)
+        bot = AsyncMock()
+
+        async def _run() -> None:
+            with patch(
+                "bot_helpers.delete_chat_message",
+                new=AsyncMock(
+                    side_effect=[None, BadRequest("message can't be deleted")]
+                ),
+            ) as del_mock:
+                await flush_pending_dm_topic_user_messages(bot, db, 1001, 42)
+                assert del_mock.await_count == 2
+                assert (
+                    del_mock.await_args_list[0].kwargs.get("kind")
+                    == "dm_topic_user"
+                )
+            assert db.list_dm_topic_user_messages(1001, 42) == []
+            # General / missing thread — no-op.
+            note_pending_dm_topic_user_message(db, 1001, 42, 32)
+            await flush_pending_dm_topic_user_messages(
+                bot, db, 1001, GENERAL_TOPIC_ID
+            )
+            assert db.list_dm_topic_user_messages(1001, 42) == [32]
+            await flush_pending_dm_topic_user_messages(bot, db, 1001, None)
+            assert db.list_dm_topic_user_messages(1001, 42) == [32]
+
+            # Age purge (≥47h) deletes without an alert.
+            db.clear_dm_topic_user_messages()
+            note_pending_dm_topic_user_message(db, 1001, 42, 40)
+            old = (
+                datetime.now(timezone.utc) - timedelta(hours=48)
+            ).isoformat()
+            with db._conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE dm_topic_user_messages
+                    SET created_at = ?
+                    WHERE chat_id = ? AND thread_id = ? AND message_id = ?
+                    """,
+                    (old, 1001, 42, 40),
+                )
+            due = db.list_due_dm_topic_user_messages(
+                datetime.now(timezone.utc)
+                - timedelta(hours=DM_TOPIC_USER_PURGE_AFTER_HOURS)
+            )
+            assert (1001, 42, 40) in due
+            ctx = SimpleNamespace(
+                application=SimpleNamespace(bot_data={"db": db}),
+                bot=bot,
+            )
+            with patch(
+                "bot_helpers.delete_chat_message", new_callable=AsyncMock
+            ) as del_age:
+                await purge_due_dm_topic_user_messages(ctx)
+                del_age.assert_awaited()
+                assert del_age.await_args.kwargs.get("kind") == "dm_topic_user"
+            assert db.list_dm_topic_user_messages(1001, 42) == []
+
+        asyncio.run(_run())
+        db.clear_dm_topic_user_messages()
+
+
 def run() -> None:
     assert "live" in TOPIC_KEYS and "giveaway_watch" in TOPIC_KEYS
     _check_new_user_topics_default_on()
     _check_start_offloads_flag_lookup()
+    _check_dm_topic_user_noise_queue()
     for key in TOPIC_KEYS:
         assert key in _TOPIC_ICON_COLOR
         assert key in _TOPIC_ICON_EMOJI and _TOPIC_ICON_EMOJI[key]

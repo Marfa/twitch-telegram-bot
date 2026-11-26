@@ -119,9 +119,15 @@ async def _deliver_alert_content(
     parse_mode: str | None = None,
     prefer_media_message_id: bool = False,
     on_media_fallback=None,
+    db: Database | None = None,
 ):
     """Send alert text, optionally with image above/below. Returns the primary message."""
+    from dm_topics import flush_pending_dm_topic_user_messages
     from message_fx import message_fx_disabled
+
+    # Private alert topics: clear user noise stashed since the last alert.
+    if db is not None:
+        await flush_pending_dm_topic_user_messages(bot, db, chat_id, thread_id)
 
     # Live alerts: deliver immediately (no typing/draft delay).
     async def _once():
@@ -2558,6 +2564,7 @@ async def _send_notification_inner(
             chat_id=sub.chat_id,
             text=text,
             thread_id=thread_id,
+            db=db,
             **_media_kwargs,
         )
     except RetryAfter as exc:
@@ -2586,6 +2593,7 @@ async def _send_notification_inner(
                 parse_mode=alert_parse_mode,
                 prefer_media_message_id=prefer_media_id,
                 on_media_fallback=_on_media_fallback_retry,
+                db=db,
             )
         except (BadRequest, Forbidden, RetryAfter) as retry_exc:
             logger.warning(

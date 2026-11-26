@@ -474,6 +474,29 @@ class Database(Protocol):
 
     def clear_user_topic_threads(self, user_id: int) -> None: ...
 
+    def note_dm_topic_user_message(
+        self,
+        chat_id: int,
+        thread_id: int,
+        message_id: int,
+        *,
+        cap: int = 40,
+    ) -> None: ...
+
+    def list_dm_topic_user_messages(
+        self, chat_id: int, thread_id: int
+    ) -> list[int]: ...
+
+    def remove_dm_topic_user_message(
+        self, chat_id: int, thread_id: int, message_id: int
+    ) -> None: ...
+
+    def list_due_dm_topic_user_messages(
+        self, older_than: datetime
+    ) -> list[tuple[int, int, int]]: ...
+
+    def clear_dm_topic_user_messages(self) -> None: ...
+
     def get_streamer_topic(
         self, user_id: int, twitch_user_id: str
     ) -> dict | None: ...

@@ -594,6 +594,23 @@ class SqliteDatabase:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS dm_topic_user_messages (
+                chat_id INTEGER NOT NULL,
+                thread_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (chat_id, thread_id, message_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_dm_topic_user_messages_created
+            ON dm_topic_user_messages(created_at)
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS user_streamer_topics (
                 user_id INTEGER NOT NULL,
                 twitch_user_id TEXT NOT NULL,
@@ -4335,6 +4352,95 @@ owner_id, twitch_username, twitch_user_id,
                 "DELETE FROM user_topic_threads WHERE user_id = ?",
                 (user_id,),
             )
+
+    def note_dm_topic_user_message(
+        self,
+        chat_id: int,
+        thread_id: int,
+        message_id: int,
+        *,
+        cap: int = 40,
+    ) -> None:
+        """Persist a user message id left in a private alert topic."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO dm_topic_user_messages
+                    (chat_id, thread_id, message_id, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (int(chat_id), int(thread_id), int(message_id), now),
+            )
+            if cap > 0:
+                rows = conn.execute(
+                    """
+                    SELECT message_id FROM dm_topic_user_messages
+                    WHERE chat_id = ? AND thread_id = ?
+                    ORDER BY created_at ASC, message_id ASC
+                    """,
+                    (int(chat_id), int(thread_id)),
+                ).fetchall()
+                excess = len(rows) - int(cap)
+                if excess > 0:
+                    for row in rows[:excess]:
+                        conn.execute(
+                            """
+                            DELETE FROM dm_topic_user_messages
+                            WHERE chat_id = ? AND thread_id = ? AND message_id = ?
+                            """,
+                            (int(chat_id), int(thread_id), int(row["message_id"])),
+                        )
+
+    def list_dm_topic_user_messages(
+        self, chat_id: int, thread_id: int
+    ) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT message_id FROM dm_topic_user_messages
+                WHERE chat_id = ? AND thread_id = ?
+                ORDER BY created_at ASC, message_id ASC
+                """,
+                (int(chat_id), int(thread_id)),
+            ).fetchall()
+        return [int(r["message_id"]) for r in rows]
+
+    def remove_dm_topic_user_message(
+        self, chat_id: int, thread_id: int, message_id: int
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                DELETE FROM dm_topic_user_messages
+                WHERE chat_id = ? AND thread_id = ? AND message_id = ?
+                """,
+                (int(chat_id), int(thread_id), int(message_id)),
+            )
+
+    def list_due_dm_topic_user_messages(
+        self, older_than: datetime
+    ) -> list[tuple[int, int, int]]:
+        cutoff = older_than.astimezone(timezone.utc).isoformat()
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT chat_id, thread_id, message_id
+                FROM dm_topic_user_messages
+                WHERE created_at <= ?
+                ORDER BY created_at ASC, message_id ASC
+                """,
+                (cutoff,),
+            ).fetchall()
+        return [
+            (int(r["chat_id"]), int(r["thread_id"]), int(r["message_id"]))
+            for r in rows
+        ]
+
+    def clear_dm_topic_user_messages(self) -> None:
+        """Test helper — wipe all stashed private alert-topic user messages."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM dm_topic_user_messages")
 
     def get_streamer_topic(
         self, user_id: int, twitch_user_id: str

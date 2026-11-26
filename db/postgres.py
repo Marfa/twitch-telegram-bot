@@ -856,6 +856,23 @@ class PostgresDatabase:
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS dm_topic_user_messages (
+                    chat_id BIGINT NOT NULL,
+                    thread_id BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    PRIMARY KEY (chat_id, thread_id, message_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dm_topic_user_messages_created
+                ON dm_topic_user_messages(created_at)
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_streamer_topics (
                     user_id BIGINT NOT NULL,
                     twitch_user_id TEXT NOT NULL,
@@ -4762,6 +4779,109 @@ owner_id, twitch_username, twitch_user_id,
                 "DELETE FROM user_topic_threads WHERE user_id = %s",
                 (user_id,),
             )
+
+    def note_dm_topic_user_message(
+        self,
+        chat_id: int,
+        thread_id: int,
+        message_id: int,
+        *,
+        cap: int = 40,
+    ) -> None:
+        """Persist a user message id left in a private alert topic."""
+        now = datetime.now(timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO dm_topic_user_messages
+                    (chat_id, thread_id, message_id, created_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (chat_id, thread_id, message_id) DO NOTHING
+                """,
+                (int(chat_id), int(thread_id), int(message_id), now),
+            )
+            if cap > 0:
+                cur.execute(
+                    """
+                    SELECT message_id FROM dm_topic_user_messages
+                    WHERE chat_id = %s AND thread_id = %s
+                    ORDER BY created_at ASC, message_id ASC
+                    """,
+                    (int(chat_id), int(thread_id)),
+                )
+                rows = cur.fetchall()
+                excess = len(rows) - int(cap)
+                if excess > 0:
+                    for row in rows[:excess]:
+                        cur.execute(
+                            """
+                            DELETE FROM dm_topic_user_messages
+                            WHERE chat_id = %s AND thread_id = %s
+                              AND message_id = %s
+                            """,
+                            (
+                                int(chat_id),
+                                int(thread_id),
+                                int(row["message_id"]),
+                            ),
+                        )
+
+    def list_dm_topic_user_messages(
+        self, chat_id: int, thread_id: int
+    ) -> list[int]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT message_id FROM dm_topic_user_messages
+                WHERE chat_id = %s AND thread_id = %s
+                ORDER BY created_at ASC, message_id ASC
+                """,
+                (int(chat_id), int(thread_id)),
+            )
+            rows = cur.fetchall()
+        return [int(r["message_id"]) for r in rows]
+
+    def remove_dm_topic_user_message(
+        self, chat_id: int, thread_id: int, message_id: int
+    ) -> None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                DELETE FROM dm_topic_user_messages
+                WHERE chat_id = %s AND thread_id = %s AND message_id = %s
+                """,
+                (int(chat_id), int(thread_id), int(message_id)),
+            )
+
+    def list_due_dm_topic_user_messages(
+        self, older_than: datetime
+    ) -> list[tuple[int, int, int]]:
+        cutoff = older_than.astimezone(timezone.utc)
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT chat_id, thread_id, message_id
+                FROM dm_topic_user_messages
+                WHERE created_at <= %s
+                ORDER BY created_at ASC, message_id ASC
+                """,
+                (cutoff,),
+            )
+            rows = cur.fetchall()
+        return [
+            (int(r["chat_id"]), int(r["thread_id"]), int(r["message_id"]))
+            for r in rows
+        ]
+
+    def clear_dm_topic_user_messages(self) -> None:
+        """Test helper — wipe all stashed private alert-topic user messages."""
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute("DELETE FROM dm_topic_user_messages")
 
     def get_streamer_topic(
         self, user_id: int, twitch_user_id: str

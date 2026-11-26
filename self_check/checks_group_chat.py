@@ -827,6 +827,7 @@ def _check_message_delete_policy() -> None:
     helpers = (_ROOT / "bot_helpers.py").read_text(encoding="utf-8")
     assert 'kind: DeleteKind' in helpers or 'kind: Literal["bot_own"' in helpers
     assert "bot_own" in helpers and "user_command" in helpers
+    assert "dm_topic_user" in helpers
     # Single raw Telegram delete call site — inside delete_chat_message.
     raw_calls = [
         m.start()
@@ -851,7 +852,8 @@ def _check_message_delete_policy() -> None:
             if forbidden.search(line):
                 raise AssertionError(
                     f"{path.relative_to(_ROOT)}:{i}: use delete_chat_message"
-                    f"(..., kind='bot_own'|'user_command'), not raw delete"
+                    f"(..., kind='bot_own'|'user_command'|'dm_topic_user'), "
+                    f"not raw delete"
                 )
 
 

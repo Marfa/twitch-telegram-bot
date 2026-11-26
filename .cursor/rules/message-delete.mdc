@@ -10,7 +10,7 @@ alwaysApply: false
 
 # Message delete policy
 
-The bot must **never** delete arbitrary chat messages (moderation, cleaning history, other users’ posts).
+The bot must **never** delete arbitrary chat messages (moderation, cleaning history, other users’ posts in groups).
 
 ## Allowed
 
@@ -18,22 +18,25 @@ The bot must **never** delete arbitrary chat messages (moderation, cleaning hist
 |---|---|---|
 | `bot_own` | Messages the bot sent (or Telegram service lines for *our* pin / topic open·close) | Alerts (`delete_other_alerts`), keyboard pulse, progress fallback, pin «bot pinned a …», forum topic reopened/closed by the bot |
 | `user_command` | Slash / free-text that invokes the bot | `/start ah_*` (schedule `/when`/`/day`/`/week` — **no** auto-delete; keep `is_ephemeral`) |
+| `dm_topic_user` | User messages left in a **private** alert topic (not General) | Persisted in `dm_topic_user_messages`; deleted best-effort on the **next** alert send to that topic, or by age (~47h, `purge_due_dm_topic_user_messages`) |
 
 ## How
 
 - Every Telegram delete goes through `delete_chat_message(bot, chat_id, message_id, kind=…)` in `bot_helpers.py`.
-- Pass an explicit `kind="bot_own"` or `kind="user_command"`. Unknown kinds raise.
+- Pass an explicit `kind="bot_own"`, `kind="user_command"`, or `kind="dm_topic_user"`. Unknown kinds raise.
 - Do **not** call `bot.delete_message` / `Message.delete()` directly from handlers.
 - Schedule ephemeral (`/when`/`/day`/`/week`) is **not** deleted by the bot — client delete delivery is unreliable.
+- `dm_topic_user`: private chats only; never use for groups/channels; do not delete immediately on receive — persist in DB, delete on next alert to that topic or after ~47h (before Telegram’s ~48h window).
 
 ## Forbidden
 
 - Deleting random user messages in a group/channel
 - “Clean chat” / moderation helpers
-- Deleting replies that are not bot-owned and not the triggering command
+- Deleting replies that are not bot-owned and not the triggering command (except `dm_topic_user` as above)
 
 ## Checklist
 
 1. New delete? → `delete_chat_message(..., kind=…)`.
 2. New user-trigger cleanup? → `kind="user_command"` only for that command message.
-3. `python -m self_check` (`_check_message_delete_policy` in `checks_group_chat.py`).
+3. Private alert-topic noise? → `kind="dm_topic_user"` via the pending queue + flush-on-alert path.
+4. `python -m self_check` (`_check_message_delete_policy` in `checks_group_chat.py`).
