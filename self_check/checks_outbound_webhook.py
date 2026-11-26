@@ -294,6 +294,22 @@ def check_web_site_locale_helpers() -> None:
     assert web_site.safe_file(web_site.SITE_DIR, "css/main.css") is not None
     assert web_site.safe_file(web_site.SITE_DIR, "css/../../health.py") is None
     assert web_site.safe_file(web_site.SITE_DIR, "/etc/passwd") is None
+    gallery = web_site.ASSETS_DIR / "gallery" / "ph-gallery-01-main-menu.ru.png"
+    assert gallery.is_file()
+    gallery_v = str(int(gallery.stat().st_mtime))
+    landing = web_site.landing_page() or b""
+    assert f"ph-gallery-01-main-menu.ru.png?v={gallery_v}".encode() in landing
+    hero = web_site.SITE_DIR / "images" / "hero-bg.jpg"
+    if hero.is_file():
+        hero_v = str(int(hero.stat().st_mtime))
+        assert f"hero-bg.jpg?v={hero_v}".encode() in landing
+    css_raw = web_site.read_site_file("css/site.css")
+    assert css_raw is not None
+    css_out = web_site.apply_css_asset_versions(css_raw[0], "css/site.css")
+    logo = web_site.SITE_DIR / "images" / "logo-square.png"
+    if logo.is_file():
+        logo_v = str(int(logo.stat().st_mtime))
+        assert f"logo-square.png?v={logo_v}".encode() in css_out
 
 
 def run() -> None:

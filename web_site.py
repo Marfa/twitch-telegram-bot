@@ -264,9 +264,116 @@ def read_assets_file(rel: str) -> tuple[bytes, str] | None:
     return data, content_type_for(path)
 
 
+def _file_version(path: Path) -> str | None:
+    try:
+        return str(int(path.stat().st_mtime))
+    except OSError:
+        return None
+
+
+def _resolve_public_asset(url_path: str) -> Path | None:
+    """Map /site/… or /assets/… (no query) to a file under the matching root."""
+    raw = (url_path or "").split("?", 1)[0].split("#", 1)[0]
+    if raw.startswith("/site/"):
+        return safe_file(SITE_DIR, raw[len("/site/") :])
+    if raw.startswith("/assets/"):
+        return safe_file(ASSETS_DIR, raw[len("/assets/") :])
+    return None
+
+
+def versioned_public_url(url: str) -> str:
+    """Append ?v=<mtime> so browsers refetch when the file changes."""
+    raw = (url or "").strip()
+    if not raw or raw.startswith("data:") or raw.startswith("//"):
+        return url
+    path_part = raw
+    prefix = ""
+    for origin in ("https://twitchbot.games", "http://twitchbot.games"):
+        if raw.startswith(origin + "/"):
+            prefix = origin
+            path_part = raw[len(origin) :]
+            break
+    path_only = path_part.split("?", 1)[0].split("#", 1)[0]
+    path = _resolve_public_asset(path_only)
+    if path is None:
+        return url
+    ver = _file_version(path)
+    if ver is None:
+        return url
+    return f"{prefix}{path_only}?v={ver}"
+
+
+_HTML_ASSET_RE = re.compile(
+    r'(?P<pre>\b(?:src|href|content|data-image-src)\s*=\s*["\'])'
+    r'(?P<url>(?:https?://twitchbot\.games)?/(?:site|assets)/[^"\'?#]+)'
+    r'(?:[?#][^"\']*)?'
+    r'(?P<post>["\'])',
+    re.IGNORECASE,
+)
+
+_CSS_URL_RE = re.compile(
+    r"url\(\s*(?P<quote>[\"']?)(?P<url>[^)\"'#?\s]+)(?:[?#][^)\"']*)?(?P=quote)\s*\)",
+    re.IGNORECASE,
+)
+
+
+def apply_html_asset_versions(html: bytes) -> bytes:
+    """Rewrite /site and /assets URLs in HTML with per-file mtime query."""
+    try:
+        text = html.decode("utf-8")
+    except UnicodeDecodeError:
+        return html
+
+    def _sub(m: re.Match[str]) -> str:
+        return m.group("pre") + versioned_public_url(m.group("url")) + m.group("post")
+
+    return _HTML_ASSET_RE.sub(_sub, text).encode("utf-8")
+
+
+def apply_css_asset_versions(css: bytes, css_rel: str) -> bytes:
+    """Rewrite relative url(...) in a site CSS file to versioned /site/ paths."""
+    try:
+        text = css.decode("utf-8")
+    except UnicodeDecodeError:
+        return css
+    css_dir = Path(css_rel.replace("\\", "/")).parent
+
+    def _sub(m: re.Match[str]) -> str:
+        raw = m.group("url").strip()
+        quote = m.group("quote") or ""
+        if (
+            not raw
+            or raw.startswith("data:")
+            or raw.startswith("http://")
+            or raw.startswith("https://")
+            or raw.startswith("//")
+        ):
+            return m.group(0)
+        if raw.startswith("/"):
+            versioned = versioned_public_url(raw)
+            return f"url({quote}{versioned}{quote})"
+        # Relative to the CSS file (e.g. ../images/logo.png → /site/images/…).
+        joined = (css_dir / raw).as_posix()
+        parts = [p for p in joined.split("/") if p and p != "."]
+        resolved: list[str] = []
+        for part in parts:
+            if part == "..":
+                if resolved:
+                    resolved.pop()
+                continue
+            resolved.append(part)
+        public = "/site/" + "/".join(resolved)
+        versioned = versioned_public_url(public)
+        return f"url({quote}{versioned}{quote})"
+
+    return _CSS_URL_RE.sub(_sub, text).encode("utf-8")
+
+
 def landing_page() -> bytes | None:
     got = read_site_file("index.html")
-    return None if got is None else got[0]
+    if got is None:
+        return None
+    return apply_html_asset_versions(got[0])
 
 
 def sitemap_bytes() -> bytes | None:
@@ -426,7 +533,7 @@ def wrap_doc_page(
 </body>
 </html>
 """
-    return page.encode("utf-8")
+    return apply_html_asset_versions(page.encode("utf-8"))
 
 
 def guide_page(lang: str) -> bytes | None:

@@ -1277,6 +1277,9 @@ def _try_serve_site_static(handler: BaseHTTPRequestHandler, path: str) -> bool:
             handler.end_headers()
             return True
         body, ctype = got
+        if ctype.startswith("text/css"):
+            body = web_site.apply_css_asset_versions(body, rel)
+        # Versioned URLs (?v=mtime) make long cache safe; HTML/CSS rewrite on change.
         _send_bytes(handler, body, content_type=ctype, cache_control="public, max-age=86400")
         return True
     if path.startswith("/assets/"):
