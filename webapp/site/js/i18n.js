@@ -7,7 +7,7 @@
     en: {
       meta_title: "Twitch X Telegram — stream alerts",
       meta_desc:
-        "Go-live for Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo, and Kick; Twitch category, schedule, and end-of-stream — in Telegram, Discord, or your HTTPS webhook. Free plan + Premium Stars.",
+        "Go-live for Twitch, YouTube Live, TikTok, VK Play, GoodGame, and Kick; Twitch category, schedule, and end-of-stream — in Telegram, Discord, or your HTTPS webhook. Free plan + Premium Stars.",
       nav_home: "Home",
       nav_about: "Features",
       nav_pricing: "Pricing",
@@ -20,10 +20,10 @@
       hero_scroll: "Scroll Down",
       about_title: "What the bot does",
       about_lead:
-        "Pick a Twitch channel or a go-live link from YouTube Live, TikTok, VK Play Live, GoodGame, Trovo, or Kick; choose when to notify and where to send it — DM, channel, Discord, or a signed webhook.",
+        "Pick a Twitch channel or a go-live link from YouTube Live, TikTok, VK Play Live, GoodGame, or Kick; choose when to notify and where to send it — DM, channel, Discord, or a signed webhook.",
       feat_alerts_t: "Alert types",
       feat_alerts_d:
-        "Stream start (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), category change, upcoming from Twitch schedule, stream end, Drops, game alerts, release dates, and free giveaways.",
+        "Stream start (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Kick), category change, upcoming from Twitch schedule, stream end, Drops, game alerts, release dates, and free giveaways.",
       feat_dest_t: "Anywhere you need",
       feat_dest_d:
         "Private chat, Telegram channel/group (topics supported), Discord Incoming Webhook, or your own HTTPS JSON webhook with HMAC.",
@@ -95,7 +95,7 @@
     ru: {
       meta_title: "Twitch X Telegram — оповещения о стримах",
       meta_desc:
-        "Старт стрима на Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo и Kick; смена категории, расписание и конец эфира для Twitch — в Telegram, Discord или на ваш HTTPS webhook. Бесплатно и Premium за Stars.",
+        "Старт стрима на Twitch, YouTube Live, TikTok, VK Play, GoodGame и Kick; смена категории, расписание и конец эфира для Twitch — в Telegram, Discord или на ваш HTTPS webhook. Бесплатно и Premium за Stars.",
       nav_home: "Главная",
       nav_about: "Возможности",
       nav_pricing: "Тарифы",
@@ -108,10 +108,10 @@
       hero_scroll: "Листайте вниз",
       about_title: "Что умеет бот",
       about_lead:
-        "Выберите канал Twitch или ссылку на старт эфира YouTube Live, TikTok, VK Play Live, GoodGame, Trovo или Kick; момент оповещения и куда слать — личка, канал, Discord или подписанный webhook.",
+        "Выберите канал Twitch или ссылку на старт эфира YouTube Live, TikTok, VK Play Live, GoodGame или Kick; момент оповещения и куда слать — личка, канал, Discord или подписанный webhook.",
       feat_alerts_t: "Типы оповещений",
       feat_alerts_d:
-        "Старт стрима (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), смена категории, предстоящий по расписанию Twitch, конец эфира, Drops, оповещения по игре, релизы и раздачи.",
+        "Старт стрима (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Kick), смена категории, предстоящий по расписанию Twitch, конец эфира, Drops, оповещения по игре, релизы и раздачи.",
       feat_dest_t: "Куда угодно",
       feat_dest_d:
         "Личка, канал/группа Telegram (темы), Discord Incoming Webhook или свой HTTPS JSON webhook с HMAC.",
@@ -183,7 +183,7 @@
     uk: {
       meta_title: "Twitch X Telegram — сповіщення про стріми",
       meta_desc:
-        "Старт стріму на Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo і Kick; зміна категорії, розклад і кінець ефіру для Twitch — у Telegram, Discord або на ваш HTTPS webhook.",
+        "Старт стріму на Twitch, YouTube Live, TikTok, VK Play, GoodGame і Kick; зміна категорії, розклад і кінець ефіру для Twitch — у Telegram, Discord або на ваш HTTPS webhook.",
       nav_home: "Головна",
       nav_about: "Можливості",
       nav_pricing: "Тарифи",
@@ -196,10 +196,10 @@
       hero_scroll: "Гортайте вниз",
       about_title: "Що вміє бот",
       about_lead:
-        "Оберіть канал Twitch або посилання на старт ефіру YouTube Live, TikTok, VK Play Live, GoodGame, Trovo чи Kick; момент сповіщення і куди надсилати — особисті, канал, Discord або підписаний webhook.",
+        "Оберіть канал Twitch або посилання на старт ефіру YouTube Live, TikTok, VK Play Live, GoodGame чи Kick; момент сповіщення і куди надсилати — особисті, канал, Discord або підписаний webhook.",
       feat_alerts_t: "Типи сповіщень",
       feat_alerts_d:
-        "Старт стріму (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), зміна категорії, майбутній за розкладом Twitch, кінець ефіру, Drops, гра, релізи та роздачі.",
+        "Старт стріму (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Kick), зміна категорії, майбутній за розкладом Twitch, кінець ефіру, Drops, гра, релізи та роздачі.",
       feat_dest_t: "Куди завгодно",
       feat_dest_d:
         "Особисті, канал/група Telegram, Discord Incoming Webhook або власний HTTPS JSON webhook з HMAC.",
@@ -271,7 +271,7 @@
     it: {
       meta_title: "Twitch X Telegram — avvisi live",
       meta_desc:
-        "Go-live per Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo e Kick; categoria, schedule e fine stream per Twitch — su Telegram, Discord o il tuo webhook HTTPS. Piano gratis + Premium con Stars.",
+        "Go-live per Twitch, YouTube Live, TikTok, VK Play, GoodGame e Kick; categoria, schedule e fine stream per Twitch — su Telegram, Discord o il tuo webhook HTTPS. Piano gratis + Premium con Stars.",
       nav_home: "Home",
       nav_about: "Funzioni",
       nav_pricing: "Prezzi",
@@ -284,10 +284,10 @@
       hero_scroll: "Scorri in basso",
       about_title: "Cosa fa il bot",
       about_lead:
-        "Scegli un canale Twitch o un link go-live di YouTube Live, TikTok, VK Play Live, GoodGame, Trovo o Kick; quando avvisare e dove inviare — DM, canale, Discord o webhook firmato.",
+        "Scegli un canale Twitch o un link go-live di YouTube Live, TikTok, VK Play Live, GoodGame o Kick; quando avvisare e dove inviare — DM, canale, Discord o webhook firmato.",
       feat_alerts_t: "Tipi di avviso",
       feat_alerts_d:
-        "Inizio live (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), cambio categoria, upcoming dallo schedule Twitch, fine stream, Drops, giochi, uscite e giveaway.",
+        "Inizio live (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Kick), cambio categoria, upcoming dallo schedule Twitch, fine stream, Drops, giochi, uscite e giveaway.",
       feat_dest_t: "Dove serve",
       feat_dest_d:
         "Chat privata, canale/gruppo Telegram, Discord Incoming Webhook o il tuo webhook JSON HTTPS con HMAC.",

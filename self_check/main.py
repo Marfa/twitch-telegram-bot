@@ -173,11 +173,13 @@ def main() -> None:
     from .checks_stream_platforms import (
         check_external_stream_parse_urls,
         check_external_user_id_roundtrip,
+        check_external_live_stream_id_stable,
         check_external_subscription_db,
     )
 
     check_external_stream_parse_urls()
     check_external_user_id_roundtrip()
+    check_external_live_stream_id_stable()
     check_external_subscription_db()
     from .checks_top_donations import check_top_donations
 

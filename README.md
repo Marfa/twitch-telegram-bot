@@ -1,6 +1,6 @@
-# Twitch X Telegram / Discord — уведомления о стримах (Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), drops, сообщений в ЛС и работа с расписанием
+# Twitch X Telegram / Discord — уведомления о стримах (Twitch, YouTube Live, TikTok, VK Play, GoodGame, Kick), drops, сообщений в ЛС и работа с расписанием
 
-**Старт стрима на Twitch, YouTube Live, TikTok, VK Play Live, GoodGame, Trovo или Kick; смена категории, скоро стрим или конец эфира, доступен новый Drops, раздачи игр или пришло сообщение в ЛС — бот напишет туда, куда вы скажете: в Telegram, Discord или на свой Webhook.** AI-клипы из VOD. Настройка Расписания Twitch из Telegram.
+**Старт стрима на Twitch, YouTube Live, TikTok, VK Play Live, GoodGame или Kick; смена категории, скоро стрим или конец эфира, доступен новый Drops, раздачи игр или пришло сообщение в ЛС — бот напишет туда, куда вы скажете: в Telegram, Discord или на свой Webhook.** AI-клипы из VOD. Настройка Расписания Twitch из Telegram.
 
 > [!IMPORTANT]
 > **Готовый бот:** [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню · [статус](https://pingzen.dev/status/bot-themarfa)
@@ -21,7 +21,7 @@ English: [README.en.md](README.en.md)
 | Языки | Русский, English, Українська, Italiano — выбор при первом `/start`, смена в **⚙️ Настройки** |
 | Типы оповещений | Начало стрима · смена категории · предстоящий (Twitch schedule) · окончание стрима · Drops · оповещение по игре · выход релизов (IGDB) · раздачи игр (GamerPower + ITAD) |
 | Куда слать | Личка, канал/группа/сообщество (с темами), Discord или универсальный HTTPS Webhook (JSON + HMAC) |
-| Канал | Twitch: ссылка, `m.twitch.tv` или username; для **начала стрима** также ссылка YouTube Live / TikTok / VK Play Live / GoodGame / Trovo / Kick (упрощённый мастер). Ссылка Twitch в ЛС вне мастера → предложение создать оповещение |
+| Канал | Twitch: ссылка, `m.twitch.tv` или username; для **начала стрима** также ссылка YouTube Live / TikTok / VK Play Live / GoodGame / Kick (упрощённый мастер). Ссылка Twitch в ЛС вне мастера → предложение создать оповещение |
 | Текст | Шаблон с плейсхолдерами; примеры `{username}`, `{game}`, `{name}` — [полный список](https://twitchbot.games/placeholders?lang=ru). **Очистка названия** — в «Дополнительно» при создании и в меню редактора при правке: убирает из `{name}` `@стримеров` (если канал есть на Twitch) и `!команды` (по умолчанию выкл) |
 | 🎲 Оповещение по игре | В **➕ Новая подписка** (под Drops): поиск стримов или оповещение; категория → фильтры (теги / зрители / язык / 18+) → **realtime или ежечасный дайджест**; live → иначе VOD; в **📋 Мои подписки** — отдельная категория |
 | 📅 Выход релизов | **➕ Новая подписка** → под «Оповещение по игре»; поиск в IGDB (локальный dump, при отсутствии — live API); даты/платформы (если даты нет — создаём всё равно, подтянем позже); за N дней; общий лимит 5 активных; пауза после оповещения по всем выбранным платформам; на карточке для **ru** — «Купить» → https://gglead.org/go22483 |

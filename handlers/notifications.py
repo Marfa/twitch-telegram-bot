@@ -1620,8 +1620,6 @@ async def _check_external_live_alerts(
     context: ContextTypes.DEFAULT_TYPE, subs: list[Subscription]
 ) -> None:
     """Poll non-Twitch platforms for go-live / offline on standalone alerts."""
-    import time
-
     import stream_platforms as sp
     from bot import _render_sub_template
 
@@ -1650,8 +1648,15 @@ async def _check_external_live_alerts(
     if not by_uid:
         return
 
-    def _probe() -> dict[str, dict]:
+    def _probe() -> tuple[dict[str, dict], set[str]]:
+        """Return (live_streams, unknown_uids).
+
+        Stream ``id`` is the stable external uid for the whole online session —
+        minute-bucket ids used to look like Helix restarts every poll.
+        Probe failures land in ``unknown_uids`` so we do not flip live→offline.
+        """
         out: dict[str, dict] = {}
+        unknown: set[str] = set()
         for uid, ch in channels.items():
             try:
                 online, stream_url = sp.external_live_state(ch)
@@ -1661,6 +1666,7 @@ async def _check_external_live_alerts(
                     uid,
                     getattr(ch, "platform", ""),
                 )
+                unknown.add(uid)
                 continue
             if not online:
                 continue
@@ -1668,7 +1674,7 @@ async def _check_external_live_alerts(
                 getattr(ch, "label", None) or getattr(ch, "channel_id", "") or ""
             ).strip()
             out[uid] = {
-                "id": f"{uid}:{int(time.time()) // 60}",
+                "id": uid,
                 "user_login": login,
                 "user_name": login,
                 "title": "",
@@ -1676,20 +1682,17 @@ async def _check_external_live_alerts(
                 "url": stream_url,
                 "started_at": "",
             }
-        return out
+        return out, unknown
 
-    live_streams = await asyncio.to_thread(_probe)
-    user_ids = list(by_uid.keys())
+    live_streams, unknown_uids = await asyncio.to_thread(_probe)
+    # Only update transitions for uids we successfully probed this tick.
+    user_ids = [uid for uid in by_uid if uid not in unknown_uids]
     was_primed = primed
     went_live, went_offline = live_transitions(
         last_live, user_ids, live_streams, primed=primed
     )
-    stream_restarts = stream_id_restart_uids(
-        primed=primed,
-        live_streams=live_streams,
-        last_stream_ids=last_stream_ids,
-        went_live=went_live,
-    )
+    # External platforms have no Helix-style mid-session stream id; do not
+    # treat a synthetic id change as a restart (that caused alert spam).
     for uid, stream in live_streams.items():
         sid = str(stream.get("id") or "")
         if sid:
@@ -1701,7 +1704,7 @@ async def _check_external_live_alerts(
         for sub in by_uid.get(uid, []):
             cancel_repeat_notify_jobs(context.job_queue, db, sub.id)
 
-    for uid in list(went_live) + stream_restarts:
+    for uid in went_live:
         stream = live_streams.get(uid)
         if not stream:
             continue

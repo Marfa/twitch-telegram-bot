@@ -1,4 +1,4 @@
-"""Standalone live alerts for non-Twitch platforms (YouTube, TikTok, VK Play, GG, Trovo, Kick)."""
+"""Standalone live alerts for non-Twitch platforms (YouTube, TikTok, VK Play, GG, Kick)."""
 from __future__ import annotations
 
 import logging
@@ -24,11 +24,9 @@ EXTERNAL_PLATFORMS = (
     "tiktok",
     "vkplay",
     "goodgame",
-    "trovo",
     "kick",
 )
 
-_TROVO_HOSTS = frozenset({"trovo.live", "www.trovo.live"})
 _KICK_HOSTS = frozenset({"kick.com", "www.kick.com"})
 
 _EXTERNAL_HOSTS = (
@@ -36,7 +34,6 @@ _EXTERNAL_HOSTS = (
     | _VK_HOSTS
     | _YT_HOSTS
     | _TT_HOSTS
-    | _TROVO_HOSTS
     | _KICK_HOSTS
 )
 
@@ -84,7 +81,7 @@ def looks_like_external_stream_url(text: str) -> bool:
 
 
 def parse_external_stream_url(text: str) -> MultistreamChannel | None:
-    """Parse a single non-Twitch stream URL (all six platforms)."""
+    """Parse a single non-Twitch stream URL (YouTube / TikTok / VK / GG / Kick)."""
     raw = (text or "").strip()
     if not raw:
         return None
@@ -99,8 +96,6 @@ def parse_external_stream_url(text: str) -> MultistreamChannel | None:
     except Exception:
         return None
     host = (parsed.hostname or "").lower()
-    if host in _TROVO_HOSTS:
-        return _parse_trovo(parsed)
     if host in _KICK_HOSTS:
         return _parse_kick(parsed)
     return None
@@ -110,9 +105,6 @@ def external_live_state(ch: MultistreamChannel) -> tuple[bool, str]:
     """Return (online, stream_url) for an external channel."""
     if ch.platform in ("goodgame", "vkplay", "youtube", "tiktok"):
         return _multistream_live_state(ch)
-    if ch.platform == "trovo":
-        online = _trovo_online(ch.channel_id)
-        return online, _canonical_external_url(ch)
     if ch.platform == "kick":
         online, live_url = _kick_live_state(ch.channel_id)
         return online, live_url or _canonical_external_url(ch)
@@ -161,8 +153,6 @@ def _canonical_external_url(ch: MultistreamChannel) -> str:
 
 def _default_url(platform: str, channel_id: str) -> str:
     cid = (channel_id or "").strip().lstrip("@")
-    if platform == "trovo":
-        return f"https://trovo.live/{cid}"
     if platform == "kick":
         return f"https://kick.com/{cid}"
     if platform == "tiktok":
@@ -174,25 +164,6 @@ def _default_url(platform: str, channel_id: str) -> str:
     if platform == "vkplay":
         return f"https://live.vkvideo.ru/{cid}"
     return ""
-
-
-def _parse_trovo(parsed) -> MultistreamChannel | None:
-    parts = [unquote(p) for p in (parsed.path or "").split("/") if p]
-    if not parts:
-        return None
-    # /s/Username/... or /Username
-    login = ""
-    if parts[0].lower() == "s" and len(parts) >= 2:
-        login = parts[1]
-    elif parts[0].lower() not in ("chat", "clip", "clips", "api", "embed"):
-        login = parts[0]
-    login = login.strip()
-    if not login or not re.fullmatch(r"[\w.\-]{2,64}", login, re.UNICODE):
-        return None
-    canon = f"https://trovo.live/{login}"
-    return MultistreamChannel(
-        platform="trovo", url=canon, channel_id=login, label=login
-    )
 
 
 def _parse_kick(parsed) -> MultistreamChannel | None:
@@ -220,64 +191,29 @@ def _parse_kick(parsed) -> MultistreamChannel | None:
     )
 
 
-def _trovo_online(login: str) -> bool:
-    """Best-effort Trovo live check via public channel-detail endpoint."""
-    slug = (login or "").strip()
-    if not slug:
-        return False
-    try:
-        resp = _SESSION.get(
-            "https://api-web.trovo.live/page/get-channel-detail",
-            params={"username": slug},
-            headers={"Referer": f"https://trovo.live/{slug}"},
-            timeout=12,
-        )
-        if resp.status_code != 200:
-            logger.warning("Trovo status HTTP %s for %s", resp.status_code, slug)
-            return False
-        data = resp.json()
-        if not isinstance(data, dict):
-            return False
-        # Shapes vary: isLive / is_live / streamer_info.isLive
-        if "isLive" in data:
-            return bool(data.get("isLive"))
-        if "is_live" in data:
-            return bool(data.get("is_live"))
-        info = data.get("streamer_info") or data.get("channelInfo") or {}
-        if isinstance(info, dict):
-            if "isLive" in info:
-                return bool(info.get("isLive"))
-            if "is_live" in info:
-                return bool(info.get("is_live"))
-        return False
-    except Exception:
-        logger.exception("Trovo status failed for %s", slug)
-        return False
-
-
 def _kick_live_state(slug: str) -> tuple[bool, str]:
-    """Kick public channel API: livestream object present when live."""
+    """Kick public channel API: livestream object present when live.
+
+    Raises on transport / unexpected HTTP errors so callers can treat the
+    result as unknown (do not flip live→offline on a blip).
+    """
     name = (slug or "").strip()
     if not name:
         return False, ""
-    try:
-        resp = _SESSION.get(
-            f"https://kick.com/api/v2/channels/{name}",
-            headers={"Accept": "application/json", "Referer": f"https://kick.com/{name}"},
-            timeout=12,
-        )
-        if resp.status_code == 404:
-            return False, f"https://kick.com/{name}"
-        if resp.status_code != 200:
-            logger.warning("Kick status HTTP %s for %s", resp.status_code, name)
-            return False, f"https://kick.com/{name}"
-        data = resp.json()
-        if not isinstance(data, dict):
-            return False, f"https://kick.com/{name}"
-        live = data.get("livestream")
-        if live and isinstance(live, dict):
-            return True, f"https://kick.com/{name}"
+    resp = _SESSION.get(
+        f"https://kick.com/api/v2/channels/{name}",
+        headers={"Accept": "application/json", "Referer": f"https://kick.com/{name}"},
+        timeout=12,
+    )
+    if resp.status_code == 404:
         return False, f"https://kick.com/{name}"
-    except Exception:
-        logger.exception("Kick status failed for %s", name)
-        return False, f"https://kick.com/{name}"
+    if resp.status_code != 200:
+        logger.warning("Kick status HTTP %s for %s", resp.status_code, name)
+        raise RuntimeError(f"Kick HTTP {resp.status_code}")
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("Kick response is not an object")
+    live = data.get("livestream")
+    if live and isinstance(live, dict):
+        return True, f"https://kick.com/{name}"
+    return False, f"https://kick.com/{name}"

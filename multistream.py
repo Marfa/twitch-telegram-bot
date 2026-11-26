@@ -515,79 +515,86 @@ def _youtube_resolve_for_custom(custom: str) -> str | None:
 
 
 def _goodgame_online(login: str) -> bool:
+    """True when the channel is live.
+
+    Raises on transport / unexpected HTTP errors so external alert polling can
+    keep the previous live state instead of treating a blip as offline.
+    """
     url = f"https://goodgame.ru/api/4/users/{login}/stream"
     try:
         resp = _SESSION.get(url, timeout=12)
-        if resp.status_code == 404:
-            # Fallback to legacy status API.
-            return _goodgame_online_legacy(login)
-        if resp.status_code != 200:
-            logger.warning("GoodGame status HTTP %s for %s", resp.status_code, login)
-            return False
-        data = resp.json()
-        if isinstance(data, dict) and "online" in data:
-            return bool(data.get("online"))
     except Exception:
         logger.exception("GoodGame status failed for %s", login)
+        raise
+    if resp.status_code == 404:
+        # Fallback to legacy status API.
+        return _goodgame_online_legacy(login)
+    if resp.status_code != 200:
+        logger.warning("GoodGame status HTTP %s for %s", resp.status_code, login)
+        raise RuntimeError(f"GoodGame HTTP {resp.status_code}")
+    data = resp.json()
+    if isinstance(data, dict) and "online" in data:
+        return bool(data.get("online"))
     return _goodgame_online_legacy(login)
 
 
 def _goodgame_online_legacy(login: str) -> bool:
-    try:
-        resp = _SESSION.get(
-            "https://goodgame.ru/api/getchannelstatus",
-            params={"id": login, "fmt": "json"},
-            timeout=12,
+    resp = _SESSION.get(
+        "https://goodgame.ru/api/getchannelstatus",
+        params={"id": login, "fmt": "json"},
+        timeout=12,
+    )
+    if resp.status_code != 200:
+        logger.warning(
+            "GoodGame legacy status HTTP %s for %s", resp.status_code, login
         )
-        if resp.status_code != 200:
-            return False
-        data = resp.json()
-        # Response shape: { "<id>": { "status": "Live"|..., ... } } or list-like.
-        if isinstance(data, dict):
-            for val in data.values():
-                if not isinstance(val, dict):
-                    continue
-                status = str(val.get("status") or "").lower()
-                if status in ("live", "online", "1", "true"):
-                    return True
-                if val.get("online") is True:
-                    return True
-        return False
-    except Exception:
-        logger.exception("GoodGame legacy status failed for %s", login)
-        return False
+        raise RuntimeError(f"GoodGame legacy HTTP {resp.status_code}")
+    data = resp.json()
+    # Response shape: { "<id>": { "status": "Live"|..., ... } } or list-like.
+    if isinstance(data, dict):
+        for val in data.values():
+            if not isinstance(val, dict):
+                continue
+            status = str(val.get("status") or "").lower()
+            if status in ("live", "online", "1", "true"):
+                return True
+            if val.get("online") is True:
+                return True
+    return False
 
 
 def _vkplay_online(slug: str) -> bool:
+    """True when the channel is live. Raises on transport / unexpected HTTP."""
     url = f"https://api.live.vkvideo.ru/v1/blog/{slug}/public_video_stream"
-    try:
-        resp = _SESSION.get(
-            url,
-            headers={"Referer": f"https://live.vkvideo.ru/{slug}"},
-            timeout=12,
-        )
-        if resp.status_code == 404:
-            return False
-        if resp.status_code != 200:
-            logger.warning("VK Play status HTTP %s for %s", resp.status_code, slug)
-            return False
-        data = resp.json()
-        if not isinstance(data, dict):
-            return False
-        if data.get("error"):
-            return False
-        stream_data = data.get("data")
-        if isinstance(stream_data, list):
-            return len(stream_data) > 0
-        if isinstance(stream_data, dict):
-            return bool(stream_data)
+    resp = _SESSION.get(
+        url,
+        headers={"Referer": f"https://live.vkvideo.ru/{slug}"},
+        timeout=12,
+    )
+    if resp.status_code == 404:
         return False
-    except Exception:
-        logger.exception("VK Play status failed for %s", slug)
+    if resp.status_code != 200:
+        logger.warning("VK Play status HTTP %s for %s", resp.status_code, slug)
+        raise RuntimeError(f"VK Play HTTP {resp.status_code}")
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("VK Play response is not an object")
+    if data.get("error"):
         return False
+    stream_data = data.get("data")
+    if isinstance(stream_data, list):
+        return len(stream_data) > 0
+    if isinstance(stream_data, dict):
+        return bool(stream_data)
+    return False
 
 
 def _youtube_live_video_id(channel_id: str) -> str | None:
+    """Return live video id, or None when the channel is offline.
+
+    Raises when the YouTube API call fails so live-alert polling can keep the
+    previous state instead of treating a blip as offline.
+    """
     data = _youtube_api_get(
         "search",
         {
@@ -599,7 +606,7 @@ def _youtube_live_video_id(channel_id: str) -> str | None:
         },
     )
     if data is None:
-        return None
+        raise RuntimeError("YouTube live probe failed")
     items = data.get("items") or []
     if not items or not isinstance(items[0], dict):
         return None
@@ -617,38 +624,37 @@ def _tiktok_online(unique_id: str) -> bool:
     Gray area: TikTok has no public Live Status API. We call the same
     ``/api-live/user/room/`` JSON endpoint the TikTok web live page (and
     Streamlink) uses. Upgrade path: official TikTok Live API if shipped.
+
+    Raises on transport / unexpected HTTP errors so live-alert polling can
+    keep the previous state instead of treating a blip as offline.
     """
     uid = (unique_id or "").strip().lstrip("@")
     if not uid:
         return False
+    resp = _SESSION.get(
+        "https://www.tiktok.com/api-live/user/room/",
+        params={"aid": "1988", "sourceType": "54", "uniqueId": uid},
+        headers={"Referer": f"https://www.tiktok.com/@{uid}/live"},
+        timeout=12,
+    )
+    if resp.status_code != 200:
+        logger.warning("TikTok status HTTP %s for %s", resp.status_code, uid)
+        raise RuntimeError(f"TikTok HTTP {resp.status_code}")
+    payload = resp.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError("TikTok response is not an object")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return False
+    live_room = data.get("liveRoom")
+    status = None
+    if isinstance(live_room, dict) and "status" in live_room:
+        status = live_room.get("status")
+    elif "status" in (data.get("user") or {}):
+        status = (data.get("user") or {}).get("status")
+    if status is None:
+        return False
     try:
-        resp = _SESSION.get(
-            "https://www.tiktok.com/api-live/user/room/",
-            params={"aid": "1988", "sourceType": "54", "uniqueId": uid},
-            headers={"Referer": f"https://www.tiktok.com/@{uid}/live"},
-            timeout=12,
-        )
-        if resp.status_code != 200:
-            logger.warning("TikTok status HTTP %s for %s", resp.status_code, uid)
-            return False
-        payload = resp.json()
-        if not isinstance(payload, dict):
-            return False
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            return False
-        live_room = data.get("liveRoom")
-        status = None
-        if isinstance(live_room, dict) and "status" in live_room:
-            status = live_room.get("status")
-        elif "status" in (data.get("user") or {}):
-            status = (data.get("user") or {}).get("status")
-        if status is None:
-            return False
-        try:
-            return int(status) != _TT_STATUS_OFFLINE
-        except (TypeError, ValueError):
-            return False
-    except Exception:
-        logger.exception("TikTok status failed for %s", uid)
+        return int(status) != _TT_STATUS_OFFLINE
+    except (TypeError, ValueError):
         return False

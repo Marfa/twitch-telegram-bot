@@ -592,7 +592,7 @@ class Subscription:
     # Encrypted HTTPS URL + HMAC secret when dest_type == "webhook" (else "").
     webhook_url: str = ""
     webhook_secret: str = ""
-    # Non-Twitch live alerts: youtube|tiktok|vkplay|goodgame|trovo|kick (else twitch).
+    # Non-Twitch live alerts: youtube|tiktok|vkplay|goodgame|kick (else twitch).
     stream_platform: str = "twitch"
     stream_url: str = ""
 

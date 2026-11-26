@@ -35,19 +35,15 @@ def check_external_stream_parse_urls() -> None:
     assert kick.channel_id == "xqc"
     assert kick.url == "https://kick.com/xqc"
 
-    trovo = parse_external_stream_url("https://trovo.live/SomeStreamer")
-    assert trovo is not None
-    assert trovo.platform == "trovo"
-    assert trovo.channel_id == "SomeStreamer"
-
-    trovo_s = parse_external_stream_url("https://trovo.live/s/SomeStreamer/123")
-    assert trovo_s is not None and trovo_s.channel_id == "SomeStreamer"
+    # Trovo is shut down — URLs must not parse as an external platform.
+    assert parse_external_stream_url("https://trovo.live/SomeStreamer") is None
+    assert parse_external_stream_url("https://trovo.live/s/SomeStreamer/123") is None
+    assert not looks_like_external_stream_url("trovo.live/foo")
 
     assert parse_external_stream_url("https://example.com/nope") is None
     assert parse_external_stream_url("just-a-username") is None
 
     assert looks_like_external_stream_url("https://kick.com/xqc")
-    assert looks_like_external_stream_url("trovo.live/foo")
     assert not looks_like_external_stream_url("https://twitch.tv/marfapr")
     assert not looks_like_external_stream_url("marfapr")
 
@@ -59,6 +55,7 @@ def check_external_user_id_roundtrip() -> None:
     assert parsed == ("kick", "xqc")
     assert parse_external_user_id("12345") is None
     assert parse_external_user_id("ext:unknown:x") is None
+    assert parse_external_user_id("ext:trovo:x") is None
 
     ch = channel_from_subscription(
         stream_platform="kick",
@@ -69,6 +66,26 @@ def check_external_user_id_roundtrip() -> None:
     assert ch is not None
     assert ch.platform == "kick"
     assert ch.channel_id == "xqc"
+
+
+def check_external_live_stream_id_stable() -> None:
+    """External go-live must use a stable stream id (no minute buckets / restarts)."""
+    import ast
+    import inspect
+
+    from handlers import notifications as notif
+
+    src = inspect.getsource(notif._check_external_live_alerts)
+    # Regression: uid:{epoch//60} looked like a Helix restart every minute.
+    assert "time.time()" not in src
+    assert "// 60" not in src
+    assert "stream_id_restart_uids" not in src
+    # Stable id while online.
+    assert '"id": uid' in src or "'id': uid" in src
+    # Probe failures must not flip last_live (unknown set).
+    assert "unknown" in src
+    # Sanity: function still parses.
+    ast.parse(src)
 
 
 def check_external_subscription_db() -> None:

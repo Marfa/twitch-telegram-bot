@@ -1,6 +1,6 @@
-# Twitch X Telegram / Discord — stream alerts (Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), Drops, whispers, and schedule tools
+# Twitch X Telegram / Discord — stream alerts (Twitch, YouTube Live, TikTok, VK Play, GoodGame, Kick), Drops, whispers, and schedule tools
 
-**Go-live on Twitch, YouTube Live, TikTok, VK Play Live, GoodGame, Trovo, or Kick; category change, upcoming or stream end, a new Drop, game giveaways, or a Twitch whisper — the bot notifies wherever you choose: Telegram, Discord, or your own Webhook.** AI clips from VOD. Manage Twitch schedule from Telegram.
+**Go-live on Twitch, YouTube Live, TikTok, VK Play Live, GoodGame, or Kick; category change, upcoming or stream end, a new Drop, game giveaways, or a Twitch whisper — the bot notifies wherever you choose: Telegram, Discord, or your own Webhook.** AI clips from VOD. Manage Twitch schedule from Telegram.
 
 > [!IMPORTANT]
 > **Live bot:** [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu · [status](https://pingzen.dev/status/bot-themarfa)
@@ -21,7 +21,7 @@
 | Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (GamerPower + ITAD) |
 | Destinations | DM, channel/group/community (with topics), Discord, or a universal HTTPS Webhook (JSON + HMAC) |
-| Channel | Twitch: link, `m.twitch.tv`, or username; for **stream start** also a YouTube Live / TikTok / VK Play Live / GoodGame / Trovo / Kick link (simplified wizard). A Twitch link in DM outside a wizard → offer to create an alert |
+| Channel | Twitch: link, `m.twitch.tv`, or username; for **stream start** also a YouTube Live / TikTok / VK Play Live / GoodGame / Kick link (simplified wizard). A Twitch link in DM outside a wizard → offer to create an alert |
 | Message template | Placeholders; examples `{username}`, `{game}`, `{name}` — [full list](https://twitchbot.games/placeholders?lang=en). **Clean title** — in Extras on create and in the edit menu on edit: strips `@streamers` (only if the channel exists on Twitch) and `!commands` from `{name}` (off by default) |
 | 🎲 Game alert | In **➕ New subscription** (under Drops): search streams or alert; category → filters (tags / viewers / language / 18+) → **realtime or hourly digest**; live → else VOD; own category in **📋 My subscriptions** |
 | 📅 Release alerts | **➕ New subscription** under Game alert; IGDB search (local dump, live API on miss); dates/platforms (if unknown — still create, backfill later); N days before; shared free active cap of 5; pauses after notify for every selected platform; on the card for **ru** — “Buy” → https://gglead.org/go22483 |
