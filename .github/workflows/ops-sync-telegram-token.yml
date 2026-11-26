@@ -18,6 +18,7 @@ permissions: {}
 jobs:
   sync:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Sync token to VPS
         uses: appleboy/ssh-action@v1.2.5

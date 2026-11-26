@@ -14,6 +14,7 @@ permissions: {}
 jobs:
   freeze:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Freeze derived secrets on VPS
         uses: appleboy/ssh-action@v1.2.5
