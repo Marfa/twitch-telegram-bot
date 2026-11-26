@@ -187,7 +187,8 @@ Max-сторона (**фаза 3 ✅**, группы/каналы — фаза 4
 - [x] В TG можно выбрать destination Webhook, указать URL, получить тестовый POST  
 - [x] Боевой алерт уходит на URL с HMAC; retry/notice при фейле  
 - [x] Документированный JSON-контракт + пример приёмника (verify) — `docs/outbound-webhook.md` + `examples/outbound_webhook_receiver.py`  
-- [ ] Max-бот: онбординг, привязка ЛС/группы/канала, приём того же webhook, публикация  
+- [x] Max-бот фаза 3: онбординг ЛС + код связи + приём webhook → send DM (группы — фаза 4)  
+
 - [ ] UX «Привязать Max» из TG без обязательного ручного URL  
 - [x] SSRF-защиты + self_check; Telegram-регрессий нет (self_check green)  
 - [x] README / guide / flow-map обновлены под Webhook (Max как пример — позже)  
