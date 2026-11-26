@@ -460,6 +460,47 @@ async def _scenario_wizard_channel_step(db) -> None:
     cap.assert_turn("wizard_channel")
 
 
+async def _scenario_wizard_external_channel(db) -> None:
+    """§2 go-live link for Kick/YouTube/… → simplified external wizard."""
+    from handlers.wizard import _wz, receive_channel
+    from i18n import t as tr
+
+    twitch = MagicMock()
+    twitch.parse_username.return_value = None
+    twitch.is_twitch_url.return_value = False
+
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, "https://kick.com/xqc", cap)
+    ctx = _ctx(application, {"alert_type": "live"})
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)
+    ):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["TEMPLATE"]
+    assert ctx.user_data.get("external_stream") is True
+    assert ctx.user_data.get("stream_platform") == "kick"
+    assert ctx.user_data.get("twitch_user_id") == "ext:kick:xqc"
+    assert "kick.com/xqc" in str(ctx.user_data.get("stream_url") or "")
+    cap.assert_turn("wizard_external_channel")
+
+    # Non-live alert type rejects external URLs (stays on CHANNEL).
+    application, bot = _app(db, twitch=twitch)
+    update = _msg_update(_FREE_UID, "https://kick.com/xqc")
+    ctx = _ctx(application, {"alert_type": "end"})
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["CHANNEL"]
+    live_only = tr("channel_external_live_only", "ru")
+    assert any(
+        live_only in str(c.args[0] if c.args else c.kwargs.get("text") or "")
+        for c in update.effective_message.reply_text.await_args_list
+    )
+
+
 async def _scenario_wizard_channel_dup_by_type(db) -> None:
     """§2 CHANNEL_DUP only when same streamer and same alert type."""
     from handlers.wizard import _wz, receive_channel
@@ -5755,6 +5796,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_premium_marfapr_wizard(db)
         await _scenario_premium_channel_ad(db)
         await _scenario_wizard_channel_step(db)
+        await _scenario_wizard_external_channel(db)
         await _scenario_wizard_channel_dup_by_type(db)
         await _scenario_subscriptions(db)
         await _scenario_settings_and_partner(db)

@@ -3193,7 +3193,8 @@ def _template_values(
             values["name"] = str(stream.get("title"))
         if stream.get("user_login") and not username:
             values["username"] = str(stream.get("user_login"))
-    values["url"] = twitch_profile_url(values["username"])
+    stream_url = str((stream or {}).get("url") or "").strip()
+    values["url"] = stream_url or twitch_profile_url(values["username"])
     return values
 
 

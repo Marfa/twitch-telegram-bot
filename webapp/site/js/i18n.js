@@ -7,23 +7,23 @@
     en: {
       meta_title: "Twitch X Telegram — stream alerts",
       meta_desc:
-        "Get Twitch live, category, schedule, and end-of-stream alerts in Telegram, Discord, or your HTTPS webhook. Free plan + Premium Stars.",
+        "Go-live for Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo, and Kick; Twitch category, schedule, and end-of-stream — in Telegram, Discord, or your HTTPS webhook. Free plan + Premium Stars.",
       nav_home: "Home",
       nav_about: "Features",
       nav_pricing: "Pricing",
       nav_guide: "Guide",
       nav_start: "Open bot",
-      hero_eyebrow: "Twitch alerts in Telegram",
+      hero_eyebrow: "Multi-platform stream alerts in Telegram",
       hero_title: "Never miss a stream you care about.",
       hero_cta_bot: "Open in Telegram",
       hero_cta_guide: "Read the guide",
       hero_scroll: "Scroll Down",
       about_title: "What the bot does",
       about_lead:
-        "Pick a Twitch channel, choose when to notify, and where to send it. The bot watches Helix and delivers the message you configured — DM, channel, Discord, or a signed webhook.",
+        "Pick a Twitch channel or a go-live link from YouTube Live, TikTok, VK Play Live, GoodGame, Trovo, or Kick; choose when to notify and where to send it — DM, channel, Discord, or a signed webhook.",
       feat_alerts_t: "Alert types",
       feat_alerts_d:
-        "Stream start, category change, upcoming from Twitch schedule, stream end, Drops, game alerts, release dates, and free giveaways.",
+        "Stream start (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), category change, upcoming from Twitch schedule, stream end, Drops, game alerts, release dates, and free giveaways.",
       feat_dest_t: "Anywhere you need",
       feat_dest_d:
         "Private chat, Telegram channel/group (topics supported), Discord Incoming Webhook, or your own HTTPS JSON webhook with HMAC.",
@@ -45,7 +45,7 @@
       how_1_or: " or ",
       how_1_after: " and pick a language.",
       how_2_t: "Add a streamer",
-      how_2_d: "New subscription → alert type → Twitch link or username → destination.",
+      how_2_d: "New subscription → alert type → Twitch link/username or a go-live link from another platform → destination.",
       how_3_t: "Tune the message",
       how_3_d: "Template, image, buttons, advanced filters — keep free defaults or unlock Premium options.",
       how_4_t: "Get notified",
@@ -76,7 +76,7 @@
       cta_guide: "User guide",
       cta_status: "Status page",
       footer_blurb:
-        "Twitch stream alerts for Telegram and Discord. Built by Marfa. Not affiliated with Twitch.",
+        "Multi-platform stream alerts for Telegram and Discord. Built by Marfa. Not affiliated with Twitch.",
       footer_contact: "Contact",
       footer_links: "Site links",
       footer_support: "Support the project",
@@ -95,23 +95,23 @@
     ru: {
       meta_title: "Twitch X Telegram — оповещения о стримах",
       meta_desc:
-        "Оповещения о старте, смене категории, расписании и конце стрима Twitch в Telegram, Discord или на ваш HTTPS webhook. Бесплатно и Premium за Stars.",
+        "Старт стрима на Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo и Kick; смена категории, расписание и конец эфира для Twitch — в Telegram, Discord или на ваш HTTPS webhook. Бесплатно и Premium за Stars.",
       nav_home: "Главная",
       nav_about: "Возможности",
       nav_pricing: "Тарифы",
       nav_guide: "Инструкция",
       nav_start: "Открыть бота",
-      hero_eyebrow: "Оповещения Twitch в Telegram",
+      hero_eyebrow: "Оповещения о стримах в Telegram",
       hero_title: "Не пропустите стрим, который ждёте.",
       hero_cta_bot: "Открыть в Telegram",
       hero_cta_guide: "Читать инструкцию",
       hero_scroll: "Листайте вниз",
       about_title: "Что умеет бот",
       about_lead:
-        "Выберите канал Twitch, момент оповещения и куда слать. Бот смотрит Helix и доставляет сообщение туда, куда вы указали — в личку, канал, Discord или подписанный webhook.",
+        "Выберите канал Twitch или ссылку на старт эфира YouTube Live, TikTok, VK Play Live, GoodGame, Trovo или Kick; момент оповещения и куда слать — личка, канал, Discord или подписанный webhook.",
       feat_alerts_t: "Типы оповещений",
       feat_alerts_d:
-        "Старт стрима, смена категории, предстоящий по расписанию Twitch, конец эфира, Drops, оповещения по игре, релизы и раздачи.",
+        "Старт стрима (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), смена категории, предстоящий по расписанию Twitch, конец эфира, Drops, оповещения по игре, релизы и раздачи.",
       feat_dest_t: "Куда угодно",
       feat_dest_d:
         "Личка, канал/группа Telegram (темы), Discord Incoming Webhook или свой HTTPS JSON webhook с HMAC.",
@@ -133,7 +133,7 @@
       how_1_or: " или ",
       how_1_after: " и выбор языка.",
       how_2_t: "Добавьте стримера",
-      how_2_d: "Новая подписка → тип → ссылка/ник Twitch → куда слать.",
+      how_2_d: "Новая подписка → тип → ссылка/ник Twitch или ссылка другой площадки (начало стрима) → куда слать.",
       how_3_t: "Настройте текст",
       how_3_d: "Шаблон, картинка, кнопки, фильтры — бесплатные опции или Premium.",
       how_4_t: "Получайте оповещения",
@@ -164,7 +164,7 @@
       cta_guide: "Инструкция",
       cta_status: "Статус",
       footer_blurb:
-        "Оповещения о стримах Twitch для Telegram и Discord. Сделано Marfa. Не аффилировано с Twitch.",
+        "Оповещения о стримах с разных площадок для Telegram и Discord. Сделано Marfa. Не аффилировано с Twitch.",
       footer_contact: "Контакты",
       footer_links: "Ссылки",
       footer_support: "Поддержка проекта",
@@ -183,23 +183,23 @@
     uk: {
       meta_title: "Twitch X Telegram — сповіщення про стріми",
       meta_desc:
-        "Сповіщення про старт, зміну категорії, розклад і кінець стріму Twitch у Telegram, Discord або на ваш HTTPS webhook.",
+        "Старт стріму на Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo і Kick; зміна категорії, розклад і кінець ефіру для Twitch — у Telegram, Discord або на ваш HTTPS webhook.",
       nav_home: "Головна",
       nav_about: "Можливості",
       nav_pricing: "Тарифи",
       nav_guide: "Інструкція",
       nav_start: "Відкрити бота",
-      hero_eyebrow: "Сповіщення Twitch у Telegram",
+      hero_eyebrow: "Сповіщення про стріми в Telegram",
       hero_title: "Не пропустіть стрім, на який чекаєте.",
       hero_cta_bot: "Відкрити в Telegram",
       hero_cta_guide: "Читати інструкцію",
       hero_scroll: "Гортайте вниз",
       about_title: "Що вміє бот",
       about_lead:
-        "Оберіть канал Twitch, момент сповіщення і куди надсилати. Бот стежить за Helix і доставляє повідомлення туди, куди ви вказали.",
+        "Оберіть канал Twitch або посилання на старт ефіру YouTube Live, TikTok, VK Play Live, GoodGame, Trovo чи Kick; момент сповіщення і куди надсилати — особисті, канал, Discord або підписаний webhook.",
       feat_alerts_t: "Типи сповіщень",
       feat_alerts_d:
-        "Старт стріму, зміна категорії, майбутній за розкладом, кінець ефіру, Drops, гра, релізи та роздачі.",
+        "Старт стріму (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), зміна категорії, майбутній за розкладом Twitch, кінець ефіру, Drops, гра, релізи та роздачі.",
       feat_dest_t: "Куди завгодно",
       feat_dest_d:
         "Особисті, канал/група Telegram, Discord Incoming Webhook або власний HTTPS JSON webhook з HMAC.",
@@ -221,7 +221,7 @@
       how_1_or: " або ",
       how_1_after: " і вибір мови.",
       how_2_t: "Додайте стрімера",
-      how_2_d: "Нова підписка → тип → посилання/нік Twitch → куди слати.",
+      how_2_d: "Нова підписка → тип → посилання/нік Twitch або посилання іншої платформи (початок стріму) → куди слати.",
       how_3_t: "Налаштуйте текст",
       how_3_d: "Шаблон, зображення, кнопки, фільтри — безкоштовно або Premium.",
       how_4_t: "Отримуйте сповіщення",
@@ -252,7 +252,7 @@
       cta_guide: "Інструкція",
       cta_status: "Статус",
       footer_blurb:
-        "Сповіщення про стріми Twitch для Telegram і Discord. Зроблено Marfa. Не афілійовано з Twitch.",
+        "Сповіщення про стріми з різних платформ для Telegram і Discord. Зроблено Marfa. Не афілійовано з Twitch.",
       footer_contact: "Контакти",
       footer_links: "Посилання",
       footer_support: "Підтримка проєкту",
@@ -271,23 +271,23 @@
     it: {
       meta_title: "Twitch X Telegram — avvisi live",
       meta_desc:
-        "Avvisi Twitch (live, categoria, schedule, fine stream) su Telegram, Discord o il tuo webhook HTTPS. Piano gratis + Premium con Stars.",
+        "Go-live per Twitch, YouTube Live, TikTok, VK Play, GoodGame, Trovo e Kick; categoria, schedule e fine stream per Twitch — su Telegram, Discord o il tuo webhook HTTPS. Piano gratis + Premium con Stars.",
       nav_home: "Home",
       nav_about: "Funzioni",
       nav_pricing: "Prezzi",
       nav_guide: "Guida",
       nav_start: "Apri il bot",
-      hero_eyebrow: "Avvisi Twitch su Telegram",
+      hero_eyebrow: "Avvisi multi-piattaforma su Telegram",
       hero_title: "Non perdere lo stream che aspetti.",
       hero_cta_bot: "Apri in Telegram",
       hero_cta_guide: "Leggi la guida",
       hero_scroll: "Scorri in basso",
       about_title: "Cosa fa il bot",
       about_lead:
-        "Scegli un canale Twitch, quando avvisare e dove inviare. Il bot guarda Helix e consegna il messaggio dove indichi tu.",
+        "Scegli un canale Twitch o un link go-live di YouTube Live, TikTok, VK Play Live, GoodGame, Trovo o Kick; quando avvisare e dove inviare — DM, canale, Discord o webhook firmato.",
       feat_alerts_t: "Tipi di avviso",
       feat_alerts_d:
-        "Inizio live, cambio categoria, upcoming dallo schedule Twitch, fine stream, Drops, giochi, uscite e giveaway.",
+        "Inizio live (Twitch + YouTube Live, TikTok, VK Play, GoodGame, Trovo, Kick), cambio categoria, upcoming dallo schedule Twitch, fine stream, Drops, giochi, uscite e giveaway.",
       feat_dest_t: "Dove serve",
       feat_dest_d:
         "Chat privata, canale/gruppo Telegram, Discord Incoming Webhook o il tuo webhook JSON HTTPS con HMAC.",
@@ -309,7 +309,7 @@
       how_1_or: " o ",
       how_1_after: " e scegli la lingua.",
       how_2_t: "Aggiungi uno streamer",
-      how_2_d: "Nuova iscrizione → tipo → link/username Twitch → destinazione.",
+      how_2_d: "Nuova iscrizione → tipo → link/username Twitch o link di un’altra piattaforma (inizio live) → destinazione.",
       how_3_t: "Configura il messaggio",
       how_3_d: "Template, immagine, pulsanti, filtri — gratis o opzioni Premium.",
       how_4_t: "Ricevi gli avvisi",
@@ -340,7 +340,7 @@
       cta_guide: "Guida",
       cta_status: "Stato",
       footer_blurb:
-        "Avvisi Twitch per Telegram e Discord. Fatto da Marfa. Non affiliato a Twitch.",
+        "Avvisi multi-piattaforma per Telegram e Discord. Fatto da Marfa. Non affiliato a Twitch.",
       footer_contact: "Contatti",
       footer_links: "Link",
       footer_support: "Supporta il progetto",

@@ -762,8 +762,44 @@ def restore_pending_alert_jobs(application: Application) -> int:
     return restored
 
 
+def _external_stream_snapshot(sub: Subscription) -> dict | None:
+    """Return a minimal live stream dict for an external sub, or None if offline."""
+    import stream_platforms as sp
+
+    ch = sp.channel_from_subscription(
+        stream_platform=getattr(sub, "stream_platform", "") or "",
+        twitch_username=sub.twitch_username,
+        twitch_user_id=sub.twitch_user_id,
+        stream_url=getattr(sub, "stream_url", "") or "",
+    )
+    if ch is None:
+        return None
+    try:
+        online, stream_url = sp.external_live_state(ch)
+    except Exception:
+        logger.exception(
+            "External delayed probe failed sub=%s platform=%s",
+            sub.id,
+            getattr(ch, "platform", ""),
+        )
+        return None
+    if not online:
+        return None
+    login = (ch.label or ch.channel_id or sub.twitch_username or "").strip()
+    return {
+        "id": sub.twitch_user_id,
+        "user_login": login,
+        "user_name": login,
+        "title": "",
+        "game_name": "",
+        "url": stream_url,
+        "started_at": "",
+    }
+
+
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
     from bot import _render_sub_template
+    import stream_platforms as sp
 
     _consume_pending_alert_job(context)
     job_data = context.job.data or {}
@@ -776,16 +812,29 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
         return
     sub = _sub_for_delivery(db, sub)
 
-    try:
-        live_streams = await asyncio.to_thread(
-            twitch.get_live_streams, [sub.twitch_user_id]
-        )
-    except Exception:
-        logger.exception("Twitch poll failed for delayed notification sub %s", sub_id)
-        return
+    external = sp.is_external_subscription(
+        stream_platform=getattr(sub, "stream_platform", None),
+        twitch_user_id=sub.twitch_user_id,
+    )
+    stream: dict | None = None
+    if external:
+        stream = await asyncio.to_thread(_external_stream_snapshot, sub)
+        live_streams = {sub.twitch_user_id: stream} if stream else {}
+    else:
+        try:
+            live_streams = await asyncio.to_thread(
+                twitch.get_live_streams, [sub.twitch_user_id]
+            )
+        except Exception:
+            logger.exception(
+                "Twitch poll failed for delayed notification sub %s", sub_id
+            )
+            return
 
     lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
-    if sub.twitch_user_id not in live_streams:
+    if sub.twitch_user_id not in live_streams or not live_streams.get(
+        sub.twitch_user_id
+    ):
         if silent_offline:
             return
         if _user_notifications_paused(db, sub.owner_id):
@@ -795,6 +844,9 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
             sub.twitch_username,
             "—",
             "—",
+            extra={"url": str(getattr(sub, "stream_url", "") or "")}
+            if external
+            else None,
         )
         try:
             await context.bot.send_message(
@@ -1189,7 +1241,8 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     user_ids = db.get_unique_twitch_user_ids()
     category_watch_subs = db.get_enabled_category_watch_subscriptions()
-    if not user_ids and not category_watch_subs:
+    external_subs = db.get_enabled_external_live_subscriptions()
+    if not user_ids and not category_watch_subs and not external_subs:
         from health import note_check_streams_ok
 
         note_check_streams_ok()
@@ -1553,11 +1606,141 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     if category_watch_subs:
         await _check_category_watch_alerts(context, category_watch_subs)
         _phase("category_watch")
+    if external_subs:
+        await _check_external_live_alerts(context, external_subs)
+        _phase("external")
     if helix_ok:
         from health import note_check_streams_ok
 
         note_check_streams_ok()
     _log_duration()
+
+
+async def _check_external_live_alerts(
+    context: ContextTypes.DEFAULT_TYPE, subs: list[Subscription]
+) -> None:
+    """Poll non-Twitch platforms for go-live / offline on standalone alerts."""
+    import time
+
+    import stream_platforms as sp
+    from bot import _render_sub_template
+
+    db: Database = context.application.bot_data["db"]
+    last_live: dict[str, bool] = context.application.bot_data.setdefault("last_live", {})
+    last_stream_ids: dict[str, str] = context.application.bot_data.setdefault(
+        "last_stream_ids", {}
+    )
+    primed = bool(context.application.bot_data.get("last_live_primed"))
+
+    by_uid: dict[str, list[Subscription]] = {}
+    channels: dict[str, object] = {}
+    for sub in subs:
+        ch = sp.channel_from_subscription(
+            stream_platform=getattr(sub, "stream_platform", "") or "",
+            twitch_username=sub.twitch_username,
+            twitch_user_id=sub.twitch_user_id,
+            stream_url=getattr(sub, "stream_url", "") or "",
+        )
+        if ch is None:
+            continue
+        uid = sp.external_user_id(ch.platform, ch.channel_id)
+        by_uid.setdefault(uid, []).append(sub)
+        channels[uid] = ch
+
+    if not by_uid:
+        return
+
+    def _probe() -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for uid, ch in channels.items():
+            try:
+                online, stream_url = sp.external_live_state(ch)
+            except Exception:
+                logger.exception(
+                    "External live probe failed uid=%s platform=%s",
+                    uid,
+                    getattr(ch, "platform", ""),
+                )
+                continue
+            if not online:
+                continue
+            login = (
+                getattr(ch, "label", None) or getattr(ch, "channel_id", "") or ""
+            ).strip()
+            out[uid] = {
+                "id": f"{uid}:{int(time.time()) // 60}",
+                "user_login": login,
+                "user_name": login,
+                "title": "",
+                "game_name": "",
+                "url": stream_url,
+                "started_at": "",
+            }
+        return out
+
+    live_streams = await asyncio.to_thread(_probe)
+    user_ids = list(by_uid.keys())
+    was_primed = primed
+    went_live, went_offline = live_transitions(
+        last_live, user_ids, live_streams, primed=primed
+    )
+    stream_restarts = stream_id_restart_uids(
+        primed=primed,
+        live_streams=live_streams,
+        last_stream_ids=last_stream_ids,
+        went_live=went_live,
+    )
+    for uid, stream in live_streams.items():
+        sid = str(stream.get("id") or "")
+        if sid:
+            last_stream_ids[uid] = sid
+    context.application.bot_data["last_live_primed"] = True
+
+    for uid in went_offline:
+        await unpin_stream_alert_messages(context.bot, db, uid)
+        for sub in by_uid.get(uid, []):
+            cancel_repeat_notify_jobs(context.job_queue, db, sub.id)
+
+    for uid in list(went_live) + stream_restarts:
+        stream = live_streams.get(uid)
+        if not stream:
+            continue
+        username = stream.get("user_login") or stream.get("user_name") or ""
+        title = stream.get("title") or ""
+        stream_id = str(stream.get("id") or "")
+        for sub in by_uid.get(uid, []):
+            sub = _sub_for_delivery(db, sub)
+            if not sub.notify_on_live:
+                continue
+            if is_on_notify_cooldown(sub):
+                continue
+            if sub.delay_minutes > 0:
+                schedule_delayed_live_notification(
+                    context.job_queue,
+                    sub_id=sub.id,
+                    stream_id=stream_id,
+                    delay_minutes=sub.delay_minutes,
+                    db=db,
+                )
+                continue
+            text = _render_sub_template(
+                sub, username, "", title, twitch=None, stream=stream
+            )
+            await _send_notification(
+                context.bot,
+                db,
+                sub,
+                text,
+                alert_type="live",
+                stream=stream,
+                twitch=None,
+                bot_data=context.application.bot_data,
+            )
+
+    if not was_primed and not went_live and not went_offline:
+        # Cold start: seed last_live without sending.
+        pass
+    persist_stream_poll_snapshot(db, context.application.bot_data)
 
 
 def _parse_category_watch_live_ids(raw: str | None) -> set[str]:

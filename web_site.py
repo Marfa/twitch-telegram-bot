@@ -37,7 +37,7 @@ _UI = {
         "nav_webhook": "Webhook",
         "nav_start": "Open bot",
         "footer_blurb": (
-            "Twitch stream alerts for Telegram and Discord. "
+            "Multi-platform stream alerts for Telegram and Discord. "
             "Built by Marfa. Not affiliated with Twitch."
         ),
         "footer_contact": "Contact",
@@ -65,7 +65,7 @@ _UI = {
         "nav_webhook": "Webhook",
         "nav_start": "Открыть бота",
         "footer_blurb": (
-            "Оповещения о стримах Twitch для Telegram и Discord. "
+            "Оповещения о стримах с разных площадок для Telegram и Discord. "
             "Сделано Marfa. Не аффилировано с Twitch."
         ),
         "footer_contact": "Контакты",
@@ -93,7 +93,7 @@ _UI = {
         "nav_webhook": "Webhook",
         "nav_start": "Відкрити бота",
         "footer_blurb": (
-            "Сповіщення про стріми Twitch для Telegram і Discord. "
+            "Сповіщення про стріми з різних платформ для Telegram і Discord. "
             "Зроблено Marfa. Не афілійовано з Twitch."
         ),
         "footer_contact": "Контакти",
@@ -121,7 +121,7 @@ _UI = {
         "nav_webhook": "Webhook",
         "nav_start": "Apri il bot",
         "footer_blurb": (
-            "Avvisi Twitch per Telegram e Discord. "
+            "Avvisi multi-piattaforma per Telegram e Discord. "
             "Fatto da Marfa. Non affiliato a Twitch."
         ),
         "footer_contact": "Contatti",

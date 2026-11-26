@@ -592,6 +592,9 @@ class Subscription:
     # Encrypted HTTPS URL + HMAC secret when dest_type == "webhook" (else "").
     webhook_url: str = ""
     webhook_secret: str = ""
+    # Non-Twitch live alerts: youtube|tiktok|vkplay|goodgame|trovo|kick (else twitch).
+    stream_platform: str = "twitch"
+    stream_url: str = ""
 
     def destination_ready(self) -> bool:
         """True when delivery target is complete enough to enable the alert."""
@@ -1625,6 +1628,12 @@ def _row_to_sub(row: Any) -> Subscription:
         use_stream_defaults=bool(row["use_stream_defaults"])
         if "use_stream_defaults" in keys
         else False,
+        stream_platform=(
+            str(row["stream_platform"] or "twitch").strip().lower() or "twitch"
+            if "stream_platform" in keys
+            else "twitch"
+        ),
+        stream_url=str(row["stream_url"] or "") if "stream_url" in keys else "",
     )
 
 

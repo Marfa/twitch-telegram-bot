@@ -439,6 +439,20 @@ class PostgresDatabase:
             cur.execute(
                 """
                 ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS stream_platform
+                TEXT NOT NULL DEFAULT 'twitch'
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
+                ADD COLUMN IF NOT EXISTS stream_url
+                TEXT NOT NULL DEFAULT ''
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE subscriptions
                 ADD COLUMN IF NOT EXISTS delete_other_alerts
                 BOOLEAN NOT NULL DEFAULT FALSE
                 """
@@ -2036,6 +2050,8 @@ class PostgresDatabase:
         discord_webhook: str = "",
         webhook_url: str = "",
         webhook_secret: str = "",
+        stream_platform: str = "twitch",
+        stream_url: str = "",
     ) -> int:
         from token_crypto import encrypt_secret
 
@@ -2061,6 +2077,7 @@ class PostgresDatabase:
             pin_message = False
             delete_previous = False
             notify_delete_fail = False
+        plat = (stream_platform or "twitch").strip().lower() or "twitch"
         with self._conn() as conn:
             cur = self._cursor(conn)
             cur.execute(
@@ -2083,13 +2100,14 @@ owner_id, twitch_username, twitch_user_id,
                     delete_other_alerts, pin_message,
                     top_donations, top_donations_template, is_demo,
                     notify_on_schedule_cancel, schedule_cancel_template,
-                    use_stream_defaults, discord_webhook, webhook_url, webhook_secret
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    use_stream_defaults, discord_webhook, webhook_url, webhook_secret,
+                    stream_platform, stream_url
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     owner_id,
-                    twitch_username.lower(),
+                    twitch_username.lower() if plat == "twitch" else twitch_username,
                     twitch_user_id,
                     message_template,
                     dest_type,
@@ -2148,6 +2166,8 @@ owner_id, twitch_username, twitch_user_id,
                     webhook_store,
                     outbound_url_store,
                     outbound_secret_store,
+                    plat,
+                    str(stream_url or "").strip(),
                 ),
             )
             row = cur.fetchone()
@@ -2630,6 +2650,8 @@ owner_id, twitch_username, twitch_user_id,
             "discord_webhook",
             "webhook_url",
             "webhook_secret",
+            "stream_platform",
+            "stream_url",
         }
         updates: list[str] = []
         values: list[object] = []
@@ -2691,11 +2713,17 @@ owner_id, twitch_username, twitch_user_id,
                 "schedule_cancel_template",
                 "schedule_cancel_notified_days",
                 "top_donations_template",
+                "stream_platform",
+                "stream_url",
             ):
                 if key == "button_style":
                     from custom_buttons import normalize_button_style
 
                     values.append(normalize_button_style(str(value or "")))
+                elif key == "stream_platform":
+                    values.append(
+                        (str(value or "twitch").strip().lower() or "twitch")
+                    )
                 else:
                     values.append(str(value or ""))
             elif key == "image_file_id":
@@ -2801,6 +2829,8 @@ owner_id, twitch_username, twitch_user_id,
                   AND twitch_user_id NOT LIKE 'drops:%'
                   AND twitch_user_id NOT LIKE 'rel:%'
                   AND twitch_user_id NOT LIKE 'gvw:%'
+                  AND twitch_user_id NOT LIKE 'ext:%'
+                  AND COALESCE(stream_platform, 'twitch') = 'twitch'
                   AND COALESCE(notify_on_drops, FALSE) = FALSE
                   AND (
                     notify_on_live = TRUE
@@ -2811,6 +2841,30 @@ owner_id, twitch_username, twitch_user_id,
             )
             rows = cur.fetchall()
         return [r["twitch_user_id"] for r in rows]
+
+    def get_enabled_external_live_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE enabled = TRUE
+                  AND notify_on_live = TRUE
+                  AND COALESCE(category_watch_prefs, '') = ''
+                  AND COALESCE(release_watch_prefs, '') = ''
+                  AND COALESCE(giveaway_watch_prefs, '') = ''
+                  AND (
+                    twitch_user_id LIKE 'ext:%'
+                    OR (
+                      COALESCE(stream_platform, 'twitch') != ''
+                      AND COALESCE(stream_platform, 'twitch') != 'twitch'
+                    )
+                  )
+                ORDER BY id
+                """
+            )
+            rows = cur.fetchall()
+        return [_row_to_sub(r) for r in rows]
 
     def get_enabled_category_watch_subscriptions(self) -> list[Subscription]:
         with self._conn() as conn:

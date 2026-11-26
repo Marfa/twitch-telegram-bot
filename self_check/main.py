@@ -170,6 +170,15 @@ def main() -> None:
     check_multistream_dump_roundtrip()
     check_multistream_status_placeholders()
     check_multistream_prompt_i18n_format()
+    from .checks_stream_platforms import (
+        check_external_stream_parse_urls,
+        check_external_user_id_roundtrip,
+        check_external_subscription_db,
+    )
+
+    check_external_stream_parse_urls()
+    check_external_user_id_roundtrip()
+    check_external_subscription_db()
     from .checks_top_donations import check_top_donations
 
     check_top_donations()

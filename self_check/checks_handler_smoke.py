@@ -874,6 +874,38 @@ async def _smoke_wizard(db) -> None:
         state = await receive_channel(update, ctx)
     assert state == _wz()["TEMPLATE"]
 
+    # External Kick URL on live → simplified wizard (template), no Helix lookup.
+    twitch.parse_username.return_value = None
+    twitch.get_user.reset_mock()
+    update = _msg_update(_FREE_UID, "https://kick.com/kickstreamer")
+    ctx = _ctx(application, {"alert_type": "live", "notify_on_live": True})
+    with patch(
+        "handlers.wizard._go_template_prompt",
+        new=AsyncMock(return_value=_wz()["TEMPLATE"]),
+    ) as ext_tpl:
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["TEMPLATE"]
+    ext_tpl.assert_awaited()
+    assert ctx.user_data.get("external_stream") is True
+    assert ctx.user_data.get("stream_platform") == "kick"
+    assert str(ctx.user_data.get("twitch_user_id") or "").startswith("ext:kick:")
+    twitch.get_user.assert_not_called()
+
+    # External URL on non-live alert type → reject.
+    update = _msg_update(_FREE_UID, "https://youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxx")
+    ctx = _ctx(application, {"alert_type": "end"})
+    state = await receive_channel(update, ctx)
+    assert state == _wz()["CHANNEL"]
+    update.effective_message.reply_text.assert_awaited()
+
+    # Restore Twitch mock after external-only parse_username=None.
+    twitch.parse_username.return_value = "streamer"
+    twitch.get_user.return_value = {
+        "id": "1",
+        "login": "streamer",
+        "display_name": "S",
+    }
+
     group_chat_id = -100123456789
     update = _msg_update(_FREE_UID, "https://twitch.tv/streamer")
     update.effective_chat = SimpleNamespace(id=group_chat_id)

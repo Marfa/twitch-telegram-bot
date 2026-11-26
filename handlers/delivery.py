@@ -383,8 +383,16 @@ def _alert_chat_button_markup(
             url = url.replace("{username}", login)
         if "{url}" in url:
             from twitch import twitch_profile_url
+            import stream_platforms as sp
 
-            url = url.replace("{url}", twitch_profile_url(login))
+            ext_url = str(getattr(sub, "stream_url", "") or "").strip()
+            if sp.is_external_subscription(
+                stream_platform=getattr(sub, "stream_platform", None),
+                twitch_user_id=sub.twitch_user_id,
+            ) and ext_url:
+                url = url.replace("{url}", ext_url)
+            else:
+                url = url.replace("{url}", twitch_profile_url(login))
         buttons.append(
             cbtn.styled_inline_button(
                 str(btn_def.get("text") or "")[:64],
@@ -1428,8 +1436,16 @@ def _discord_link_buttons(
             url = url.replace("{username}", login)
         if "{url}" in url:
             from twitch import twitch_profile_url
+            import stream_platforms as sp
 
-            url = url.replace("{url}", twitch_profile_url(login))
+            ext_url = str(getattr(sub, "stream_url", "") or "").strip()
+            if sp.is_external_subscription(
+                stream_platform=getattr(sub, "stream_platform", None),
+                twitch_user_id=sub.twitch_user_id,
+            ) and ext_url:
+                url = url.replace("{url}", ext_url)
+            else:
+                url = url.replace("{url}", twitch_profile_url(login))
         label = str(btn_def.get("text") or "")[:80]
         if label and url:
             out.append((label, url))

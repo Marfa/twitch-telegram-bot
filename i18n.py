@@ -1829,6 +1829,9 @@ def advanced_options_keyboard(
     want_overlap: bool = False,
     want_apply_defaults: bool = False,
     button_style: str = "",
+    show_strip: bool = True,
+    show_ignore: bool = True,
+    show_chat: bool = True,
     show_delay: bool = True,
     show_repeat: bool = True,
     show_repeats: bool = False,
@@ -1842,6 +1845,7 @@ def advanced_options_keyboard(
     show_multistream: bool = False,
     show_top_donations: bool = False,
     show_categories: bool = False,
+    show_apply_defaults: bool = True,
     locked: frozenset[str] | set[str] | None = None,
 ) -> InlineKeyboardMarkup:
     from alert_settings import ADVOPT_LABEL_KEY, ALERT_SETTING_ORDER
@@ -1876,6 +1880,9 @@ def advanced_options_keyboard(
         "multistream": want_multistream,
     }
     show = {
+        "strip": show_strip,
+        "ignore": show_ignore,
+        "chat": show_chat,
         "categories": show_categories,
         "delay": show_delay,
         "repeat": show_repeat,
@@ -1932,15 +1939,16 @@ def advanced_options_keyboard(
                 style_row = []
         if style_row:
             rows.append(style_row)
-    apply_mark = "✅ " if want_apply_defaults else "⬜️ "
-    rows.append(
-        [
-            InlineKeyboardButton(
-                apply_mark + t("edit_apply_defaults", lang),
-                callback_data="advopt:toggle:apply_defaults",
-            )
-        ]
-    )
+    if show_apply_defaults:
+        apply_mark = "✅ " if want_apply_defaults else "⬜️ "
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    apply_mark + t("edit_apply_defaults", lang),
+                    callback_data="advopt:toggle:apply_defaults",
+                )
+            ]
+        )
     rows.append(
         [
             InlineKeyboardButton(
@@ -3048,7 +3056,19 @@ def image_ask_keyboard(
     stream_preview_on: bool = False,
     stream_video_preview_on: bool = False,
     stream_file_video_preview_on: bool = False,
+    own_only: bool = False,
 ) -> InlineKeyboardMarkup:
+    if own_only:
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(t("image_add", lang), callback_data="image_ask:add")],
+                [
+                    InlineKeyboardButton(
+                        t("btn_wizard_next", lang), callback_data="image_ask:next"
+                    )
+                ],
+            ]
+        )
     preview_mark = "✅ " if stream_preview_on else "⬜️ "
     gif_mark = "✅ " if stream_video_preview_on else "⬜️ "
     file_video_mark = "✅ " if stream_file_video_preview_on else "⬜️ "
@@ -3101,7 +3121,33 @@ def image_edit_keyboard(
     stream_preview_on: bool = False,
     stream_video_preview_on: bool = False,
     stream_file_video_preview_on: bool = False,
+    own_only: bool = False,
 ) -> InlineKeyboardMarkup:
+    if own_only:
+        if has_image:
+            return InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            t("edit_image_replace", lang),
+                            callback_data="image_ask:add",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            t("edit_image_delete", lang),
+                            callback_data="image_ask:delete",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            t("edit_image_keep", lang),
+                            callback_data="image_ask:keep",
+                        )
+                    ],
+                ]
+            )
+        return image_ask_keyboard(lang, own_only=True)
     preview_mark = "✅ " if stream_preview_on else "⬜️ "
     gif_mark = "✅ " if stream_video_preview_on else "⬜️ "
     file_video_mark = "✅ " if stream_file_video_preview_on else "⬜️ "

@@ -339,6 +339,17 @@ def _render_sub_template(
                 locale = DEFAULT_LOCALE
     template = sub.message_template or ""
     merged = dict(extra or {})
+    import stream_platforms as sp
+
+    if sp.is_external_subscription(
+        stream_platform=getattr(sub, "stream_platform", None),
+        twitch_user_id=getattr(sub, "twitch_user_id", None),
+    ):
+        ext_url = str(getattr(sub, "stream_url", "") or "").strip()
+        if not ext_url and stream:
+            ext_url = str(stream.get("url") or "").strip()
+        if ext_url:
+            merged.setdefault("url", ext_url)
     if any(f"{{{key}}}" in template for key in ms.MULTISTREAM_PLACEHOLDERS):
         for key, val in ms.multistream_placeholders(
             getattr(sub, "multistream_channels", None), template
@@ -1032,12 +1043,22 @@ async def _go_template_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     chat_id = reply_chat_id(update)
     context.user_data.setdefault("strip_name_mentions", False)
-    text = t(
-        "channel_found",
-        lang,
-        display_name=html.escape(display),
-        placeholders_link=placeholders_link_html(lang),
-    )
+    if _is_external_wizard(context):
+        plat = str(context.user_data.get("stream_platform") or "").strip().lower()
+        plat_label = t(f"platform_{plat}", lang) if plat else plat
+        text = t(
+            "channel_found_external",
+            lang,
+            display_name=html.escape(display),
+            platform=html.escape(plat_label or plat),
+        )
+    else:
+        text = t(
+            "channel_found",
+            lang,
+            display_name=html.escape(display),
+            placeholders_link=placeholders_link_html(lang),
+        )
     await _send_prompt_with_wizard_inline(
         context.bot,
         chat_id,
@@ -1064,14 +1085,20 @@ async def _go_image_ask_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
     )
     prompt = t("edit_image_prompt", lang) if has_image else t("image_ask", lang)
     fid = context.user_data.get("image_file_id")
+    own_only = _is_external_wizard(context)
     markup = image_edit_keyboard(
         lang,
         has_image=has_image,
-        game_cover_on=is_game_cover_image(fid),
-        ai_cover_on=is_ai_game_cover_image(fid),
-        stream_preview_on=is_stream_preview_image(fid),
-        stream_video_preview_on=is_stream_video_preview_image(fid),
-        stream_file_video_preview_on=is_stream_file_video_preview_image(fid),
+        game_cover_on=False if own_only else is_game_cover_image(fid),
+        ai_cover_on=False if own_only else is_ai_game_cover_image(fid),
+        stream_preview_on=False if own_only else is_stream_preview_image(fid),
+        stream_video_preview_on=(
+            False if own_only else is_stream_video_preview_image(fid)
+        ),
+        stream_file_video_preview_on=(
+            False if own_only else is_stream_file_video_preview_image(fid)
+        ),
+        own_only=own_only,
     )
     if update.callback_query:
         await context.bot.send_message(
@@ -1504,20 +1531,25 @@ async def _advanced_options_markup(
     import donationalerts as da
 
     alert = context.user_data.get("alert_type")
-    show_preview = template_has_link(
+    external = _is_external_wizard(context)
+    show_preview = (not external) and template_has_link(
         str(context.user_data.get("message_template") or "")
     )
     db: Database = context.application.bot_data["db"]
     show_buttons = beta_features.is_enabled(db, user_id, cbtn.BETA_FEATURE_ID)
-    show_live_remind = alert == "upcoming" and beta_features.is_enabled(
-        db, user_id, "live-remind-button"
+    show_live_remind = (
+        not external
+        and alert == "upcoming"
+        and beta_features.is_enabled(db, user_id, "live-remind-button")
     )
-    show_schedule_cancel = alert == "upcoming"
-    show_multistream = alert == "live" or not alert
-    show_top_donations = alert == "end" and beta_features.is_enabled(
-        db, user_id, da.BETA_FEATURE_ID
+    show_schedule_cancel = (not external) and alert == "upcoming"
+    show_multistream = (not external) and (alert == "live" or not alert)
+    show_top_donations = (
+        not external
+        and alert == "end"
+        and beta_features.is_enabled(db, user_id, da.BETA_FEATURE_ID)
     )
-    show_categories = _show_category_filter_option(context)
+    show_categories = (not external) and _show_category_filter_option(context)
     import alert_repeats as alert_reps
 
     show_reps = (alert == "live" or not alert) and beta_features.is_enabled(
@@ -1548,6 +1580,9 @@ async def _advanced_options_markup(
         want_preview=bool(context.user_data.get("adv_want_preview")),
         want_apply_defaults=bool(context.user_data.get("use_stream_defaults")),
         button_style=str(context.user_data.get("button_style") or ""),
+        show_strip=not external,
+        show_ignore=not external,
+        show_chat=not external,
         show_categories=show_categories,
         show_delay=alert != "upcoming",
         show_repeat=alert == "live" or not alert,
@@ -1556,10 +1591,11 @@ async def _advanced_options_markup(
         show_preview=show_preview,
         show_buttons=show_buttons,
         show_live_remind=show_live_remind,
-        show_schedule_block_repeats=alert == "upcoming",
+        show_schedule_block_repeats=(not external) and alert == "upcoming",
         show_schedule_cancel=show_schedule_cancel,
         show_multistream=show_multistream,
         show_top_donations=show_top_donations,
+        show_apply_defaults=not external,
         locked=await _advopt_locked(context, user_id),
     )
 
@@ -1578,16 +1614,18 @@ def _advanced_options_prompt_text(
     import donationalerts as da
 
     alert = context.user_data.get("alert_type")
+    external = _is_external_wizard(context)
     db: Database = context.application.bot_data["db"]
     lines = [
         t("advanced_options_prompt", lang),
         "",
         t("advanced_options_hint_image", lang),
-        t("advanced_options_hint_strip", lang),
-        t("advanced_options_hint_ignore", lang),
     ]
-    if _show_category_filter_option(context):
-        lines.append(t("advanced_options_hint_categories", lang))
+    if not external:
+        lines.append(t("advanced_options_hint_strip", lang))
+        lines.append(t("advanced_options_hint_ignore", lang))
+        if _show_category_filter_option(context):
+            lines.append(t("advanced_options_hint_categories", lang))
     if alert != "upcoming":
         lines.append(t("advanced_options_hint_delay", lang))
     if alert == "live" or not alert:
@@ -1601,20 +1639,23 @@ def _advanced_options_prompt_text(
     lines.append(t("advanced_options_hint_pin", lang))
     if beta_features.is_enabled(db, user_id, cbtn.BETA_FEATURE_ID):
         lines.append(t("advanced_options_hint_buttons", lang))
-    lines.append(t("advanced_options_hint_chat", lang))
-    if alert == "upcoming" and beta_features.is_enabled(
-        db, user_id, "live-remind-button"
-    ):
-        lines.append(t("advanced_options_hint_live_remind", lang))
-    if alert == "upcoming":
-        lines.append(t("advanced_options_hint_schedule_block_repeats", lang))
-        lines.append(t("advanced_options_hint_schedule_cancel", lang))
-    if alert == "live" or not alert:
-        lines.append(t("advanced_options_hint_multistream", lang))
-    if alert == "end" and beta_features.is_enabled(db, user_id, da.BETA_FEATURE_ID):
-        lines.append(t("advanced_options_hint_top_donations", lang))
+    if not external:
+        lines.append(t("advanced_options_hint_chat", lang))
+        if alert == "upcoming" and beta_features.is_enabled(
+            db, user_id, "live-remind-button"
+        ):
+            lines.append(t("advanced_options_hint_live_remind", lang))
+        if alert == "upcoming":
+            lines.append(t("advanced_options_hint_schedule_block_repeats", lang))
+            lines.append(t("advanced_options_hint_schedule_cancel", lang))
+        if alert == "live" or not alert:
+            lines.append(t("advanced_options_hint_multistream", lang))
+        if alert == "end" and beta_features.is_enabled(db, user_id, da.BETA_FEATURE_ID):
+            lines.append(t("advanced_options_hint_top_donations", lang))
     lines.append(t("advanced_options_hint_button_style", lang))
-    if template_has_link(str(context.user_data.get("message_template") or "")):
+    if (not external) and template_has_link(
+        str(context.user_data.get("message_template") or "")
+    ):
         lines.append(t("advanced_options_hint_preview", lang))
     return "\n".join(lines)
 
@@ -1622,15 +1663,36 @@ def _advanced_options_prompt_text(
 async def _go_advanced_options_prompt(
     update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str
 ) -> int:
+    external = _is_external_wizard(context)
     context.user_data.setdefault("adv_want_image", False)
-    context.user_data.setdefault(
-        "adv_want_strip", bool(context.user_data.get("strip_name_mentions"))
-    )
-    context.user_data.setdefault("adv_want_ignore", False)
-    if _show_category_filter_option(context):
-        context.user_data.setdefault("adv_want_categories", False)
-    else:
+    if external:
+        context.user_data["adv_want_strip"] = False
+        context.user_data["strip_name_mentions"] = False
+        context.user_data["adv_want_ignore"] = False
+        context.user_data["ignore_keywords"] = ""
+        context.user_data["use_global_ignore"] = False
         context.user_data.pop("adv_want_categories", None)
+        context.user_data["category_filter"] = ""
+        context.user_data["adv_want_chat"] = False
+        context.user_data["attach_chat_button"] = False
+        context.user_data.pop("adv_want_multistream", None)
+        context.user_data["multistream_channels"] = "[]"
+        context.user_data.pop("adv_want_preview", None)
+        context.user_data.pop("adv_want_live_remind", None)
+        context.user_data.pop("adv_want_schedule_block_repeats", None)
+        context.user_data.pop("adv_want_schedule_cancel", None)
+        context.user_data.pop("adv_want_top_donations", None)
+        context.user_data["use_stream_defaults"] = False
+    else:
+        context.user_data.setdefault(
+            "adv_want_strip", bool(context.user_data.get("strip_name_mentions"))
+        )
+        context.user_data.setdefault("adv_want_ignore", False)
+        if _show_category_filter_option(context):
+            context.user_data.setdefault("adv_want_categories", False)
+        else:
+            context.user_data.pop("adv_want_categories", None)
+        context.user_data.setdefault("adv_want_chat", False)
     context.user_data.setdefault("adv_want_delay", False)
     context.user_data.setdefault("adv_want_repeat", False)
     context.user_data.setdefault("adv_want_repeats", False)
@@ -1640,35 +1702,35 @@ async def _go_advanced_options_prompt(
     context.user_data.setdefault("adv_want_delete", False)
     context.user_data.setdefault("adv_want_pin", False)
     context.user_data.setdefault("adv_want_buttons", False)
-    context.user_data.setdefault("adv_want_chat", False)
     context.user_data.setdefault("button_style", "")
-    if context.user_data.get("alert_type") == "upcoming":
-        context.user_data.setdefault("adv_want_live_remind", False)
-        context.user_data.setdefault("adv_want_schedule_block_repeats", False)
-        context.user_data.setdefault("adv_want_schedule_cancel", False)
-        context.user_data.pop("adv_want_multistream", None)
-    else:
-        context.user_data.pop("adv_want_live_remind", None)
-        context.user_data.pop("adv_want_schedule_block_repeats", None)
-        context.user_data.pop("adv_want_schedule_cancel", None)
-        if context.user_data.get("alert_type") == "live" or not context.user_data.get(
-            "alert_type"
-        ):
-            context.user_data.setdefault("adv_want_multistream", False)
-        else:
+    if not external:
+        if context.user_data.get("alert_type") == "upcoming":
+            context.user_data.setdefault("adv_want_live_remind", False)
+            context.user_data.setdefault("adv_want_schedule_block_repeats", False)
+            context.user_data.setdefault("adv_want_schedule_cancel", False)
             context.user_data.pop("adv_want_multistream", None)
-    if context.user_data.get("alert_type") == "end":
-        context.user_data.setdefault("adv_want_top_donations", False)
-    else:
-        context.user_data.pop("adv_want_top_donations", None)
-    has_link = template_has_link(
-        str(context.user_data.get("message_template") or "")
-    )
-    if has_link:
-        # Default: show preview (matches DB default disable_link_preview=False).
-        context.user_data.setdefault("adv_want_preview", True)
-    else:
-        context.user_data.pop("adv_want_preview", None)
+        else:
+            context.user_data.pop("adv_want_live_remind", None)
+            context.user_data.pop("adv_want_schedule_block_repeats", None)
+            context.user_data.pop("adv_want_schedule_cancel", None)
+            if context.user_data.get("alert_type") == "live" or not context.user_data.get(
+                "alert_type"
+            ):
+                context.user_data.setdefault("adv_want_multistream", False)
+            else:
+                context.user_data.pop("adv_want_multistream", None)
+        if context.user_data.get("alert_type") == "end":
+            context.user_data.setdefault("adv_want_top_donations", False)
+        else:
+            context.user_data.pop("adv_want_top_donations", None)
+        has_link = template_has_link(
+            str(context.user_data.get("message_template") or "")
+        )
+        if has_link:
+            # Default: show preview (matches DB default disable_link_preview=False).
+            context.user_data.setdefault("adv_want_preview", True)
+        else:
+            context.user_data.pop("adv_want_preview", None)
     _sync_adv_preview_conflict(context)
     context.user_data.pop("advanced_options_done", None)
     # Fresh premium-lock snapshot for this screen; toggles reuse the cache.
@@ -2237,6 +2299,13 @@ async def _go_delay_minutes_prompt(update: Update, context: ContextTypes.DEFAULT
 def _wizard_channel(context: ContextTypes.DEFAULT_TYPE) -> str | None:
     raw = context.user_data.get("twitch_username")
     return str(raw) if raw else None
+
+
+def _is_external_wizard(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if context.user_data.get("external_stream"):
+        return True
+    plat = str(context.user_data.get("stream_platform") or "twitch").strip().lower()
+    return bool(plat and plat != "twitch")
 
 async def _go_repeat_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     return await _prompt_repeat_step(update, context, lang)
@@ -3063,9 +3132,62 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     twitch: TwitchClient = context.application.bot_data["twitch"]
     username = twitch.parse_username(text)
+    alert_kind = context.user_data.get("alert_type") or "live"
+
     if not username:
+        import stream_platforms as sp
+
+        if sp.looks_like_external_stream_url(text):
+            if alert_kind != "live":
+                await update.effective_message.reply_text(
+                    t("channel_external_live_only", lang)
+                )
+                return _wz()["CHANNEL"]
+            try:
+                ext = await asyncio.to_thread(sp.parse_external_stream_url, text)
+            except Exception:
+                logger.exception("External channel parse failed")
+                ext = None
+            if ext is None:
+                await update.effective_message.reply_text(
+                    t("channel_external_not_parsed", lang)
+                )
+                return _wz()["CHANNEL"]
+            synthetic_id = sp.external_user_id(ext.platform, ext.channel_id)
+            display = (ext.label or ext.channel_id or "").strip() or ext.channel_id
+            context.user_data["external_stream"] = True
+            context.user_data["stream_platform"] = ext.platform
+            context.user_data["stream_url"] = ext.url
+            context.user_data["twitch_username"] = display
+            context.user_data["twitch_user_id"] = synthetic_id
+            context.user_data["twitch_display_name"] = display
+            context.user_data["channel_input_was_url"] = True
+            context.user_data["notify_on_live"] = True
+            context.user_data["notify_on_end"] = False
+            context.user_data["notify_on_category_change"] = False
+            db: Database = context.application.bot_data["db"]
+            owner_id = update.effective_user.id
+            from handlers.subscriptions import _existing_sub_for_twitch
+
+            existing = _existing_sub_for_twitch(
+                db, owner_id, synthetic_id, alert_type="live"
+            )
+            if existing:
+                await update.effective_message.reply_text(
+                    t("channel_dup_prompt", lang),
+                    reply_markup=channel_dup_keyboard(lang, existing.id),
+                )
+                context.user_data["dup_sub_id"] = existing.id
+                _set_wizard_back(context, _wz()["CHANNEL_DUP"])
+                return _wz()["CHANNEL_DUP"]
+            return await _go_template_prompt(update, context, lang)
+
         await update.effective_message.reply_text(t("channel_not_parsed", lang))
         return _wz()["CHANNEL"]
+
+    context.user_data.pop("external_stream", None)
+    context.user_data["stream_platform"] = "twitch"
+    context.user_data["stream_url"] = ""
 
     try:
         user = await asyncio.to_thread(twitch.get_user, username)
@@ -3089,8 +3211,7 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["twitch_display_name"] = user.get("display_name") or user["login"]
     context.user_data["channel_input_was_url"] = twitch.is_twitch_url(text)
 
-    db: Database = context.application.bot_data["db"]
-    alert_kind = context.user_data.get("alert_type") or "live"
+    db = context.application.bot_data["db"]
     if alert_kind != "live" and not await prem.has_feature(
         context.bot,
         db,
@@ -3332,6 +3453,9 @@ async def receive_image_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         "stream_video_preview",
         "stream_file_video_preview",
     ):
+        if _is_external_wizard(context):
+            await query.answer()
+            return _wz()["IMAGE_ASK"]
         if action in ("stream_video_preview", "stream_file_video_preview"):
             db: Database = context.application.bot_data["db"]
             entitled = await prem.has_feature(
@@ -4938,6 +5062,8 @@ async def _finish_subscription(
                 discord_webhook=discord_webhook,
                 webhook_url=outbound_webhook_url,
                 webhook_secret=outbound_webhook_secret,
+                stream_platform=str(data.get("stream_platform") or "twitch"),
+                stream_url=str(data.get("stream_url") or ""),
             )
             if not create_enabled and not as_draft:
                 context.user_data["premium_created_disabled"] = True
