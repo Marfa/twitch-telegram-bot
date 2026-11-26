@@ -20,6 +20,7 @@ migration_vps_status.txt
 _tmp_*
 AGENTS.md
 *.pem
+!certs/russian_trusted_root_ca.pem
 *.key
 backups/
 *.sql.gz
