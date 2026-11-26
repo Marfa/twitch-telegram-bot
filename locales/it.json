@@ -1515,6 +1515,7 @@
   "max_setup_sample": "✅ Configurazione Max completata.\nGli avvisi arriveranno in questa chat Max.",
   "max_test_failed": "Impossibile inviare il messaggio di test a Max. Assicurati di aver aperto il bot Max con /start, poi riprova.",
   "delivery_fail_notice_max": "Impossibile inviare la notifica per l'iscrizione #{sub_id} ({twitch_username}) su Max.\n\nMotivo: {reason}\n\nQuesta destinazione Max è in pausa. Ricollega Max nelle impostazioni dell'avviso per riprendere.",
+  "delivery_fail_notice_max_soft": "Impossibile inviare la notifica per l'iscrizione #{sub_id} ({twitch_username}) su Max.\n\nMotivo: {reason}\n\nLa destinazione non è in pausa — il bot riproverà al prossimo stream. Se l'errore continua, ricollega Max nelle impostazioni dell'avviso.",
   "webhook_docs_link_label": "documentazione webhook",
   "webhook_setup": "Gli avvisi verranno inviati con POST al tuo URL HTTPS (JSON + HMAC).\n\nInvia un URL come https://example.com/hooks/alerts\n\nRequisiti: solo https, host pubblico (non localhost / IP privati). Il bot genera un secret e invia un POST di test con l'header X-Bot-Signature.\n\nPer Max preferisci «Su Max» e incolla il codice — non questo Webhook (anche il nostro URL Max ingest viene riconosciuto se lo incolli qui).\n\nPin ed eliminazione dei messaggi precedenti non sono disponibili per Webhook.\n\nContratto completo (JSON, firma, esempio ricevitore): {docs_link}.",
   "webhook_invalid_url": "Questo non sembra un URL webhook HTTPS valido.\nServe un https://… pubblico — niente localhost o IP privati.",

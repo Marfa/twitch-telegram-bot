@@ -1007,26 +1007,63 @@ def peer_ids_for_destination(dest: Any) -> tuple[int | None, int | None]:
     return None, int(cid)
 
 
-def deliver_alert_to_destination(dest: Any, payload: dict[str, Any]) -> None:
+def deliver_alert_to_destination(dest: Any, payload: dict[str, Any]) -> bool:
+    """Send alert to Max dest. Returns True if image was dropped after upload fail."""
     text = _payload_to_plain_text(payload)
     attachments = _payload_attachments(payload)
     user_id, chat_id = peer_ids_for_destination(dest)
-    _throttled_send(
+    return _send_alert_with_image_fallback(
         user_id=user_id,
         chat_id=chat_id,
         text=text[:4000] if text else " ",
-        attachments=attachments or None,
+        attachments=attachments,
     )
 
 
-def _deliver_alert_to_dm(max_user_id: int, payload: dict[str, Any]) -> None:
+def _deliver_alert_to_dm(max_user_id: int, payload: dict[str, Any]) -> bool:
     text = _payload_to_plain_text(payload)
     attachments = _payload_attachments(payload)
-    _throttled_send(
+    return _send_alert_with_image_fallback(
         user_id=max_user_id,
+        chat_id=None,
         text=text[:4000] if text else " ",
-        attachments=attachments or None,
+        attachments=attachments,
     )
+
+
+def _send_alert_with_image_fallback(
+    *,
+    user_id: int | None,
+    chat_id: int | None,
+    text: str,
+    attachments: list[dict[str, Any]],
+) -> bool:
+    """Send; on Max image-upload errors retry without image (keep keyboard)."""
+    try:
+        _throttled_send(
+            user_id=user_id,
+            chat_id=chat_id,
+            text=text,
+            attachments=attachments or None,
+        )
+        return False
+    except max_api.MaxApiError as exc:
+        if not attachments or not max_api.is_image_upload_error(exc):
+            raise
+        stripped = [a for a in attachments if a.get("type") != "image"]
+        if len(stripped) == len(attachments):
+            raise
+        logger.warning(
+            "Max image upload failed (%s); retrying without image",
+            exc,
+        )
+        _throttled_send(
+            user_id=user_id,
+            chat_id=chat_id,
+            text=text,
+            attachments=stripped or None,
+        )
+        return True
 
 
 def _unwrap_md_marker(text: str, marker: str) -> str:
@@ -1072,11 +1109,32 @@ def _payload_to_plain_text(payload: dict[str, Any]) -> str:
     return raw.strip()
 
 
+def _image_attachment(photo_url: str) -> dict[str, Any] | None:
+    """Build Max image attachment.
+
+    Download → Max ``/uploads`` → token. Temp file is always deleted inside
+    ``upload_image_from_url`` (success or error). Fall back to URL if upload fails.
+    """
+    photo = (photo_url or "").strip()
+    if not photo.startswith("https://"):
+        return None
+    try:
+        tok = max_api.upload_image_from_url(photo)
+        if tok:
+            # Max may still be processing; brief pause avoids attachment.not.ready.
+            time.sleep(0.4)
+            return {"type": "image", "payload": {"token": tok}}
+    except Exception as exc:
+        logger.warning("Max image upload via /uploads failed: %s", exc)
+    return {"type": "image", "payload": {"url": photo}}
+
+
 def _payload_attachments(payload: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     photo = str(payload.get("photo_url") or "").strip()
-    if photo.startswith("https://"):
-        out.append({"type": "image", "payload": {"url": photo}})
+    image = _image_attachment(photo) if photo else None
+    if image is not None:
+        out.append(image)
     buttons = payload.get("buttons")
     rows: list[list[dict[str, Any]]] = []
     if isinstance(buttons, list):

@@ -19,10 +19,112 @@ def run() -> None:
     _check_payload_plain_text_no_redos()
     _check_parse_ingest_path()
     _check_onboard_menu_and_callbacks()
+    _check_image_upload_fallback()
     with tempfile.TemporaryDirectory() as tmp:
         db = SqliteDatabase(Path(tmp) / "max_link.db")
         _check_resolve_link_code(db)
         _check_chat_destination_and_permissions(db)
+
+
+def _check_image_upload_fallback() -> None:
+    import max_api
+    import max_bot
+
+    assert max_api.is_image_upload_error(
+        max_api.MaxApiError("Failed to upload image", status_code=400)
+    )
+    assert max_api.is_image_upload_error(
+        max_api.MaxApiError("x", code="attachment.not.ready")
+    )
+    assert not max_api.is_image_upload_error(
+        max_api.MaxApiError("unauthorized", status_code=401)
+    )
+    assert max_api._extract_upload_token(
+        {"photos": {"abc": {"token": "tok-1"}}}
+    ) == "tok-1"
+
+    # Temp file must be gone after success and after failure.
+    import os
+    import tempfile
+    from pathlib import Path
+
+    created: list[Path] = []
+
+    def _fake_download_track(url, *, session=None):
+        fd, name = tempfile.mkstemp(prefix="max_alert_img_", suffix=".jpg")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(b"jpeg-bytes")
+        p = Path(name)
+        created.append(p)
+        return p
+
+    with (
+        patch.object(
+            max_api, "_download_image_to_temp", side_effect=_fake_download_track
+        ),
+        patch.object(max_api, "upload_image_file", return_value="tok-ok"),
+    ):
+        assert max_api.upload_image_from_url("https://cdn.example/a.jpg") == "tok-ok"
+    with (
+        patch.object(
+            max_api, "_download_image_to_temp", side_effect=_fake_download_track
+        ),
+        patch.object(
+            max_api,
+            "upload_image_file",
+            side_effect=max_api.MaxApiError("upload boom"),
+        ),
+    ):
+        try:
+            max_api.upload_image_from_url("https://cdn.example/b.jpg")
+            raise AssertionError("expected MaxApiError")
+        except max_api.MaxApiError:
+            pass
+    assert len(created) == 2 and all(not p.exists() for p in created)
+
+    class _Dest:
+        kind = "dm"
+        max_user_id = 99
+        chat_id = None
+
+    calls: list[dict] = []
+
+    def _send(**kwargs):
+        calls.append(kwargs)
+        if any(
+            a.get("type") == "image"
+            for a in (kwargs.get("attachments") or [])
+        ):
+            raise max_api.MaxApiError(
+                "Failed to upload image", status_code=400
+            )
+        return {"ok": True}
+
+    with (
+        patch.object(max_bot.max_api, "send_message", side_effect=_send),
+        patch.object(
+            max_bot.max_api,
+            "upload_image_from_url",
+            side_effect=max_api.MaxApiError("skip upload"),
+        ),
+    ):
+        dropped = max_bot.deliver_alert_to_destination(
+            _Dest(),
+            {
+                "text": "hi",
+                "text_format": "plain",
+                "photo_url": "https://cdn.example/cover.jpg",
+                "buttons": [{"text": "Open", "url": "https://twitch.tv/x"}],
+            },
+        )
+    assert dropped is True
+    assert len(calls) == 2
+    assert any(a.get("type") == "image" for a in (calls[0].get("attachments") or []))
+    assert all(a.get("type") != "image" for a in (calls[1].get("attachments") or []))
+    assert any(
+        a.get("type") == "inline_keyboard"
+        for a in (calls[1].get("attachments") or [])
+    )
 
 
 def _check_ca_bundle() -> None:

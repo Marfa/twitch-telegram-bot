@@ -1130,6 +1130,7 @@ async def _maybe_notify_media_fallback(
     """DM owner when alert media could not be posted and text-only was used."""
     from handlers.subscriptions import _owner_sub_number
 
+    # Private Telegram DM: no rights issue to report.
     if sub.dest_type == "dm":
         return
     if db.is_bot_blocked(sub.owner_id):
@@ -2155,6 +2156,7 @@ async def _maybe_notify_max_delivery_failure(
     sub: Subscription,
     *,
     reason: str,
+    paused: bool = True,
 ) -> None:
     from handlers.subscriptions import _owner_sub_number
 
@@ -2164,7 +2166,7 @@ async def _maybe_notify_max_delivery_failure(
         return
     lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
     notice = t(
-        "delivery_fail_notice_max",
+        "delivery_fail_notice_max" if paused else "delivery_fail_notice_max_soft",
         lang,
         sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
         twitch_username=sub.twitch_username,
@@ -2288,22 +2290,45 @@ async def _send_max_notification(
     )
 
     try:
-        await asyncio.to_thread(
+        media_dropped = await asyncio.to_thread(
             max_bot.deliver_alert_to_destination, dest, payload
         )
     except max_api.MaxApiError as exc:
-        if exc.status_code in (401, 403, 404, 410):
+        # Image-upload failures must not pause (Max URL fetcher is flaky).
+        soft_media = max_api.is_image_upload_error(exc)
+        if exc.status_code in (401, 403, 404, 410) and not soft_media:
             db.pause_delivery_for_subscription(sub.id)
-        await _maybe_notify_max_delivery_failure(
-            bot, db, sub, reason=str(exc)
-        )
+            await _maybe_notify_max_delivery_failure(
+                bot, db, sub, reason=str(exc), paused=True
+            )
+        elif soft_media:
+            # Fallback inside max_bot should normally succeed; if not, soft notice.
+            logger.warning(
+                "Max image upload failed for sub %s after fallback: %s",
+                sub.id,
+                exc,
+            )
+            await _maybe_notify_max_delivery_failure(
+                bot, db, sub, reason=str(exc), paused=False
+            )
+        else:
+            await _maybe_notify_max_delivery_failure(
+                bot, db, sub, reason=str(exc), paused=False
+            )
         return False
     except Exception as exc:
         logger.exception("Max alert delivery failed for sub %s", sub.id)
         await _maybe_notify_max_delivery_failure(
-            bot, db, sub, reason=str(exc)
+            bot, db, sub, reason=str(exc), paused=False
         )
         return False
+
+    if media_dropped:
+        # Alert delivered as text; Max CDN/upload flake — no owner DM spam.
+        logger.info(
+            "Max alert for sub %s sent without image after upload failure",
+            sub.id,
+        )
 
     if not is_scheduled_repeat:
         suppress_m = prem.effective_suppress_repeat_minutes(sub)

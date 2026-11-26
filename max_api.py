@@ -176,6 +176,182 @@ def set_my_commands(
     return data
 
 
+def is_image_upload_error(exc: BaseException) -> bool:
+    """True when Max rejected an image attachment (do not pause destination)."""
+    if not isinstance(exc, MaxApiError):
+        return False
+    msg = str(exc).lower()
+    code = str(exc.code or "").lower()
+    return any(
+        token in msg or token in code
+        for token in (
+            "failed to upload image",
+            "upload image",
+            "attachment.not.ready",
+            "process.attachment",
+            "errors.process.attachment",
+        )
+    )
+
+
+def _extract_upload_token(data: dict[str, Any]) -> str | None:
+    """Pull media token from POST /uploads or multipart upload responses."""
+    direct = str(data.get("token") or "").strip()
+    if direct:
+        return direct
+    photos = data.get("photos")
+    if isinstance(photos, dict):
+        for entry in photos.values():
+            if isinstance(entry, dict):
+                tok = str(entry.get("token") or "").strip()
+                if tok:
+                    return tok
+            elif isinstance(entry, str) and entry.strip():
+                return entry.strip()
+    return None
+
+
+def _unlink_quiet(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Failed to delete temp Max image %s: %s", path, exc)
+
+
+def _download_image_to_temp(url: str, *, session: requests.Session | None = None) -> Path:
+    """Download image to a temp file. Caller must delete the path (use finally)."""
+    href = (url or "").strip()
+    if not href.startswith(("http://", "https://")):
+        raise MaxApiError("image url required", code="proto.payload")
+    http = _http(session)
+    try:
+        resp = http.get(href, timeout=30, verify=True, stream=True)
+    except requests.RequestException as exc:
+        raise MaxApiError(str(exc)) from exc
+    path: Path | None = None
+    try:
+        if resp.status_code >= 400:
+            raise MaxApiError(
+                f"image download http {resp.status_code}",
+                status_code=resp.status_code,
+            )
+        ctype = (resp.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
+        if not ctype.startswith("image/"):
+            ctype = "image/jpeg"
+        ext = {
+            "image/png": "png",
+            "image/gif": "gif",
+            "image/webp": "webp",
+            "image/jpeg": "jpg",
+            "image/jpg": "jpg",
+        }.get(ctype.lower(), "jpg")
+        fd, name = tempfile.mkstemp(prefix="max_alert_img_", suffix=f".{ext}")
+        path = Path(name)
+        with os.fdopen(fd, "wb") as out:
+            for chunk in resp.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    out.write(chunk)
+        if path.stat().st_size <= 0:
+            raise MaxApiError("empty image download")
+        return path
+    except Exception:
+        _unlink_quiet(path)
+        raise
+    finally:
+        resp.close()
+
+
+def upload_image_file(
+    path: Path | str,
+    *,
+    content_type: str = "image/jpeg",
+    token: str | None = None,
+    session: requests.Session | None = None,
+) -> str:
+    """POST /uploads + multipart from a local file; return Max attachment token."""
+    file_path = Path(path)
+    if not file_path.is_file() or file_path.stat().st_size <= 0:
+        raise MaxApiError("empty image", code="proto.payload")
+    http = _http(session)
+    auth = token or _access_token()
+    try:
+        resp = http.post(
+            f"{API_BASE}/uploads",
+            headers={"Authorization": auth},
+            params={"type": "image"},
+            timeout=30,
+            verify=_tls_verify(),
+        )
+    except requests.RequestException as exc:
+        raise MaxApiError(str(exc)) from exc
+    meta = _parse_body(resp)
+    _raise_if_failed(resp, meta)
+    early = _extract_upload_token(meta)
+    upload_url = str(meta.get("url") or "").strip()
+    if early and not upload_url:
+        return early
+    if not upload_url:
+        raise MaxApiError(
+            "uploads: missing url",
+            status_code=resp.status_code,
+            code=str(meta.get("code") or "") or None,
+        )
+    name = file_path.name[:200] or "image.jpg"
+    ctype = content_type or "image/jpeg"
+    try:
+        with file_path.open("rb") as fh:
+            up = http.post(
+                upload_url,
+                headers={"Authorization": auth},
+                files={"data": (name, fh, ctype)},
+                timeout=60,
+                verify=_tls_verify(),
+            )
+    except requests.RequestException as exc:
+        raise MaxApiError(str(exc)) from exc
+    body = _parse_body(up)
+    _raise_if_failed(up, body)
+    out = _extract_upload_token(body) or early
+    if not out:
+        raise MaxApiError(
+            "uploads: missing token",
+            status_code=up.status_code,
+            code=str(body.get("code") or "") or None,
+        )
+    return out
+
+
+def upload_image_from_url(
+    url: str,
+    *,
+    token: str | None = None,
+    session: requests.Session | None = None,
+) -> str:
+    """Download ``url`` to a temp file, upload to Max, always delete the temp file.
+
+    Temp file is removed on success and on any error after download started.
+    """
+    href = (url or "").strip()
+    path: Path | None = None
+    try:
+        path = _download_image_to_temp(href, session=session)
+        suffix = path.suffix.lower().lstrip(".")
+        ctype = {
+            "png": "image/png",
+            "gif": "image/gif",
+            "webp": "image/webp",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+        }.get(suffix, "image/jpeg")
+        return upload_image_file(
+            path, content_type=ctype, token=token, session=session
+        )
+    finally:
+        _unlink_quiet(path)
+
+
 def send_message(
     *,
     text: str,
