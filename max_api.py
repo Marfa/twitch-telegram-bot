@@ -134,6 +134,48 @@ def get_me(
     return data
 
 
+def set_my_commands(
+    commands: list[dict[str, str]],
+    *,
+    token: str | None = None,
+    session: requests.Session | None = None,
+) -> dict[str, Any]:
+    """PATCH /me/commands — replace slash-command hints (max 32).
+
+    Empty ``commands`` clears the list. Each item needs ``name`` (1–64) and
+    optional ``description`` (1–128). Shown when the user types ``/`` in a
+    dialog (iOS/Android/desktop) or group (iOS/Android); not in channels.
+    """
+    body: dict[str, Any] = {
+        "commands": [
+            {
+                "name": str(c.get("name") or "").strip()[:64],
+                **(
+                    {"description": str(c["description"]).strip()[:128]}
+                    if (c.get("description") or "").strip()
+                    else {}
+                ),
+            }
+            for c in commands
+            if str(c.get("name") or "").strip()
+        ]
+    }
+    http = _http(session)
+    try:
+        resp = http.patch(
+            f"{API_BASE}/me/commands",
+            headers=_headers(token),
+            json=body,
+            timeout=30,
+            verify=_tls_verify(),
+        )
+    except requests.RequestException as exc:
+        raise MaxApiError(str(exc)) from exc
+    data = _parse_body(resp)
+    _raise_if_failed(resp, data)
+    return data
+
+
 def send_message(
     *,
     text: str,

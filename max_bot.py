@@ -5,7 +5,6 @@ Never log tokens, update secrets, or per-dest webhook secrets.
 """
 from __future__ import annotations
 
-import html
 import logging
 import re
 import secrets
@@ -33,10 +32,6 @@ LINK_CODE_TTL = timedelta(minutes=30)
 _MSG_MIN_INTERVAL = 0.55  # ≤2 msg/s per peer
 _BODY_MAX = 256_000
 _PUBLIC_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
-_TAG_RE = re.compile(r"<[^>]+>")
-_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
-_MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|_(.+?)_")
-_MD_CODE_RE = re.compile(r"`([^`]+)`")
 _CMD_RE = re.compile(r"^/([a-zA-Z_]+)(?:@\S+)?(?:\s+(.*))?$", re.DOTALL)
 
 _UPDATE_TYPES = [
@@ -97,6 +92,37 @@ def updates_secret() -> str:
     return (MAX_UPDATES_SECRET or "").strip()
 
 
+def _bot_commands_payload(*, lang: str = "ru") -> list[dict[str, str]]:
+    """Slash hints for Max ``/`` menu (API has no per-locale list — use ``lang``)."""
+    from i18n import t
+
+    return [
+        {"name": name, "description": t(desc_key, lang)[:128]}
+        for name, desc_key in (
+            ("start", "max_cmd_start_desc"),
+            ("link", "max_cmd_link_desc"),
+            ("list", "max_cmd_list_desc"),
+            ("unlink", "max_cmd_unlink_desc"),
+            ("help", "max_cmd_help_desc"),
+        )
+    ]
+
+
+def ensure_max_bot_commands() -> bool:
+    """Register Max slash commands so ``/`` shows the hint list. Returns True if ok."""
+    from config import MAX_BOT_TOKEN
+
+    if not (MAX_BOT_TOKEN or "").strip():
+        return False
+    try:
+        max_api.set_my_commands(_bot_commands_payload(lang="ru"))
+        logger.info("Max bot commands registered")
+        return True
+    except max_api.MaxApiError:
+        logger.exception("Max set_my_commands failed")
+        return False
+
+
 def bootstrap_max_subscription() -> bool:
     """Ensure Max delivers updates to our HTTPS endpoint. Returns True if ok/skipped."""
     from config import MAX_BOT_TOKEN
@@ -104,6 +130,8 @@ def bootstrap_max_subscription() -> bool:
     if not (MAX_BOT_TOKEN or "").strip():
         logger.info("MAX_BOT_TOKEN unset — skip Max subscription bootstrap")
         return False
+    # Slash menu is independent of webhook subscription — always refresh.
+    ensure_max_bot_commands()
     secret = updates_secret()
     if not secret:
         logger.warning("MAX_UPDATES_SECRET unset — skip Max subscription bootstrap")
@@ -358,6 +386,10 @@ def _on_message_created(data: dict[str, Any]) -> None:
 
     # Group / channel
     cmd, arg = _parse_command(text)
+    if cmd == "help":
+        lang = _normalize_lang(locale)
+        _throttled_send(chat_id=chat_id, text=_help_text(lang))
+        return
     if cmd in ("link", "start"):
         _link_chat_destination(
             sender,
@@ -885,21 +917,10 @@ def _list_dests_text(*, lang: str, dests: list[Any]) -> str:
 
 
 def _help_text(lang: str) -> str:
-    if lang.startswith("en"):
-        return (
-            "/start — onboarding menu (have alert / create alert)\n"
-            "/link — new DM code (in a group/channel: bind that chat)\n"
-            "/list — destinations\n"
-            "/unlink N|id — disable a destination\n"
-            "/help — this text"
-        )
-    return (
-        "/start — меню: есть оповещение / создать оповещение\n"
-        "/link — новый код ЛС (в группе/канале — привязка этого чата)\n"
-        "/list — список назначений\n"
-        "/unlink N|id — отвязать\n"
-        "/help — эта справка"
-    )
+    """Same shape as Telegram ``/help``: commands list + menu bullets (Max surface)."""
+    from i18n import t
+
+    return t("max_help", lang)
 
 
 def _no_dests(lang: str) -> str:
@@ -987,17 +1008,46 @@ def _deliver_alert_to_dm(max_user_id: int, payload: dict[str, Any]) -> None:
     )
 
 
+def _unwrap_md_marker(text: str, marker: str) -> str:
+    """Strip non-overlapping ``marker…marker`` wrappers in linear time (no ReDoS)."""
+    mlen = len(marker)
+    if mlen == 0 or not text:
+        return text
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text.startswith(marker, i):
+            j = text.find(marker, i + mlen)
+            if j != -1:
+                out.append(text[i + mlen : j])
+                i = j + mlen
+                continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def _markdown_to_plain(text: str) -> str:
+    """Best-effort markdown → plain without backtracking regexes."""
+    plain = _unwrap_md_marker(text, "`")
+    plain = _unwrap_md_marker(plain, "**")
+    plain = _unwrap_md_marker(plain, "__")
+    plain = _unwrap_md_marker(plain, "*")
+    plain = _unwrap_md_marker(plain, "_")
+    return plain
+
+
 def _payload_to_plain_text(payload: dict[str, Any]) -> str:
     raw = str(payload.get("text") or "")
     fmt = str(payload.get("text_format") or "plain").strip().lower()
     if fmt == "html":
-        plain = _TAG_RE.sub("", raw)
-        return html.unescape(plain).strip()
+        # Linear tag strip (same approach as translate.telegram_html_to_plain).
+        from translate import telegram_html_to_plain
+
+        return telegram_html_to_plain(raw).strip()
     if fmt == "markdown":
-        plain = _MD_CODE_RE.sub(r"\1", raw)
-        plain = _MD_BOLD_RE.sub(lambda m: m.group(1) or m.group(2) or "", plain)
-        plain = _MD_ITALIC_RE.sub(lambda m: m.group(1) or m.group(2) or "", plain)
-        return plain.strip()
+        return _markdown_to_plain(raw).strip()
     return raw.strip()
 
 

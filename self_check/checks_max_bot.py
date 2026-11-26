@@ -15,6 +15,8 @@ def run() -> None:
     _check_ca_bundle()
     _check_crud_and_ingest()
     _check_bootstrap_subscribe()
+    _check_help_and_commands_payload()
+    _check_payload_plain_text_no_redos()
     _check_parse_ingest_path()
     _check_onboard_menu_and_callbacks()
     with tempfile.TemporaryDirectory() as tmp:
@@ -146,14 +148,78 @@ def _check_bootstrap_subscribe() -> None:
                         with patch.object(
                             max_bot.max_api, "subscribe", return_value={"success": True}
                         ) as sub:
-                            assert max_bot.bootstrap_max_subscription() is True
-                            assert sub.called
-                            assert (
-                                sub.call_args.args[0]
-                                == "https://twitchbot.games/hooks/max/updates"
-                            )
-                            types = sub.call_args.kwargs.get("update_types") or []
-                            assert "message_callback" in types
+                            with patch.object(
+                                max_bot.max_api,
+                                "set_my_commands",
+                                return_value={"commands": []},
+                            ) as cmds:
+                                assert max_bot.bootstrap_max_subscription() is True
+                                assert sub.called
+                                assert cmds.called
+                                names = [
+                                    c["name"] for c in cmds.call_args.args[0]
+                                ]
+                                assert names == [
+                                    "start",
+                                    "link",
+                                    "list",
+                                    "unlink",
+                                    "help",
+                                ]
+                                assert (
+                                    sub.call_args.args[0]
+                                    == "https://twitchbot.games/hooks/max/updates"
+                                )
+                                types = sub.call_args.kwargs.get("update_types") or []
+                                assert "message_callback" in types
+
+
+def _check_help_and_commands_payload() -> None:
+    import max_bot
+
+    cmds = max_bot._bot_commands_payload(lang="ru")
+    assert [c["name"] for c in cmds] == [
+        "start",
+        "link",
+        "list",
+        "unlink",
+        "help",
+    ]
+    assert all(c.get("description") for c in cmds)
+    help_ru = max_bot._help_text("ru")
+    assert "/start" in help_ru and "/link" in help_ru and "/list" in help_ru
+    assert "/unlink" in help_ru and "/help" in help_ru
+    assert "Меню:" in help_ru
+    help_en = max_bot._help_text("en")
+    assert "Available commands:" in help_en
+    assert "Menu:" in help_en
+
+
+def _check_payload_plain_text_no_redos() -> None:
+    """HTML/markdown → plain must stay linear (CodeQL py/polynomial-redos #76/#77)."""
+    import max_bot
+
+    html_plain = max_bot._payload_to_plain_text(
+        {"text": "<b>hi</b> &amp; you", "text_format": "html"}
+    )
+    assert html_plain == "hi & you"
+    # Many '<' without '>' must not hang (old <[^>]+> ReDoS shape).
+    nasty = "<" * 50_000
+    assert max_bot._payload_to_plain_text(
+        {"text": nasty, "text_format": "html"}
+    ) == nasty
+    md_plain = max_bot._payload_to_plain_text(
+        {"text": "**bold** and *italic* and `code`", "text_format": "markdown"}
+    )
+    assert md_plain == "bold and italic and code"
+    # Long '*'+'a'*n with no closer — old italic regex ReDoS shape; must finish fast.
+    star_bomb = "*" + ("a" * 20_000)
+    assert (
+        max_bot._payload_to_plain_text(
+            {"text": star_bomb, "text_format": "markdown"}
+        )
+        == star_bomb
+    )
 
 
 def _check_onboard_menu_and_callbacks() -> None:
