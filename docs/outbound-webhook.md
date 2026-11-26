@@ -5,7 +5,7 @@ Destination **Webhook** in the Telegram bot: after the alert is rendered, the bo
 Public HTML copy (same file): [PUBLIC_BASE_URL/webhook](https://twitchbot.games/webhook) (fallback: this file on GitHub). The wizard setup step links here.
 
 Source of truth for signing/payload shape: [`outbound_webhook.py`](../outbound_webhook.py).  
-Product plan (Max thin bot): [`todo-max-messenger-bot.md`](todo-max-messenger-bot.md).
+Max thin bot receives the same contract via `/hooks/max/d/{public_id}` (`max_bot.py`).
 
 Runnable sample: [`examples/outbound_webhook_receiver.py`](../examples/outbound_webhook_receiver.py).
 

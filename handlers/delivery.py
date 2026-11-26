@@ -2149,6 +2149,224 @@ async def _send_outbound_webhook_notification(
     return True
 
 
+async def _maybe_notify_max_delivery_failure(
+    bot,
+    db: Database,
+    sub: Subscription,
+    *,
+    reason: str,
+) -> None:
+    from handlers.subscriptions import _owner_sub_number
+
+    if db.is_bot_blocked(sub.owner_id):
+        return
+    if not _delivery_fail_notice_due(sub.id):
+        return
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    notice = t(
+        "delivery_fail_notice_max",
+        lang,
+        sub_id=_owner_sub_number(db, sub.owner_id, sub.id),
+        twitch_username=sub.twitch_username,
+        reason=reason,
+    )
+    try:
+        await bot.send_message(
+            sub.owner_id,
+            notice,
+            reply_markup=delivery_fail_notice_keyboard(sub.id, lang),
+        )
+        _delivery_fail_notified[sub.id] = datetime.now(timezone.utc)
+    except (BadRequest, Forbidden) as notify_exc:
+        if _is_user_blocked_error(notify_exc):
+            apply_user_blocked(
+                db,
+                sub.owner_id,
+                source="delivery_fail_notice",
+                properties=_block_context(sub),
+            )
+        logger.warning(
+            "Cannot notify owner %s about Max delivery failure: %s",
+            sub.owner_id,
+            notify_exc,
+        )
+
+
+async def _send_max_notification(
+    bot,
+    db: Database,
+    sub: Subscription,
+    text: str,
+    *,
+    alert_type: str = "live",
+    stream: dict | None = None,
+    stream_id: str = "",
+    vod_offset_seconds: int | None = None,
+    twitch: TwitchClient | None = None,
+    parse_mode: str | None = None,
+    bot_data: dict | None = None,
+    job_queue=None,
+    is_scheduled_repeat: bool = False,
+) -> bool:
+    """Send rendered alert directly to Max DM/group/channel (dest_type=max)."""
+    import max_api
+    import max_bot
+    import outbound_webhook as owh
+    import premium as prem
+    from token_crypto import try_decrypt_secret
+    from twitch import template_uses_html
+    from uuid import uuid4
+
+    await _maybe_notify_stored_template_typos(bot, db, sub)
+
+    peer = int(sub.chat_id or 0)
+    public_raw = str(getattr(sub, "webhook_url", "") or "").strip()
+    public_id = try_decrypt_secret(public_raw) if public_raw else ""
+    if not public_id:
+        public_id = public_raw
+    dest = (
+        db.get_max_destination_by_public_id(public_id) if public_id else None
+    )
+    if dest is None or not dest.enabled:
+        # Legacy: chat_id alone as Max DM user_id.
+        if peer <= 0:
+            db.pause_delivery_for_subscription(sub.id)
+            await _maybe_notify_max_delivery_failure(
+                bot, db, sub, reason="max destination missing"
+            )
+            return False
+
+        class _LegacyDm:
+            kind = "dm"
+            max_user_id = peer
+            chat_id = None
+
+        dest = _LegacyDm()
+
+    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+    use_html = (
+        parse_mode == ParseMode.HTML
+        if parse_mode is not None
+        else template_uses_html(sub.message_template or "")
+    )
+    text_format = "html" if use_html else "plain"
+    bot_username = await _cached_bot_username(bot, bot_data)
+    buttons = _discord_link_buttons(
+        sub, lang, db=db, bot_username=bot_username
+    )
+
+    photo_url: str | None = None
+    image_photo = await asyncio.to_thread(
+        resolve_sub_image_photo, sub, stream, twitch
+    )
+    if isinstance(image_photo, str) and image_photo.startswith(
+        ("http://", "https://")
+    ):
+        photo_url = image_photo
+
+    history_stream_id = (
+        (stream_id or "").strip()
+        or (str(stream.get("id") or "") if stream else "")
+    )
+    delivery_id = str(uuid4())
+    payload = owh.build_payload(
+        delivery_id=delivery_id,
+        subscription_id=int(sub.id),
+        owner_id=int(sub.owner_id),
+        alert_type=alert_type,
+        twitch_login=sub.twitch_username or "",
+        twitch_user_id=str(sub.twitch_user_id or ""),
+        stream_id=history_stream_id,
+        text=text or "",
+        text_format=text_format,
+        photo_url=photo_url,
+        buttons=buttons,
+        meta={
+            "vod_offset_seconds": vod_offset_seconds,
+            "is_scheduled_repeat": bool(is_scheduled_repeat),
+        },
+    )
+
+    try:
+        await asyncio.to_thread(
+            max_bot.deliver_alert_to_destination, dest, payload
+        )
+    except max_api.MaxApiError as exc:
+        if exc.status_code in (401, 403, 404, 410):
+            db.pause_delivery_for_subscription(sub.id)
+        await _maybe_notify_max_delivery_failure(
+            bot, db, sub, reason=str(exc)
+        )
+        return False
+    except Exception as exc:
+        logger.exception("Max alert delivery failed for sub %s", sub.id)
+        await _maybe_notify_max_delivery_failure(
+            bot, db, sub, reason=str(exc)
+        )
+        return False
+
+    if not is_scheduled_repeat:
+        suppress_m = prem.effective_suppress_repeat_minutes(sub)
+        if suppress_m > 0:
+            db.set_notify_cooldown(sub.id, suppress_m)
+    jq = job_queue
+    if jq is None and bot_data is not None:
+        jq = bot_data.get("job_queue")
+    if (
+        alert_type == "live"
+        and not is_scheduled_repeat
+        and jq is not None
+    ):
+        from handlers.notifications import schedule_repeat_notify_jobs
+
+        schedule_repeat_notify_jobs(
+            jq,
+            db=db,
+            sub=sub,
+            stream_id=history_stream_id,
+        )
+
+    stream_uid = str((stream or {}).get("user_id") or "").strip()
+    history_uid = (
+        stream_uid if stream_uid.isdigit() else (sub.twitch_user_id or "")
+    )
+    log_chat = peer
+    try:
+        uid, cid = max_bot.peer_ids_for_destination(dest)
+        log_chat = int(uid or cid or peer)
+    except Exception:
+        log_chat = peer
+    try:
+        db.add_alert_delivery_log(
+            sub.owner_id,
+            subscription_id=sub.id,
+            dest_type="max",
+            chat_id=log_chat,
+            message_id=None,
+            thread_id=None,
+            twitch_username=sub.twitch_username,
+            alert_type=alert_type,
+            twitch_user_id=history_uid,
+            stream_id=history_stream_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to record Max alert delivery log for sub %s", sub.id
+        )
+    analytics.capture(
+        sub.owner_id,
+        "alert_sent",
+        {
+            "alert_type": alert_type,
+            "dest_type": "max",
+            "subscription_id": sub.id,
+            "twitch_username": sub.twitch_username,
+            "delivery_id": delivery_id,
+        },
+    )
+    return True
+
+
 def _delivery_log_extra(
     sub: Subscription,
     *,
@@ -2231,9 +2449,9 @@ async def _send_notification(
 
     alert_type = str(kwargs.get("alert_type") or "live")
     stream_id = _notification_stream_id(**kwargs)
-    # Discord / webhook destinations do not use the Telegram circuit.
+    # Discord / webhook / Max destinations do not use the Telegram circuit.
     dest = getattr(sub, "dest_type", "") or ""
-    if dest not in ("discord", "webhook") and not telegram_circuit.allow_send():
+    if dest not in ("discord", "webhook", "max") and not telegram_circuit.allow_send():
         _enqueue_transport_retry_for_sub(
             db, sub, alert_type=alert_type, stream_id=stream_id, kwargs=kwargs
         )
@@ -2260,7 +2478,7 @@ async def _send_notification(
         # handler (unreachable / typo / parse). TimedOut stays here as transport.
         if isinstance(exc, BadRequest):
             raise
-        if dest not in ("discord", "webhook") and telegram_circuit.is_transport_failure(
+        if dest not in ("discord", "webhook", "max") and telegram_circuit.is_transport_failure(
             exc
         ):
             _enqueue_transport_retry_for_sub(
@@ -2350,6 +2568,28 @@ async def _send_notification_inner(
         metrics.record_alert_delivery(
             alert_type=alert_type,
             dest_type="webhook",
+            outcome="sent" if ok else "failed",
+        )
+        return ok
+    if sub.dest_type == "max":
+        ok = await _send_max_notification(
+            bot,
+            db,
+            sub,
+            text,
+            alert_type=alert_type,
+            stream=stream,
+            stream_id=stream_id,
+            vod_offset_seconds=vod_offset_seconds,
+            twitch=twitch,
+            parse_mode=parse_mode,
+            bot_data=bot_data,
+            job_queue=job_queue,
+            is_scheduled_repeat=is_scheduled_repeat,
+        )
+        metrics.record_alert_delivery(
+            alert_type=alert_type,
+            dest_type="max",
             outcome="sent" if ok else "failed",
         )
         return ok

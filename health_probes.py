@@ -47,12 +47,21 @@ COMPONENT_NAMES = frozenset(
         "twitchdrops",
         "donationalerts",
         "clips_oauth",
+        "max",
+        "webhook_delivery",
     }
 )
 
 # Probes with no API key and no quota: their failures are cheap to re-check.
 _QUOTA_FREE_COMPONENTS = frozenset(
-    {"telegram", "gamerpower", "twitchdrops", "donationalerts"}
+    {
+        "telegram",
+        "gamerpower",
+        "twitchdrops",
+        "donationalerts",
+        "max",
+        "webhook_delivery",
+    }
 )
 
 _CACHE_LOCK = threading.Lock()
@@ -173,6 +182,10 @@ def _run_probe(name: str) -> tuple[int, bytes]:
         return _probe_donationalerts()
     if name == "clips_oauth":
         return _probe_clips_oauth()
+    if name == "max":
+        return _probe_max()
+    if name == "webhook_delivery":
+        return _probe_webhook_delivery()
     return 404, b"unknown"
 
 
@@ -537,4 +550,55 @@ def _probe_clips_oauth() -> tuple[int, bytes]:
         scopes = [str(s) for s in scope]
     if "clips:edit" not in scopes:
         return _fail(b"scope")
+    return _ok()
+
+
+def _probe_max() -> tuple[int, bytes]:
+    """MAX Bot API: GET /me when MAX_BOT_TOKEN is set."""
+    from config import MAX_BOT_TOKEN, MAX_UPDATES_SECRET
+
+    import max_api
+
+    token = (MAX_BOT_TOKEN or "").strip()
+    if not token:
+        return _na()
+    if not (MAX_UPDATES_SECRET or "").strip():
+        return _fail(b"secret")
+    try:
+        data = max_api.get_me()
+    except max_api.MaxApiError as exc:
+        if exc.status_code in (401, 403):
+            return _fail(b"auth")
+        logger.warning("health probe max failed status=%s", exc.status_code)
+        return _fail(b"http" if exc.status_code else b"net")
+    except Exception:
+        logger.exception("health probe max failed")
+        return _fail(b"error")
+    if not isinstance(data, dict) or not data:
+        return _fail(b"body")
+    return _ok()
+
+
+def _probe_webhook_delivery() -> tuple[int, bytes]:
+    """Outbound webhook module sanity (SSRF reject + secret shape). Always on."""
+    try:
+        import outbound_webhook as owh
+
+        if owh.normalize_webhook_url("http://example.com/hook") is not None:
+            return _fail(b"ssrf")
+        if owh.normalize_webhook_url("https://127.0.0.1/hook") is not None:
+            return _fail(b"ssrf")
+        ok_url = owh.normalize_webhook_url("https://example.com/hooks/alerts")
+        if not ok_url or not ok_url.startswith("https://"):
+            return _fail(b"url")
+        secret = owh.generate_secret()
+        if not owh.normalize_secret(secret):
+            return _fail(b"secret")
+        body = b'{"schema_version":1,"delivery_id":"probe"}'
+        sig = owh.sign_body(body, secret)
+        if not owh.verify_signature(body, secret, sig):
+            return _fail(b"hmac")
+    except Exception:
+        logger.exception("health probe webhook_delivery failed")
+        return _fail(b"error")
     return _ok()

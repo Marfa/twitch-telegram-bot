@@ -607,6 +607,9 @@ class Subscription:
             return bool(str(self.discord_webhook or "").strip())
         if dest == "webhook":
             return bool(str(self.webhook_url or "").strip())
+        if dest == "max":
+            # chat_id holds Max user_id for DM delivery.
+            return int(self.chat_id or 0) != 0
         return False
 
 

@@ -1624,6 +1624,11 @@ def dest_keyboard(lang: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    t("dest_max", lang), callback_data="dest:max"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     t("dest_webhook", lang), callback_data="dest:webhook"
                 )
             ],

@@ -1,6 +1,6 @@
-# Twitch X Telegram / Discord — уведомления о стримах (Twitch, YouTube Live, TikTok, VK Play, GoodGame, Kick), drops, сообщений в ЛС и работа с расписанием
+# Twitch X Telegram / Discord / Max — уведомления о стримах (Twitch, YouTube Live, TikTok, VK Play, GoodGame, Kick), drops, сообщений в ЛС и работа с расписанием
 
-**Старт стрима на Twitch, YouTube Live, TikTok, VK Play Live, GoodGame или Kick; смена категории, скоро стрим или конец эфира, доступен новый Drops, раздачи игр или пришло сообщение в ЛС — бот напишет туда, куда вы скажете: в Telegram, Discord или на свой Webhook.** AI-клипы из VOD. Настройка Расписания Twitch из Telegram.
+**Старт стрима на Twitch, YouTube Live, TikTok, VK Play Live, GoodGame или Kick; смена категории, скоро стрим или конец эфира, доступен новый Drops, раздачи игр или пришло сообщение в ЛС — бот напишет туда, куда вы скажете: в Telegram, Discord, Max или на свой Webhook.** AI-клипы из VOD. Настройка Расписания Twitch из Telegram.
 
 > [!IMPORTANT]
 > **Готовый бот:** [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню · [статус](https://pingzen.dev/status/bot-themarfa)
@@ -20,7 +20,7 @@ English: [README.en.md](README.en.md)
 | Готовый бот | [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню; [статус](https://pingzen.dev/status/bot-themarfa) |
 | Языки | Русский, English, Українська, Italiano — выбор при первом `/start`, смена в **⚙️ Настройки** |
 | Типы оповещений | Начало стрима · смена категории · предстоящий (Twitch schedule) · окончание стрима · Drops · оповещение по игре · выход релизов (IGDB) · раздачи игр (GamerPower + ITAD) |
-| Куда слать | Личка, канал/группа/сообщество (с темами), Discord или универсальный HTTPS Webhook (JSON + HMAC) |
+| Куда слать | Личка, канал/группа/сообщество (с темами), Discord, Max или универсальный HTTPS Webhook (JSON + HMAC) |
 | Канал | Twitch: ссылка, `m.twitch.tv` или username; для **начала стрима** также ссылка YouTube Live / TikTok / VK Play Live / GoodGame / Kick (упрощённый мастер). Ссылка Twitch в ЛС вне мастера → предложение создать оповещение |
 | Текст | Шаблон с плейсхолдерами; примеры `{username}`, `{game}`, `{name}` — [полный список](https://twitchbot.games/placeholders?lang=ru). **Очистка названия** — в «Дополнительно» при создании и в меню редактора при правке: убирает из `{name}` `@стримеров` (если канал есть на Twitch) и `!команды` (по умолчанию выкл) |
 | 🎲 Оповещение по игре | В **➕ Новая подписка** (под Drops): поиск стримов или оповещение; категория → фильтры (теги / зрители / язык / 18+) → **realtime или ежечасный дайджест**; live → иначе VOD; в **📋 Мои подписки** — отдельная категория |
@@ -130,9 +130,9 @@ python main.py
 6. Отложить отправку (минуты) — если отмечено; после старта / смены категории / офлайна, перед отправкой Helix перепроверяется
 7. Заглушка при рестарте (минуты) — если отмечено; только **начало стрима**
 8. Повторы (интервал в минутах, напр. `15` или `10,30`) — если отмечено; только **начало стрима**; `0` = выкл
-9. Куда слать: личка, канал/группа, Discord или Webhook (здесь тоже **💾 Сохранить черновик** — на паузе; без назначения включить оповещение нельзя)
-10. Для канала или группы — добавьте бота и подтвердите чат; для Discord — вставьте URL Incoming Webhook; для Webhook — HTTPS URL (бот выдаст HMAC-секрет). Контракт JSON + пример приёмника: [`docs/outbound-webhook.md`](docs/outbound-webhook.md), sample [`examples/outbound_webhook_receiver.py`](examples/outbound_webhook_receiver.py)
-11. Удалять предыдущие сообщения бота? — если отмечено, перед новым оповещением бот удаляет прошлые по этому же стримеру в том же чате / Discord webhook (тип и шаблон не важны; другие стримеры не трогаются). Закрепление в Discord и Webhook недоступно; для Webhook удаление прошлых тоже недоступно.
+9. Куда слать: личка, канал/группа, Discord, Max или Webhook (здесь тоже **💾 Сохранить черновик** — на паузе; без назначения включить оповещение нельзя)
+10. Для канала или группы — добавьте бота и подтвердите чат; для Discord — вставьте URL Incoming Webhook; для Max — код связи из Max-бота после `/start`; для Webhook — HTTPS URL (бот выдаст HMAC-секрет). Контракт JSON + пример приёмника: [`docs/outbound-webhook.md`](docs/outbound-webhook.md), sample [`examples/outbound_webhook_receiver.py`](examples/outbound_webhook_receiver.py)
+11. Удалять предыдущие сообщения бота? — если отмечено, перед новым оповещением бот удаляет прошлые по этому же стримеру в том же чате / Discord webhook (тип и шаблон не важны; другие стримеры не трогаются). Закрепление в Discord, Max и Webhook недоступно; для Webhook и Max удаление прошлых тоже недоступно.
 
 Шаги 4 / 6 / 7 / 8 / 11 — только после отметки на «Дополнительно» (и Premium для ⭐). Кнопка чата, «Кнопка напоминания», очистка названия и изображение бесплатны.
 
@@ -423,7 +423,7 @@ Churn / блоки: `bot_blocked` с `source` (`my_chat_member`, `delivery`, `ha
 | `twitch.py` | Helix API, discovery live-стримов, шаблоны, status.twitch.com |
 | `translate.py` | DeepL для админ-рассылок / IGDB blurbs |
 | `links.py` | Парсинг `t.me/c/…/тема` |
-| `health.py` | `/` лендинг (Dazzle, i18n), `/health` (DB ping + freshness `check_streams`; для deploy), `/health/c/<name>` (компоненты: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth), `/media/compilations/{token}.mp4` (компиляция клипов, TTL 3 дня), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook |
+| `health.py` | `/` лендинг (Dazzle, i18n), `/health` (DB ping + freshness `check_streams`; для deploy), `/health/c/<name>` (компоненты: db, twitch, telegram, igdb, posthog, groq, bothub, deepl, youtube, itad, gamerpower, twitchdrops, donationalerts, clips_oauth, max, webhook_delivery), `/media/compilations/{token}.mp4` (компиляция клипов, TTL 3 дня), `/placeholders`, `/privacy`, `/guide`, `/webhook`, `/sitemap.xml`, `/robots.txt`, Twitch OAuth callback, PostHog Issue/Report webhook, Max `/hooks/max/*` |
 
 Опрос Twitch Helix ~60 сек, Statuspage (Twitch, PostHog, Cursor, Polylane API) ~120 сек, Telegram polling; публичный HTTPS: лендинг `/`, guide/webhook/privacy/placeholders, OAuth, `/health`, PostHog Issue+Report webhook.
 

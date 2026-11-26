@@ -1264,6 +1264,8 @@ async def _format_subs_overview_lines(
                     if plain
                     else dest_label("webhook", lang)
                 )
+            elif sub.dest_type == "max":
+                chat_display = dest_label("max", lang)
             else:
                 chat_display = await _resolve_chat_display_name(bot, sub)
             lines.append(

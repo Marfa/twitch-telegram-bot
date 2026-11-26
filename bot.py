@@ -4075,7 +4075,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
                     receive_wizard_save_draft, pattern=r"^dest:draft$"
                 ),
                 CallbackQueryHandler(
-                    receive_dest_type, pattern=r"^dest:(dm|chat|discord|webhook)$"
+                    receive_dest_type, pattern=r"^dest:(dm|chat|discord|max|webhook)$"
                 ),
             ],
             DEST_STREAMER_TOPIC: [

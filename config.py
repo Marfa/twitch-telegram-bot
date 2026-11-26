@@ -172,6 +172,14 @@ POLYLANE_WORKSPACE_ID = os.getenv("POLYLANE_WORKSPACE_ID", "").strip()
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "").strip()
 # Secret for Max → us updates webhook (X-Max-Bot-Api-Secret); charset A–Z a–z 0–9 _ -
 MAX_UPDATES_SECRET = os.getenv("MAX_UPDATES_SECRET", "").strip()
+# Public username / deep link for the Max bot (no @).
+MAX_BOT_USERNAME = (
+    os.getenv("MAX_BOT_USERNAME", "").strip().lstrip("@") or "id760403963548_bot"
+)
+# Telegram bot username for Max onboarding deep links (no @).
+TELEGRAM_BOT_USERNAME = (
+    os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@") or "twitchbot_game"
+)
 
 
 def validate() -> None:

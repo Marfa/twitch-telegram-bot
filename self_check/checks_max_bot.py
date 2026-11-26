@@ -16,6 +16,11 @@ def run() -> None:
     _check_crud_and_ingest()
     _check_bootstrap_subscribe()
     _check_parse_ingest_path()
+    _check_onboard_menu_and_callbacks()
+    with tempfile.TemporaryDirectory() as tmp:
+        db = SqliteDatabase(Path(tmp) / "max_link.db")
+        _check_resolve_link_code(db)
+        _check_chat_destination_and_permissions(db)
 
 
 def _check_ca_bundle() -> None:
@@ -147,6 +152,70 @@ def _check_bootstrap_subscribe() -> None:
                                 sub.call_args.args[0]
                                 == "https://twitchbot.games/hooks/max/updates"
                             )
+                            types = sub.call_args.kwargs.get("update_types") or []
+                            assert "message_callback" in types
+
+
+def _check_onboard_menu_and_callbacks() -> None:
+    import max_bot
+
+    assert "message_callback" in max_bot._UPDATE_TYPES
+
+    text, atts = max_bot._menu_start("ru")
+    assert "Выберите" in text
+    assert "Код связи" not in text
+    payloads = {
+        b.get("payload")
+        for att in atts
+        for row in (att.get("payload") or {}).get("buttons") or []
+        for b in row
+        if isinstance(b, dict)
+    }
+    assert max_bot._CB_HAVE in payloads
+    assert max_bot._CB_NEW in payloads
+
+    new_text, new_atts = max_bot._menu_new("ru")
+    assert "Telegram" in new_text
+    assert any(
+        b.get("type") == "link"
+        for att in new_atts
+        for row in (att.get("payload") or {}).get("buttons") or []
+        for b in row
+        if isinstance(b, dict)
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = SqliteDatabase(Path(tmp) / "max_onboard.db")
+        max_bot.configure(db)
+
+        with patch.object(
+            max_bot.max_api, "send_message", return_value={"ok": True}
+        ) as send:
+            max_bot._onboard_user({"user_id": 77, "username": "neo"}, locale="ru")
+            assert send.called
+            kwargs = send.call_args.kwargs
+            assert "attachments" in kwargs
+            assert db.get_max_dm_destination(77) is None
+
+        with patch.object(
+            max_bot.max_api, "answer_callback", return_value={"success": True}
+        ) as ans:
+            max_bot._on_message_callback(
+                {
+                    "update_type": "message_callback",
+                    "user_locale": "ru",
+                    "callback": {
+                        "callback_id": "cb-1",
+                        "payload": max_bot._CB_HAVE,
+                        "user": {"user_id": 77, "username": "neo"},
+                    },
+                }
+            )
+            assert ans.called
+            msg = ans.call_args.kwargs.get("message") or {}
+            assert "код связи" in (msg.get("text") or "").lower()
+            assert db.get_max_dm_destination(77) is not None
+            assert db.list_max_destinations(77)
 
 
 def _check_parse_ingest_path() -> None:
@@ -155,3 +224,82 @@ def _check_parse_ingest_path() -> None:
     assert max_bot.parse_ingest_public_id("/hooks/max/d/abc_DEF-12") == "abc_DEF-12"
     assert max_bot.parse_ingest_public_id("/hooks/max/d/bad/extra") is None
     assert max_bot.parse_ingest_public_id("/hooks/max/updates") is None
+
+    with patch("config.PUBLIC_BASE_URL", "https://twitchbot.games"):
+        assert (
+            max_bot.our_ingest_public_id_from_url(
+                "https://twitchbot.games/hooks/max/d/abc_DEF-12"
+            )
+            == "abc_DEF-12"
+        )
+        assert (
+            max_bot.our_ingest_public_id_from_url(
+                "https://evil.example/hooks/max/d/abc_DEF-12"
+            )
+            is None
+        )
+
+
+def _check_resolve_link_code(db) -> None:
+    import max_bot
+    from datetime import datetime, timedelta, timezone
+    from token_crypto import encrypt_secret
+
+    db.upsert_max_user(4242, username="u", lang="ru")
+    dest = db.create_max_destination(
+        4242,
+        kind="dm",
+        chat_id=None,
+        public_id="pidLinkCode01",
+        webhook_secret=encrypt_secret("secret_ok_link_code_abc"),
+        enabled=True,
+    )
+    expires = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+    db.create_max_link_code(
+        code="ABCD1234",
+        max_user_id=4242,
+        dest_id=dest.id,
+        expires_at=expires,
+    )
+    got, err = max_bot.resolve_link_code(db, "abcd1234")
+    assert err is None and got is not None
+    assert int(got.max_user_id) == 4242
+    assert db.consume_max_link_code("ABCD1234") is True
+    got2, err2 = max_bot.resolve_link_code(db, "ABCD1234")
+    assert got2 is None and err2 == "max_code_used"
+
+
+def _check_chat_destination_and_permissions(db) -> None:
+    import max_bot
+    from token_crypto import encrypt_secret
+
+    db.upsert_max_user(777, username="adder", lang="ru")
+    chat = db.create_max_destination(
+        777,
+        kind="chat",
+        chat_id=-100500,
+        public_id="pidChatDest01xx",
+        webhook_secret=encrypt_secret("secret_ok_chat_dest_xyz"),
+        enabled=True,
+    )
+    assert db.get_max_destination_by_chat_id(-100500) is not None
+    uid, cid = max_bot.peer_ids_for_destination(chat)
+    assert uid is None and cid == -100500
+    assert db.set_max_destination_enabled(chat.id, False) is True
+    assert db.get_max_destination_by_chat_id(-100500).enabled is False
+
+    import max_api
+
+    assert max_api.bot_can_post({"is_admin": False}, is_channel=False) is True
+    assert (
+        max_api.bot_can_post(
+            {"is_admin": True, "permissions": ["write"]}, is_channel=True
+        )
+        is True
+    )
+    assert (
+        max_api.bot_can_post(
+            {"is_admin": False, "permissions": []}, is_channel=True
+        )
+        is False
+    )

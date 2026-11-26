@@ -1023,6 +1023,12 @@ class SqliteDatabase:
         )
         conn.execute(
             """
+            CREATE INDEX IF NOT EXISTS idx_max_destinations_chat
+            ON max_destinations(chat_id)
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS max_link_codes (
                 code TEXT PRIMARY KEY,
                 max_user_id INTEGER NOT NULL,
@@ -1864,6 +1870,12 @@ class SqliteDatabase:
             pin_message = False
             delete_previous = False
             notify_delete_fail = False
+        elif dest_type == "max":
+            # webhook_url column holds max_destinations.public_id (not a secret).
+            outbound_url_store = str(webhook_url or "").strip()
+            pin_message = False
+            delete_previous = False
+            notify_delete_fail = False
         plat = (stream_platform or "twitch").strip().lower() or "twitch"
         with self._conn() as conn:
             cur = conn.execute(
@@ -2008,7 +2020,7 @@ owner_id, twitch_username, twitch_user_id,
                 SELECT * FROM subscriptions
                 WHERE COALESCE(delete_previous, 0) != 0
                   AND last_message_id IS NOT NULL
-                  AND dest_type NOT IN ('dm', 'discord', 'webhook')
+                  AND dest_type NOT IN ('dm', 'discord', 'webhook', 'max')
                   AND (
                     last_message_at IS NULL
                     OR last_message_at <= ?
@@ -7145,6 +7157,65 @@ owner_id, twitch_username, twitch_user_id,
                 (pid,),
             ).fetchone()
         return _row_to_max_destination(row) if row else None
+
+    def get_max_destination_by_id(self, dest_id: int) -> MaxDestination | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM max_destinations WHERE id = ?",
+                (int(dest_id),),
+            ).fetchone()
+        return _row_to_max_destination(row) if row else None
+
+    def get_max_destination_by_chat_id(self, chat_id: int) -> MaxDestination | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM max_destinations
+                WHERE chat_id = ? AND kind IN ('chat', 'channel')
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (int(chat_id),),
+            ).fetchone()
+        return _row_to_max_destination(row) if row else None
+
+    def list_max_destinations(
+        self, max_user_id: int, *, enabled_only: bool = False
+    ) -> list[MaxDestination]:
+        sql = "SELECT * FROM max_destinations WHERE max_user_id = ?"
+        params: list[object] = [int(max_user_id)]
+        if enabled_only:
+            sql += " AND enabled = 1"
+        sql += " ORDER BY kind ASC, id ASC"
+        with self._conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_row_to_max_destination(r) for r in rows]
+
+    def set_max_destination_enabled(self, dest_id: int, enabled: bool) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE max_destinations SET enabled = ? WHERE id = ?",
+                (1 if enabled else 0, int(dest_id)),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0) > 0
+
+    def consume_max_link_code(self, code: str, *, consumed_at: str | None = None) -> bool:
+        raw = (code or "").strip()
+        if not raw:
+            return False
+        now = consumed_at or datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE max_link_codes
+                SET consumed_at = ?
+                WHERE code = ? AND consumed_at IS NULL
+                """,
+                (now, raw),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0) > 0
 
     def create_max_destination(
         self,

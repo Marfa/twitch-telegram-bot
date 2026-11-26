@@ -2399,6 +2399,12 @@ def check_core() -> None:
     with patch.dict("os.environ", {"TWITCH_CLIPS_REFRESH_TOKEN": ""}, clear=False):
         st, body = probes_mod.evaluate_component("clips_oauth")
         assert st == 200 and body == b"n/a"
+    clear_probe_cache_for_tests()
+    assert probes_mod.evaluate_component("webhook_delivery") == (200, b"ok")
+    clear_probe_cache_for_tests()
+    with patch("config.MAX_BOT_TOKEN", ""):
+        st_max, body_max = probes_mod.evaluate_component("max")
+        assert st_max == 200 and body_max == b"n/a"
 
     # A keyless probe re-measures a failure at the next monitor poll, while a
     # paid quota probe keeps the long failure cache. Success keeps it for both.

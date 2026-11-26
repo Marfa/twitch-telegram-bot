@@ -2625,6 +2625,15 @@ async def wizard_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             )
             _set_wizard_back(context, _wz()["DEST_CHAT"])
             return _wz()["DEST_CHAT"]
+        if dest_type == "max":
+            from config import MAX_BOT_USERNAME
+
+            await update.effective_message.reply_text(
+                t("max_setup", lang, bot=MAX_BOT_USERNAME),
+                reply_markup=_wizard(lang),
+            )
+            _set_wizard_back(context, _wz()["DEST_CHAT"])
+            return _wz()["DEST_CHAT"]
         if dest_type == "webhook":
             await update.effective_message.reply_text(
                 webhook_setup_html(lang),
@@ -4038,6 +4047,25 @@ async def receive_dest_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         _set_wizard_back(context, _wz()["DEST_CHAT"])
         return _wz()["DEST_CHAT"]
 
+    if dest_type == "max":
+        from config import MAX_BOT_USERNAME
+
+        context.user_data["pin_message"] = False
+        context.user_data["adv_want_pin"] = False
+        context.user_data["delete_previous"] = False
+        context.user_data["notify_delete_fail"] = False
+        context.user_data["discord_webhook"] = ""
+        context.user_data["webhook_url"] = ""
+        context.user_data["webhook_secret"] = ""
+        await query.edit_message_text("✓")
+        await context.bot.send_message(
+            reply_chat_id(update),
+            t("max_setup", lang, bot=MAX_BOT_USERNAME),
+            reply_markup=_wizard(lang),
+        )
+        _set_wizard_back(context, _wz()["DEST_CHAT"])
+        return _wz()["DEST_CHAT"]
+
     if dest_type == "webhook":
         context.user_data["pin_message"] = False
         context.user_data["adv_want_pin"] = False
@@ -4415,6 +4443,8 @@ async def receive_dest_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if dest_type == "discord":
         return await _receive_discord_webhook(update, context)
+    if dest_type == "max":
+        return await _receive_max_link_code(update, context)
     if dest_type == "webhook":
         return await _receive_outbound_webhook(update, context)
 
@@ -4521,9 +4551,86 @@ async def _receive_discord_webhook(
     return await _prompt_delete_old(update, context, lang)
 
 
+async def _bind_max_destination(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    dest,
+    link_code: str | None = None,
+) -> int:
+    """Finish wizard with dest_type=max (peer = Max user or chat id)."""
+    import max_bot
+    import max_api
+
+    message = update.effective_message
+    lang = _user_lang(context, update.effective_user.id)
+    user_id, chat_id = max_bot.peer_ids_for_destination(dest)
+    peer = int(user_id or chat_id or 0)
+    if peer <= 0:
+        await message.reply_text(t("max_invalid_code", lang))
+        return _wz()["DEST_CHAT"]
+    try:
+        await asyncio.to_thread(
+            max_bot.send_plain_to_destination, dest, t("max_setup_sample", lang)
+        )
+    except max_api.MaxApiError:
+        await message.reply_text(t("max_test_failed", lang))
+        return _wz()["DEST_CHAT"]
+    except Exception:
+        logger.exception("Max setup sample failed peer=%s kind=%s", peer, dest.kind)
+        await message.reply_text(t("max_test_failed", lang))
+        return _wz()["DEST_CHAT"]
+
+    if link_code:
+        db: Database = context.application.bot_data["db"]
+        db.consume_max_link_code(link_code)
+
+    context.user_data["dest_type"] = "max"
+    context.user_data["discord_webhook"] = ""
+    # Store public_id so delivery can resolve kind (dm vs chat/channel).
+    context.user_data["webhook_url"] = str(dest.public_id or "")
+    context.user_data["webhook_secret"] = ""
+    context.user_data["webhook_secret_plain"] = ""
+    context.user_data["pending_chat_id"] = peer
+    context.user_data["pending_thread_id"] = None
+    context.user_data["pin_message"] = False
+    context.user_data["adv_want_pin"] = False
+    context.user_data["delete_previous"] = False
+    context.user_data["notify_delete_fail"] = False
+    return await _finish_subscription(
+        update,
+        context,
+        update.effective_user.id,
+        peer,
+        None,
+    )
+
+
+async def _receive_max_link_code(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    import max_bot
+
+    message = update.effective_message
+    lang = _user_lang(context, update.effective_user.id)
+    raw = (message.text or message.caption or "").strip()
+    db: Database = context.application.bot_data["db"]
+    dest, err_key = max_bot.resolve_link_code(db, raw)
+    if err_key or dest is None:
+        await message.reply_text(t(err_key or "max_invalid_code", lang))
+        return _wz()["DEST_CHAT"]
+    return await _bind_max_destination(
+        update,
+        context,
+        dest=dest,
+        link_code=raw.strip().upper(),
+    )
+
+
 async def _receive_outbound_webhook(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
+    import max_bot
     import outbound_webhook as owh
 
     message = update.effective_message
@@ -4533,6 +4640,16 @@ async def _receive_outbound_webhook(
     if not url:
         await message.reply_text(t("webhook_invalid_url", lang))
         return _wz()["DEST_CHAT"]
+
+    db: Database = context.application.bot_data["db"]
+    # Our Max ingest URL: bind as dest_type=max (generated webhook secret would 401).
+    max_pid = max_bot.our_ingest_public_id_from_url(url)
+    if max_pid:
+        dest = db.get_max_destination_by_public_id(max_pid)
+        if dest is None or not dest.enabled or dest.kind != "dm":
+            await message.reply_text(t("max_ingest_unknown", lang))
+            return _wz()["DEST_CHAT"]
+        return await _bind_max_destination(update, context, dest=dest)
 
     secret = owh.generate_secret()
     err = await asyncio.to_thread(
@@ -4770,19 +4887,21 @@ async def _finish_subscription(
         return ConversationHandler.END
     delete_previous = (
         bool(data.get("delete_previous", False))
-        and dest_type not in ("dm", "webhook", "unset")
+        and dest_type not in ("dm", "webhook", "max", "unset")
     )
     notify_delete_fail = delete_previous
-    # Discord / outbound webhook cannot pin; keep pin off for DM too.
+    # Discord / outbound webhook / Max cannot pin; keep pin off for DM too.
     pin_message = (
         bool(data.get("pin_message", False) or data.get("adv_want_pin", False))
-        and dest_type not in ("dm", "discord", "webhook", "unset")
+        and dest_type not in ("dm", "discord", "webhook", "max", "unset")
     )
     discord_webhook = (
         str(data.get("discord_webhook") or "").strip() if dest_type == "discord" else ""
     )
     outbound_webhook_url = (
-        str(data.get("webhook_url") or "").strip() if dest_type == "webhook" else ""
+        str(data.get("webhook_url") or "").strip()
+        if dest_type in ("webhook", "max")
+        else ""
     )
     outbound_webhook_secret = (
         str(data.get("webhook_secret") or "").strip() if dest_type == "webhook" else ""
@@ -4794,6 +4913,10 @@ async def _finish_subscription(
     )
     if dest_type in ("discord", "webhook", "unset"):
         chat_id = 0
+        thread_id = None
+    elif dest_type == "max":
+        # chat_id = Max peer (user_id for dm, chat_id for group/channel).
+        # webhook_url holds max_destinations.public_id for kind lookup.
         thread_id = None
     from alert_repeats import format_repeat_notify_minutes, parse_repeat_notify_minutes
 
@@ -4810,12 +4933,12 @@ async def _finish_subscription(
         repeat_notify_minutes = ""
     block_overlap = (
         bool(data.get("block_overlap"))
-        and dest_type not in ("dm", "discord", "webhook", "unset")
+        and dest_type not in ("dm", "discord", "webhook", "max", "unset")
         and alert_type in ("", "live")
     )
     block_repeat_when_last = (
         bool(data.get("block_repeat_when_last"))
-        and dest_type not in ("dm", "discord", "webhook", "unset")
+        and dest_type not in ("dm", "discord", "webhook", "max", "unset")
         and alert_type in ("", "live")
     )
     if alert_type and alert_type != "live":
@@ -5092,6 +5215,7 @@ async def _finish_subscription(
     elif edit_sub_id and (
         (dest_type == "discord" and discord_webhook)
         or (dest_type == "webhook" and outbound_webhook_url)
+        or (dest_type == "max" and int(chat_id or 0) != 0)
     ):
         can = await prem.may_enable_subscription_async(
             context.bot,

@@ -181,6 +181,45 @@ def send_message(
     return data
 
 
+def answer_callback(
+    callback_id: str,
+    *,
+    message: dict[str, Any] | None = None,
+    notification: str | None = None,
+    token: str | None = None,
+    session: requests.Session | None = None,
+) -> dict[str, Any]:
+    """POST /answers — react to ``message_callback`` (edit message and/or toast)."""
+    cid = (callback_id or "").strip()
+    if not cid:
+        raise MaxApiError("callback_id required", code="proto.payload")
+    body: dict[str, Any] = {}
+    if message is not None:
+        body["message"] = message
+    if notification is not None:
+        body["notification"] = notification
+    if not body:
+        raise MaxApiError(
+            "message or notification required",
+            code="proto.payload",
+        )
+    http = _http(session)
+    try:
+        resp = http.post(
+            f"{API_BASE}/answers",
+            headers=_headers(token),
+            params={"callback_id": cid},
+            json=body,
+            timeout=30,
+            verify=_tls_verify(),
+        )
+    except requests.RequestException as exc:
+        raise MaxApiError(str(exc)) from exc
+    data = _parse_body(resp)
+    _raise_if_failed(resp, data)
+    return data
+
+
 def subscribe(
     url: str,
     *,
@@ -280,3 +319,51 @@ def unsubscribe(
     data = _parse_body(resp)
     _raise_if_failed(resp, data)
     return data
+
+
+def get_chat_membership(
+    chat_id: int,
+    *,
+    token: str | None = None,
+    session: requests.Session | None = None,
+) -> dict[str, Any]:
+    """GET /chats/{chatId}/members/me — bot membership + admin permissions."""
+    cid = int(chat_id)
+    http = _http(session)
+    try:
+        resp = http.get(
+            f"{API_BASE}/chats/{cid}/members/me",
+            headers=_headers(token),
+            timeout=30,
+            verify=_tls_verify(),
+        )
+    except requests.RequestException as exc:
+        raise MaxApiError(str(exc)) from exc
+    data = _parse_body(resp)
+    _raise_if_failed(resp, data)
+    return data
+
+
+def bot_can_post(membership: dict[str, Any] | None, *, is_channel: bool) -> bool:
+    """Whether the bot may send messages into this chat/channel."""
+    if not isinstance(membership, dict):
+        return False
+    if not is_channel:
+        # Group: membership is enough to POST /messages for a normal participant.
+        return True
+    if membership.get("is_owner") or membership.get("is_admin"):
+        perms = membership.get("permissions")
+        if not isinstance(perms, list) or not perms:
+            # Owner/admin with no permissions list — allow write.
+            return True
+        names = {str(p).strip() for p in perms if p is not None}
+        return bool(
+            names
+            & {
+                "write",
+                "post_edit_delete_message",
+                "edit",
+                "edit_message",
+            }
+        )
+    return False
