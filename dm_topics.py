@@ -688,14 +688,24 @@ async def strip_reply_keyboards_from_threads(
 
 
 async def strip_alert_topic_reply_keyboards(
-    bot, db, user_id: int, *, force: bool = False
+    bot, db, user_id: int, *, force: bool = False, screen: str | None = None
 ) -> None:
     """Clear ReplyKeyboard from stored alert topics.
 
     Only when force=True (topics enable). Menu / pulse / redeploy must not
     post into Эфир — that bumps the sidebar and looks like topics recreating.
+
+    Alert topics carry alerts only, so no screen may leave its keyboard there.
+    The i18n screen registry names the screens that post the sticky reply
+    keyboard (``screen`` is the one posted to General, main_menu by default);
+    only such a keyboard can be left behind in a topic, so the registry alone
+    decides whether a strip is needed.
     """
+    from i18n import sticky_screen_keys
+
     if not force:
+        return
+    if (screen or "main_menu") not in sticky_screen_keys():
         return
     tids = user_alert_topic_thread_ids(db, user_id)
     await strip_reply_keyboards_from_threads(bot, user_id, tids)

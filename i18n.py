@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import calendar as cal_mod
 import html
+import itertools
 import re
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 from telegram import (
     InlineKeyboardButton,
@@ -1185,6 +1189,202 @@ def wizard_nav_inline(lang: str, *, back: bool = True) -> InlineKeyboardMarkup:
 def admin_wizard_menu(lang: str, *, back: bool = True) -> InlineKeyboardMarkup:
     """Admin broadcast wizard nav — inline only (same as wizard_nav_inline)."""
     return wizard_nav_inline(lang, back=back)
+
+
+# --- Private-chat screen registry -------------------------------------------
+#
+# Which keyboard a private-chat screen posts, and whether it is sticky, is
+# declared here once. bot_helpers (sticky coercion), dm_topics (alert topic
+# strip) and self_check (escape hatch) read this registry instead of deriving
+# the rule from markup contents. Product rule: .cursor/rules/reply-keyboard.mdc.
+#
+# Add a screen by adding one Screen below. A builder named ``*_menu`` or
+# ``*_menu_inline`` without a declaration fails self_check.
+
+NAV_SCREEN_BUILDER_RE = re.compile(r"^[a-z0-9_]*menu(?:_inline)?$")
+
+# Builders for a declared screen under another name.
+SCREEN_BUILDER_ALIASES: frozenset[str] = frozenset({"admin_wizard_menu"})
+
+
+@dataclass(frozen=True)
+class Screen:
+    """One private-chat navigation screen and the keyboard it posts.
+
+    kind: "reply" posts a ReplyKeyboardMarkup, "inline" posts an InlineKeyboardMarkup.
+    sticky: the always-visible reply keyboard of the private chat (main menu only).
+    callback_prefix: inline screens — callbacks that open the panel.
+    variants: builder arguments that name this screen (optional rows, roles).
+    """
+
+    key: str
+    kind: str
+    builder: Callable[..., Any]
+    sticky: bool = False
+    callback_prefix: str | None = None
+    variants: Mapping[str, tuple[Any, ...]] = field(default_factory=dict)
+
+    def arg_sets(self) -> list[dict[str, Any]]:
+        """Every builder argument combination that builds this screen."""
+        names = list(self.variants)
+        if not names:
+            return [{}]
+        combos = itertools.product(*(self.variants[name] for name in names))
+        return [dict(zip(names, combo, strict=True)) for combo in combos]
+
+
+_SCREENS: tuple[Screen, ...] = (
+    Screen(
+        "main_menu",
+        "reply",
+        main_menu,
+        sticky=True,
+        variants={"is_admin": (False, True), "demo_active": (False, True)},
+    ),
+    Screen("other_menu", "reply", other_menu),
+    Screen(
+        "subscriptions_menu",
+        "reply",
+        subscriptions_menu,
+        variants={"cart": (False, True), "pause_notifications": (False, True)},
+    ),
+    Screen("settings_menu", "reply", settings_menu),
+    Screen("bot_settings_menu", "reply", bot_settings_menu),
+    Screen("admin_menu", "reply", admin_menu),
+    Screen("broadcast_menu", "reply", broadcast_menu),
+    Screen("partner_menu", "reply", partner_menu),
+    Screen("auth_tokens_menu", "reply", auth_tokens_menu),
+    Screen("wizard_menu", "reply", wizard_menu, variants={"back": (True, False)}),
+    Screen(
+        "other_inline",
+        "inline",
+        other_menu_inline,
+        callback_prefix="menu_other:",
+    ),
+    Screen(
+        "settings_inline",
+        "inline",
+        settings_menu_inline,
+        callback_prefix="menu_settings:",
+    ),
+    Screen(
+        "bot_settings_inline",
+        "inline",
+        bot_settings_menu_inline,
+        callback_prefix="menu_bot_settings:",
+    ),
+    Screen("admin_inline", "inline", admin_menu_inline, callback_prefix="menu_admin:"),
+    Screen(
+        "subscriptions_inline",
+        "inline",
+        subscriptions_menu_inline,
+        callback_prefix="menu_subs:",
+        variants={"cart": (True,)},
+    ),
+    Screen(
+        "broadcast_inline",
+        "inline",
+        broadcast_menu_inline,
+        callback_prefix="menu_broadcast:",
+    ),
+    Screen("partner_inline", "inline", partner_menu_inline, callback_prefix="menu_partner:"),
+    Screen(
+        "auth_tokens_inline",
+        "inline",
+        auth_tokens_menu_inline,
+        callback_prefix="menu_auth:",
+    ),
+    Screen(
+        "wizard_inline",
+        "inline",
+        wizard_nav_inline,
+        callback_prefix="wizard_nav:",
+        variants={"back": (True, False)},
+    ),
+)
+
+SCREEN_REGISTRY: Mapping[str, Screen] = MappingProxyType(
+    {spec.key: spec for spec in _SCREENS}
+)
+
+
+def build_screen(key: str, lang: str, **kwargs: Any) -> Any:
+    """Build a declared screen for ``lang``; omitted rows take their first variant."""
+    spec = SCREEN_REGISTRY[key]
+    args: dict[str, Any] = {
+        name: values[0] for name, values in spec.variants.items()
+    }
+    args.update(kwargs)
+    return spec.builder(lang, **args)
+
+
+def sticky_screen_keys() -> frozenset[str]:
+    """Screens declared to post the always-visible reply keyboard."""
+    return frozenset(spec.key for spec in _SCREENS if spec.sticky)
+
+
+def screen_is_sticky(key: str | None) -> bool:
+    return key is not None and key in sticky_screen_keys()
+
+
+def inline_screen_callback_prefixes() -> tuple[str, ...]:
+    """Callback prefixes of the declared inline panels."""
+    return tuple(
+        spec.callback_prefix
+        for spec in _SCREENS
+        if spec.callback_prefix is not None
+    )
+
+
+def _reply_signature(markup: ReplyKeyboardMarkup) -> tuple[tuple[str, ...], ...]:
+    return tuple(tuple(button.text for button in row) for row in markup.keyboard)
+
+
+def screen_key_for_markup(markup: Any, *, sticky_only: bool = False) -> str | None:
+    """Declared screen key for a built markup, or None when no screen declares it.
+
+    Reply screens match on their button rows over every supported locale, so a
+    caller that posts ``main_menu(lang, …)`` without ``lang=`` is still known.
+    Inline screens match on their declared callback prefix.
+    """
+    if isinstance(markup, ReplyKeyboardMarkup):
+        signature = _reply_signature(markup)
+        for spec in _SCREENS:
+            if spec.kind != "reply" or (sticky_only and not spec.sticky):
+                continue
+            for loc in SUPPORTED_LOCALES:
+                for args in spec.arg_sets():
+                    if signature == _reply_signature(spec.builder(loc, **args)):
+                        return spec.key
+        return None
+    if isinstance(markup, InlineKeyboardMarkup):
+        hits: dict[str, int] = {}
+        for row in markup.inline_keyboard:
+            for button in row:
+                data = button.callback_data
+                if not data:
+                    continue
+                for spec in _SCREENS:
+                    if spec.callback_prefix and data.startswith(spec.callback_prefix):
+                        hits[spec.key] = hits.get(spec.key, 0) + 1
+        if not hits:
+            return None
+        return max(hits, key=lambda key: hits[key])
+    return None
+
+
+def screen_escape_labels() -> set[str]:
+    """Button labels of every declared screen, over every supported locale."""
+    labels: set[str] = set()
+    for spec in _SCREENS:
+        for loc in SUPPORTED_LOCALES:
+            markup = build_screen(spec.key, loc)
+            rows = getattr(markup, "keyboard", None) or markup.inline_keyboard
+            for row in rows:
+                for button in row:
+                    if button.text:
+                        labels.add(button.text)
+    return labels
 
 
 def language_keyboard(lang: str | None = None) -> InlineKeyboardMarkup:

@@ -6,9 +6,10 @@ from typing import Any
 
 from i18n import (
     SUPPORTED_LOCALES,
-    all_menu_buttons,
     all_wizard_nav_buttons,
     btn,
+    inline_screen_callback_prefixes,
+    screen_escape_labels,
     t,
 )
 from telegram import InlineKeyboardMarkup, ReplyKeyboardMarkup
@@ -56,11 +57,13 @@ _INLINE_ESCAPE_CALLBACK_RE = re.compile(
     r"^stored_typo_fix:0$|"
     r"^gv:(?:close|hub)$|"
     r"^schq:list:(?:when|day|week)$|"
-    r"^dm_menu$|"
-    # Other/Settings/Admin/Subs inline panels leave the main reply keyboard; not a trap.
-    r"^menu_(?:other|settings|admin|subs):"
+    r"^dm_menu$"
     r")"
 )
+
+# Inline panels declared in the i18n screen registry (menu_other:, …) leave the
+# main reply keyboard in place, so they are not traps.
+_INLINE_ESCAPE_CALLBACK_PREFIXES = inline_screen_callback_prefixes()
 
 
 def _decline_labels() -> set[str]:
@@ -78,7 +81,7 @@ def _decline_labels() -> set[str]:
 
 
 def escape_hatch_reply_labels() -> set[str]:
-    return all_wizard_nav_buttons() | all_menu_buttons() | _decline_labels()
+    return all_wizard_nav_buttons() | screen_escape_labels() | _decline_labels()
 
 
 def reply_keyboard_labels(markup: ReplyKeyboardMarkup | None) -> set[str]:
@@ -114,7 +117,10 @@ def markup_has_escape_hatch(markup: Any) -> bool:
         for text, callback in inline_keyboard_buttons(markup):
             if text in escape:
                 return True
-            if callback and _INLINE_ESCAPE_CALLBACK_RE.search(callback):
+            if callback and (
+                callback.startswith(_INLINE_ESCAPE_CALLBACK_PREFIXES)
+                or _INLINE_ESCAPE_CALLBACK_RE.search(callback)
+            ):
                 return True
         return False
     return False

@@ -4376,6 +4376,7 @@ def check_core() -> None:
     assert schedule_cancel_suppressed(bot_data_sc, "42") is True
     assert schedule_cancel_suppressed(bot_data_sc, "42", now_ts=1e12) is False
 
+    _check_screen_registry()
     _check_streamer_telegram_links()
 
 
@@ -4536,3 +4537,75 @@ def _check_streamer_telegram_links() -> None:
         assert not should_include_streamer_telegram_in_setup("drops")
         assert format_links_block(["https://t.me/a"]) == "• https://t.me/a"
 
+
+def _check_screen_registry() -> None:
+    """i18n screen registry: one declaration per screen, main_menu the only sticky."""
+    import ast
+    from pathlib import Path
+
+    import i18n
+    from bot_helpers import _coerce_main_reply_keyboard
+    from i18n import (
+        SCREEN_BUILDER_ALIASES,
+        SCREEN_REGISTRY,
+        SUPPORTED_LOCALES,
+        build_screen,
+        screen_key_for_markup,
+        sticky_screen_keys,
+    )
+    from telegram import InlineKeyboardMarkup, ReplyKeyboardMarkup
+
+    assert sticky_screen_keys() == frozenset({"main_menu"}), (
+        f"only main_menu is sticky, declared: {sorted(sticky_screen_keys())}"
+    )
+    for spec in SCREEN_REGISTRY.values():
+        if spec.sticky:
+            assert spec.kind == "reply", (
+                f"{spec.key}: a sticky screen posts a reply keyboard"
+            )
+        for loc in SUPPORTED_LOCALES:
+            for args in spec.arg_sets():
+                markup = spec.builder(loc, **args)
+                where = f"{spec.key} {args} for {loc}"
+                if isinstance(markup, ReplyKeyboardMarkup):
+                    kind = "reply"
+                elif isinstance(markup, InlineKeyboardMarkup):
+                    kind = "inline"
+                else:
+                    kind = "unknown"
+                assert kind == spec.kind, f"{where} builds {kind}"
+                mapped = screen_key_for_markup(markup)
+                assert mapped == spec.key, f"{where} maps to {mapped}"
+
+    # An undeclared navigation screen must fail here, not later in navigation.
+    source = (Path(__file__).resolve().parents[1] / "i18n.py").read_text(
+        encoding="utf-8"
+    )
+    declared = {spec.builder.__name__ for spec in SCREEN_REGISTRY.values()}
+    declared |= set(SCREEN_BUILDER_ALIASES)
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and i18n.NAV_SCREEN_BUILDER_RE.match(
+            node.name
+        ):
+            assert node.name in declared, (
+                f"i18n.{node.name} is a navigation screen without a "
+                "SCREEN_REGISTRY entry"
+            )
+
+    # Menu send sites: the sticky screen passes, every other reply screen is coerced.
+    for spec in SCREEN_REGISTRY.values():
+        if spec.kind != "reply":
+            continue
+        for args in spec.arg_sets():
+            markup = spec.builder("ru", **args)
+            coerced = _coerce_main_reply_keyboard(
+                markup, chat_id=7, user_id=7, lang="ru"
+            )
+            if spec.sticky:
+                assert coerced.keyboard == markup.keyboard, (
+                    f"{spec.key} {args} must stay sticky"
+                )
+            else:
+                assert screen_key_for_markup(coerced, sticky_only=True) == "main_menu", (
+                    f"{spec.key} {args} must be coerced to main_menu"
+                )
