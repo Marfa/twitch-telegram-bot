@@ -168,8 +168,10 @@ POLYLANE_API_HOST = (
 ).rstrip("/")
 # Optional override; empty = first workspace returned by GET /v1/workspaces.
 POLYLANE_WORKSPACE_ID = os.getenv("POLYLANE_WORKSPACE_ID", "").strip()
-# Optional: MAX Messenger bot token (platform-api2.max.ru). No UI yet — max_api.py only.
+# Optional: MAX Messenger bot token (platform-api2.max.ru).
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", "").strip()
+# Secret for Max → us updates webhook (X-Max-Bot-Api-Secret); charset A–Z a–z 0–9 _ -
+MAX_UPDATES_SECRET = os.getenv("MAX_UPDATES_SECRET", "").strip()
 
 
 def validate() -> None:

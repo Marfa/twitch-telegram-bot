@@ -1216,6 +1216,69 @@ class ChannelStatsSample:
 
 
 @dataclass
+class MaxUser:
+    max_user_id: int
+    username: str
+    lang: str
+    created_at: str
+
+
+@dataclass
+class MaxDestination:
+    id: int
+    max_user_id: int
+    kind: str
+    chat_id: int | None
+    public_id: str
+    webhook_secret: str
+    enabled: bool
+    created_at: str
+
+
+@dataclass
+class MaxLinkCode:
+    code: str
+    max_user_id: int
+    dest_id: int
+    expires_at: str
+    consumed_at: str | None
+
+
+def _row_to_max_user(row: Any) -> MaxUser:
+    return MaxUser(
+        max_user_id=int(row["max_user_id"]),
+        username=str(row["username"] or ""),
+        lang=str(row["lang"] or ""),
+        created_at=str(row["created_at"] or ""),
+    )
+
+
+def _row_to_max_destination(row: Any) -> MaxDestination:
+    chat_raw = row["chat_id"]
+    return MaxDestination(
+        id=int(row["id"]),
+        max_user_id=int(row["max_user_id"]),
+        kind=str(row["kind"] or "dm"),
+        chat_id=int(chat_raw) if chat_raw is not None else None,
+        public_id=str(row["public_id"] or ""),
+        webhook_secret=str(row["webhook_secret"] or ""),
+        enabled=bool(row["enabled"]),
+        created_at=str(row["created_at"] or ""),
+    )
+
+
+def _row_to_max_link_code(row: Any) -> MaxLinkCode:
+    consumed = row["consumed_at"]
+    return MaxLinkCode(
+        code=str(row["code"] or ""),
+        max_user_id=int(row["max_user_id"]),
+        dest_id=int(row["dest_id"]),
+        expires_at=str(row["expires_at"] or ""),
+        consumed_at=str(consumed) if consumed else None,
+    )
+
+
+@dataclass
 class FollowMonitorFollower:
     owner_id: int
     twitch_user_id: str

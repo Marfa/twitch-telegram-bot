@@ -1,8 +1,8 @@
 # TODO: Универсальный webhook-destination + тонкий бот MAX
 
-Дата: 2026-11-10 (обновлено: 2026-11-26 — фаза 0 ✅)  
-Статус: **фазы 0–2 ✅** — Max бот `@id760403963548_bot` опубликован, группы разрешены, без мини-приложения; `MAX_BOT_TOKEN` в local encrypted `.env` + VPS plaintext; `GET /me` 200. Далее фазы **3–6** (тонкий Max receiver / UX / ops).  
-Связанный код: `outbound_webhook.py`, `max_api.py`, `handlers/delivery.py`, wizard dest / `subscriptions`  
+Дата: 2026-11-10 (обновлено: 2026-11-26 — фаза 3 ✅ каркас)  
+Статус: **фазы 0–3 ✅** — Max каркас: таблицы, `/hooks/max/updates` + `/hooks/max/d/{id}`, `/start` → link code + DM dest, send в ЛС, bootstrap `subscribe`. Далее фазы **4–6** (группы/каналы, UX «Привязать Max», ops).  
+Связанный код: `outbound_webhook.py`, `max_api.py`, `max_bot.py`, `handlers/delivery.py`, wizard dest / `subscriptions`  
 Доки: контракт [`outbound-webhook.md`](outbound-webhook.md); Max — [создание бота](https://dev.max.ru/docs/chatbots/bots-create/create/), [управление / токен](https://dev.max.ru/docs/chatbots/bots-create/manage/), [Bot API](https://dev.max.ru/docs-api), [POST /subscriptions](https://dev.max.ru/docs-api/methods/POST/subscriptions/)  
 Контекст: вся настройка алертов остаётся в Telegram; destination **Webhook** (универсальный URL); бот MAX — онбординг + привязка куда слать + приём нашего webhook.  
 Ассет аватара для Max: [`assets/max-bot-logo-500.png`](../assets/max-bot-logo-500.png) (500×500).  
@@ -60,12 +60,11 @@
 - Рендер алерта как сейчас; в webhook уходит **уже собранный** payload (не сырой Twitch event).
 - Ошибки доставки: один retry на 429; pause + notice владельцу при 401/403/404/410.
 
-### Max (тонкий бот) — ещё не сделано
+### Max (тонкий бот)
 
-- `/start`, язык (опционально), выдача **кода связи** / ссылки в Telegram.
-- Привязка назначения: ЛС, группа, канал (бот админом где нужно).
-- Список своих dest, отвязка.
-- HTTP endpoint приёма webhook (тот же контракт, что универсальный): проверка подписи → send через Max API.
+- ✅ `/start` / `bot_started`: DM dest + код связи + URL ingest (секрет один раз).
+- ✅ HTTP ingest того же контракта → send в ЛС (`max_bot.py`).
+- ❌ Привязка группа/канал, список dest, отвязка (фаза 4).
 - **Нет** wizard подписок, Premium UI, drops, schedule и пр.
 
 ### Связка TG ↔ Max — ещё не сделано
@@ -103,11 +102,11 @@ Telegram-сторона (**сделано**):
 - `webhook_url`, `webhook_secret` (encrypted)
 - pause после фатальных HTTP + notice владельцу
 
-Max-сторона (**не сделано**):
+Max-сторона (**фаза 3 ✅**, группы/каналы — фаза 4):
 
-- `max_users`, `max_destinations` (chat_id, type dm|group|channel)
+- `max_users`, `max_destinations` (пока `kind=dm`)
 - `max_link_codes` (код → max user/dest, TTL)
-- лог принятых `delivery_id` для идемпотентности
+- `max_delivery_log` (`delivery_id` идемпотентность)
 
 ---
 
@@ -116,10 +115,10 @@ Max-сторона (**не сделано**):
 | Кусок | Статус |
 |-------|--------|
 | TG delivery `dest_type=webhook` | ✅ |
-| `max_api.py` subscribe/list/unsubscribe | ✅ код, без UI / без авто-subscribe |
-| Max процесс (receiver + send) | ❌ после токена |
-| Health `/health/c/webhook_delivery` / `/health/c/max` | ❌ |
-| PingZen монитор Max/hooks | ❌ при появлении endpoint |
+| `max_api.py` subscribe/list/unsubscribe/send/me | ✅ |
+| Max процесс (receiver + send DM) | ✅ `max_bot.py` + `/hooks/max/*` |
+| Health `/health/c/webhook_delivery` / `/health/c/max` | ❌ фаза 6 |
+| PingZen монитор Max/hooks | ❌ фаза 6 |
 
 ---
 
@@ -130,7 +129,7 @@ Max-сторона (**не сделано**):
 | **0. Доступ Max** | Профиль ✅ → `@id760403963548_bot` опубликован ✅ → группы ✅ → без мини-приложения ✅ → `MAX_BOT_TOKEN` local+VPS ✅ → `GET /me` 200 ✅ | ✅ |
 | **1. Webhook dest в TG** | UI dest, URL/secret, POST delivery, тест, SSRF, notice, i18n, flow-nav | ✅ в коде |
 | **2. Контракт + docs** | schema + README + [`docs/outbound-webhook.md`](outbound-webhook.md) + [`examples/outbound_webhook_receiver.py`](../examples/outbound_webhook_receiver.py) | ✅ |
-| **3. Max каркас** | таблицы, `/start`, link code, webhook receiver, send в ЛС | ❌ после 0 |
+| **3. Max каркас** | таблицы, `/start`, link code, webhook receiver, send в ЛС | ✅ |
 | **4. Max destinations** | группа/канал, права, отвязка | ❌ после 3 |
 | **5. UX «Привязать Max»** | в TG wizard без ручного URL (код / deep link) | ❌ после 1+3 |
 | **6. Ops** | health probes, PingZen, deploy, README Max-as-example | ❌ к релизу Max |
@@ -141,10 +140,10 @@ Max-сторона (**не сделано**):
 
 ## Что осталось сделать (короткий backlog)
 
-1. **Фаза 3:** тонкий Max-бот — таблицы, `/start` + link code, HTTP receiver нашего контракта, send в ЛС через Max API; subscribe webhook через `max_api.subscribe`.
-2. **Фаза 4:** dest группа/канал + права + отвязка в Max.
-3. **Фаза 5:** в TG wizard «Привязать Max» (код / deep link) без ручного URL.
-4. **Фаза 6:** `/health/c/…`, PingZen, maintenance при disruptive deploy.
+1. **Фаза 4:** dest группа/канал + права + отвязка в Max.
+2. **Фаза 5:** в TG wizard «Привязать Max» (код / deep link) без ручного URL.
+3. **Фаза 6:** `/health/c/…`, PingZen, maintenance при disruptive deploy.
+4. Ops: `MAX_UPDATES_SECRET` в local+VPS если ещё не задан (нужен для subscribe).
 
 Не в этом backlog: копия UI/Premium на Max, миграция TG→Max, рублёвая оплата.
 

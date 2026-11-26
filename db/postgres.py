@@ -24,6 +24,9 @@ from .models import (
     DropsAuth,
     ChannelStatsSample,
     ChannelStatsTrack,
+    MaxDestination,
+    MaxLinkCode,
+    MaxUser,
     FollowMonitor,
     FollowMonitorEvent,
     FollowMonitorFollower,
@@ -50,6 +53,9 @@ from .models import (
     _row_to_chat_auth,
     _row_to_channel_stats_sample,
     _row_to_channel_stats_track,
+    _row_to_max_destination,
+    _row_to_max_link_code,
+    _row_to_max_user,
     _row_to_follow_monitor,
     _row_to_follow_monitor_event,
     _row_to_follow_monitor_follower,
@@ -1249,6 +1255,56 @@ class PostgresDatabase:
                 """
                 CREATE INDEX IF NOT EXISTS idx_channel_stats_samples_owner
                 ON channel_stats_samples(owner_id, sampled_at)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS max_users (
+                    max_user_id BIGINT PRIMARY KEY,
+                    username TEXT NOT NULL DEFAULT '',
+                    lang TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS max_destinations (
+                    id BIGSERIAL PRIMARY KEY,
+                    max_user_id BIGINT NOT NULL REFERENCES max_users(max_user_id),
+                    kind TEXT NOT NULL DEFAULT 'dm',
+                    chat_id BIGINT,
+                    public_id TEXT NOT NULL UNIQUE,
+                    webhook_secret TEXT NOT NULL DEFAULT '',
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_max_destinations_user
+                ON max_destinations(max_user_id)
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS max_link_codes (
+                    code TEXT PRIMARY KEY,
+                    max_user_id BIGINT NOT NULL REFERENCES max_users(max_user_id),
+                    dest_id BIGINT NOT NULL REFERENCES max_destinations(id),
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    consumed_at TIMESTAMPTZ
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS max_delivery_log (
+                    delivery_id TEXT PRIMARY KEY,
+                    dest_id BIGINT NOT NULL REFERENCES max_destinations(id),
+                    received_at TIMESTAMPTZ NOT NULL
+                )
                 """
             )
             cur.execute(
@@ -7684,6 +7740,179 @@ owner_id, twitch_username, twitch_user_id,
                 )
             rows = cur.fetchall()
         return [_row_to_channel_stats_sample(r) for r in rows]
+
+    def upsert_max_user(
+        self,
+        max_user_id: int,
+        *,
+        username: str = "",
+        lang: str = "",
+        created_at: str | None = None,
+    ) -> MaxUser:
+        now = created_at or datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO max_users (max_user_id, username, lang, created_at)
+                VALUES (%s, %s, %s, %s::timestamptz)
+                ON CONFLICT (max_user_id) DO UPDATE SET
+                    username = CASE
+                        WHEN EXCLUDED.username != '' THEN EXCLUDED.username
+                        ELSE max_users.username
+                    END,
+                    lang = CASE
+                        WHEN EXCLUDED.lang != '' THEN EXCLUDED.lang
+                        ELSE max_users.lang
+                    END
+                RETURNING *
+                """,
+                (int(max_user_id), username or "", lang or "", now),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return _row_to_max_user(row)
+
+    def get_max_user(self, max_user_id: int) -> MaxUser | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM max_users WHERE max_user_id = %s",
+                (int(max_user_id),),
+            )
+            row = cur.fetchone()
+        return _row_to_max_user(row) if row else None
+
+    def get_max_dm_destination(self, max_user_id: int) -> MaxDestination | None:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                SELECT * FROM max_destinations
+                WHERE max_user_id = %s AND kind = 'dm'
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (int(max_user_id),),
+            )
+            row = cur.fetchone()
+        return _row_to_max_destination(row) if row else None
+
+    def get_max_destination_by_public_id(self, public_id: str) -> MaxDestination | None:
+        pid = (public_id or "").strip()
+        if not pid:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM max_destinations WHERE public_id = %s",
+                (pid,),
+            )
+            row = cur.fetchone()
+        return _row_to_max_destination(row) if row else None
+
+    def create_max_destination(
+        self,
+        max_user_id: int,
+        *,
+        kind: str = "dm",
+        chat_id: int | None = None,
+        public_id: str,
+        webhook_secret: str,
+        enabled: bool = True,
+        created_at: str | None = None,
+    ) -> MaxDestination:
+        now = created_at or datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO max_destinations (
+                    max_user_id, kind, chat_id, public_id, webhook_secret, enabled, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s::timestamptz)
+                RETURNING *
+                """,
+                (
+                    int(max_user_id),
+                    kind or "dm",
+                    chat_id,
+                    public_id,
+                    webhook_secret,
+                    bool(enabled),
+                    now,
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return _row_to_max_destination(row)
+
+    def create_max_link_code(
+        self,
+        *,
+        code: str,
+        max_user_id: int,
+        dest_id: int,
+        expires_at: str,
+    ) -> MaxLinkCode:
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO max_link_codes (code, max_user_id, dest_id, expires_at, consumed_at)
+                VALUES (%s, %s, %s, %s::timestamptz, NULL)
+                RETURNING *
+                """,
+                (code, int(max_user_id), int(dest_id), expires_at),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return _row_to_max_link_code(row)
+
+    def get_max_link_code(self, code: str) -> MaxLinkCode | None:
+        raw = (code or "").strip()
+        if not raw:
+            return None
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT * FROM max_link_codes WHERE code = %s",
+                (raw,),
+            )
+            row = cur.fetchone()
+        return _row_to_max_link_code(row) if row else None
+
+    def mark_max_delivery_seen(self, delivery_id: str, dest_id: int) -> bool:
+        """Return True if newly recorded; False if already seen."""
+        did = (delivery_id or "").strip()
+        if not did:
+            return False
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                """
+                INSERT INTO max_delivery_log (delivery_id, dest_id, received_at)
+                VALUES (%s, %s, %s::timestamptz)
+                ON CONFLICT (delivery_id) DO NOTHING
+                RETURNING delivery_id
+                """,
+                (did, int(dest_id), now),
+            )
+            row = cur.fetchone()
+        return row is not None
+
+    def has_max_delivery(self, delivery_id: str) -> bool:
+        did = (delivery_id or "").strip()
+        if not did:
+            return False
+        with self._conn() as conn:
+            cur = self._cursor(conn)
+            cur.execute(
+                "SELECT 1 FROM max_delivery_log WHERE delivery_id = %s",
+                (did,),
+            )
+            row = cur.fetchone()
+        return row is not None
 
     def prune_channel_stats_samples(self, before_iso: str) -> int:
         with self._conn() as conn:

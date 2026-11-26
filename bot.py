@@ -2715,6 +2715,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             mark_ready,
             register_eventsub_bridge,
             register_health_probes,
+            register_max_bot,
             register_oauth_bridge,
             register_donationalerts_oauth_bridge,
             register_posthog_issue_bridge,
@@ -2732,6 +2733,13 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         loop = asyncio.get_running_loop()
         register_chat_webapp(db=db, twitch=twitch)
         register_health_probes(db_ping=db.ping, db=db)
+        register_max_bot(db)
+        try:
+            from max_bot import bootstrap_max_subscription
+
+            await asyncio.to_thread(bootstrap_max_subscription)
+        except Exception:
+            logger.exception("Max subscription bootstrap failed")
         redirect_uri = twitch_oauth_redirect_uri()
         if redirect_uri:
 

@@ -211,6 +211,9 @@ def main() -> None:
     from .checks_outbound_webhook import run as check_outbound_webhook
 
     check_outbound_webhook()
+    from .checks_max_bot import run as check_max_bot
+
+    check_max_bot()
     from .checks_tracing import run as check_tracing
 
     check_tracing()

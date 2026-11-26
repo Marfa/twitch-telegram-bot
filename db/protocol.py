@@ -16,6 +16,9 @@ from .models import (
     DropsAuth,
     ChannelStatsSample,
     ChannelStatsTrack,
+    MaxDestination,
+    MaxLinkCode,
+    MaxUser,
     FollowMonitor,
     FollowMonitorEvent,
     FollowMonitorFollower,
@@ -934,6 +937,48 @@ class Database(Protocol):
     ) -> list[ChannelStatsSample]: ...
 
     def prune_channel_stats_samples(self, before_iso: str) -> int: ...
+
+    def upsert_max_user(
+        self,
+        max_user_id: int,
+        *,
+        username: str = "",
+        lang: str = "",
+        created_at: str | None = None,
+    ) -> MaxUser: ...
+
+    def get_max_user(self, max_user_id: int) -> MaxUser | None: ...
+
+    def get_max_dm_destination(self, max_user_id: int) -> MaxDestination | None: ...
+
+    def get_max_destination_by_public_id(self, public_id: str) -> MaxDestination | None: ...
+
+    def create_max_destination(
+        self,
+        max_user_id: int,
+        *,
+        kind: str = "dm",
+        chat_id: int | None = None,
+        public_id: str,
+        webhook_secret: str,
+        enabled: bool = True,
+        created_at: str | None = None,
+    ) -> MaxDestination: ...
+
+    def create_max_link_code(
+        self,
+        *,
+        code: str,
+        max_user_id: int,
+        dest_id: int,
+        expires_at: str,
+    ) -> MaxLinkCode: ...
+
+    def get_max_link_code(self, code: str) -> MaxLinkCode | None: ...
+
+    def mark_max_delivery_seen(self, delivery_id: str, dest_id: int) -> bool: ...
+
+    def has_max_delivery(self, delivery_id: str) -> bool: ...
 
     def list_follow_monitor_followers(
         self, owner_id: int, *, limit: int = 5000, offset: int = 0

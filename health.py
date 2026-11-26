@@ -289,6 +289,13 @@ def is_ready() -> bool:
         return _ready
 
 
+def register_max_bot(db: Any) -> None:
+    """Wire Max thin-bot handlers to the shared Database."""
+    import max_bot
+
+    max_bot.configure(db)
+
+
 def register_health_probes(
     *, db_ping: Callable[[], bool], db: Any | None = None
 ) -> None:
@@ -660,6 +667,44 @@ def _handle_eventsub_post(
     if result.revoked_user_id:
         _schedule_eventsub_revoke(result.revoked_user_id)
     return result.status, result.body, result.content_type
+
+
+def _read_hook_body(
+    handler: BaseHTTPRequestHandler, *, max_bytes: int
+) -> tuple[int, bytes] | tuple[None, bytes]:
+    length_raw = handler.headers.get("Content-Length") or "0"
+    try:
+        length = int(length_raw)
+    except ValueError:
+        return 400, b"bad content-length"
+    if length < 0 or length > max_bytes:
+        return 413, b"payload too large"
+    return None, handler.rfile.read(length)
+
+
+def _handle_max_updates_post(handler: BaseHTTPRequestHandler) -> tuple[int, bytes]:
+    import max_bot
+
+    err, body = _read_hook_body(handler, max_bytes=_EVENTSUB_BODY_MAX)
+    if err is not None:
+        return err, body
+    return max_bot.handle_updates_post(headers=handler.headers, body=body)
+
+
+def _handle_max_ingest_post(
+    handler: BaseHTTPRequestHandler, path: str
+) -> tuple[int, bytes]:
+    import max_bot
+
+    public_id = max_bot.parse_ingest_public_id(path)
+    if not public_id:
+        return 404, b"not found"
+    err, body = _read_hook_body(handler, max_bytes=_EVENTSUB_BODY_MAX)
+    if err is not None:
+        return err, body
+    return max_bot.handle_ingest_post(
+        public_id, headers=handler.headers, body=body
+    )
 
 
 def _schedule_oauth_complete(
@@ -1632,6 +1677,32 @@ class _HealthHandler(BaseHTTPRequestHandler):
                 status, body, content_type = 500, b"error", "text/plain"
             self.send_response(status)
             self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+            return
+        if path == "/hooks/max/updates":
+            try:
+                status, body = _handle_max_updates_post(self)
+            except Exception:
+                logger.exception("Max updates webhook handler failed")
+                status, body = 500, b"error"
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+            return
+        if path.startswith("/hooks/max/d/"):
+            try:
+                status, body = _handle_max_ingest_post(self, path)
+            except Exception:
+                logger.exception("Max ingest webhook handler failed")
+                status, body = 500, b"error"
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if body:

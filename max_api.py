@@ -79,6 +79,72 @@ def _raise_if_failed(resp: requests.Response, data: dict[str, Any]) -> None:
         )
 
 
+def get_me(
+    *,
+    token: str | None = None,
+    session: requests.Session | None = None,
+) -> dict[str, Any]:
+    """GET /me — bot identity."""
+    http = session or requests
+    try:
+        resp = http.get(
+            f"{API_BASE}/me",
+            headers=_headers(token),
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        raise MaxApiError(str(exc)) from exc
+    data = _parse_body(resp)
+    _raise_if_failed(resp, data)
+    return data
+
+
+def send_message(
+    *,
+    text: str,
+    user_id: int | None = None,
+    chat_id: int | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    disable_link_preview: bool | None = None,
+    token: str | None = None,
+    session: requests.Session | None = None,
+) -> dict[str, Any]:
+    """POST /messages — send to a user (DM) or chat/channel."""
+    if user_id is None and chat_id is None:
+        raise MaxApiError("user_id or chat_id required", code="proto.payload")
+    if user_id is not None and chat_id is not None:
+        raise MaxApiError(
+            "pass only one of user_id or chat_id",
+            code="proto.payload",
+        )
+    params: dict[str, Any] = {}
+    if user_id is not None:
+        params["user_id"] = int(user_id)
+    if chat_id is not None:
+        params["chat_id"] = int(chat_id)
+    if disable_link_preview is not None:
+        params["disable_link_preview"] = bool(disable_link_preview)
+
+    body: dict[str, Any] = {"text": text if text is not None else ""}
+    if attachments is not None:
+        body["attachments"] = list(attachments)
+
+    http = session or requests
+    try:
+        resp = http.post(
+            f"{API_BASE}/messages",
+            headers=_headers(token),
+            params=params,
+            json=body,
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        raise MaxApiError(str(exc)) from exc
+    data = _parse_body(resp)
+    _raise_if_failed(resp, data)
+    return data
+
+
 def subscribe(
     url: str,
     *,
