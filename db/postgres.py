@@ -8784,9 +8784,11 @@ owner_id, twitch_username, twitch_user_id,
         *,
         is_demo: bool = False,
     ) -> list[dict[str, str]]:
-        """Real streamers not in follows that still have manual stream alerts.
+        """Real Twitch streamers not in follows that still have manual stream alerts.
 
-        Excludes synthetic rows (game/category watch, Drops, release alerts).
+        Excludes synthetic rows (game/category watch, Drops, release, giveaway)
+        and non-Twitch platforms (ext:* / stream_platform != twitch) — those are
+        not Twitch follows and must not trigger sync-unfollow prompts.
         """
         with self._conn() as conn:
             cur = self._cursor(conn)
@@ -8801,6 +8803,8 @@ owner_id, twitch_username, twitch_user_id,
                   AND twitch_user_id NOT LIKE 'drops:%%'
                   AND twitch_user_id NOT LIKE 'rel:%%'
                   AND twitch_user_id NOT LIKE 'gvw:%%'
+                  AND twitch_user_id NOT LIKE 'ext:%%'
+                  AND COALESCE(stream_platform, 'twitch') = 'twitch'
                 """,
                 (owner_id, bool(is_demo)),
             )

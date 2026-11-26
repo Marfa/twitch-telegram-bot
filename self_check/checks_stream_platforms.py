@@ -113,6 +113,18 @@ def check_external_subscription_db() -> None:
             assert "ext:kick:xqc" not in db.get_unique_twitch_user_ids()
             ext = db.get_enabled_external_live_subscriptions()
             assert any(s.id == sub_id for s in ext)
+            # Sync-unfollow must ignore non-Twitch platforms (prod Postgres
+            # previously missed this and prompted for GG/VK/Kick/YouTube/TikTok).
+            asked = db.get_unfollowed_manual_alert_streamers(
+                42, keep_twitch_user_ids=set()
+            )
+            assert asked == []
+            # Dual-backend parity: Postgres query must exclude ext:/non-twitch.
+            from pathlib import Path as _P
+
+            pg_src = _P("db/postgres.py").read_text(encoding="utf-8")
+            assert "twitch_user_id NOT LIKE 'ext:%%'" in pg_src
+            assert "COALESCE(stream_platform, 'twitch') = 'twitch'" in pg_src
         finally:
             close = getattr(db, "close", None)
             if callable(close):
