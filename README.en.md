@@ -150,7 +150,7 @@ Each step has **Back** and **Cancel** (inline); the **Main menu** stays on the b
 - group ID (`-100…`)
 - forwarded message from the group (“Forwarded from: …”)
 
-Bot permissions in a group: **send messages** (admin is not required for alerts). Also needs permission to **delete messages** (if “delete previous” or “pin message” is on — the bot removes the “pinned a …” service line) and **pin messages** (if “pin message” is on). During setup the bot must be an **administrator** so Telegram allows checking that you are an admin too; after binding, admin is optional if the needed rights remain.
+Bot permissions in a group: **send messages** (admin is not required for alerts). Also needs permission to **delete messages** (if “delete previous” or “pin message” is on — the bot removes the “pinned a …” service line) and **pin messages** (if “pin message” is on). To post into a **closed topic** — **manage topics** (admin): the bot temporarily reopens the topic → sends → closes it again. During setup the bot must be an **administrator** so Telegram allows checking that you are an admin too; after binding, admin is optional if the needed rights remain.
 
 With “delete old” enabled, the bot removes the previous alert before a new one and also auto-deletes it after about 47 hours (Telegram’s ~48-hour limit), without waiting for the next stream.
 

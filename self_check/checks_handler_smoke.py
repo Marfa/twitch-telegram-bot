@@ -1325,13 +1325,92 @@ async def _smoke_delivery_and_helpers(db) -> None:
     assert _is_chat_unreachable_error(
         Forbidden("Forbidden: bot is not a member of the channel chat")
     )
-    from handlers.delivery import _is_topic_closed_error, test_fail_user_text
+    from handlers.delivery import (
+        _is_topic_closed_error,
+        _run_with_closed_topic_retry,
+        _send_test,
+        test_fail_user_text,
+    )
 
     assert _is_topic_closed_error(BadRequest("Topic_closed"))
     assert not _is_chat_unreachable_error(BadRequest("Topic_closed"))
     assert "закрыта" in test_fail_user_text(BadRequest("Topic_closed"), "ru").lower()
     assert "closed" in test_fail_user_text(BadRequest("Topic_closed"), "en").lower()
+    assert "управл" in test_fail_user_text(BadRequest("Topic_closed"), "ru").lower()
+    assert "manage topics" in test_fail_user_text(BadRequest("Topic_closed"), "en").lower()
     assert "прав" in test_fail_user_text(Forbidden("no rights"), "ru").lower()
+
+    # Closed topic: reopen → send → close (General = thread 1).
+    topic_bot = AsyncMock()
+    calls: list[str] = []
+
+    async def _closed_then_ok():
+        calls.append("send")
+        if calls.count("send") == 1:
+            raise BadRequest("Topic_closed")
+        return "ok"
+
+    topic_bot.reopen_general_forum_topic = AsyncMock()
+    topic_bot.close_general_forum_topic = AsyncMock()
+    assert await _run_with_closed_topic_retry(topic_bot, -1001, 1, _closed_then_ok) == "ok"
+    topic_bot.reopen_general_forum_topic.assert_awaited_once_with(chat_id=-1001)
+    topic_bot.close_general_forum_topic.assert_awaited_once_with(chat_id=-1001)
+    assert calls == ["send", "send"]
+
+    # Non-general topic uses reopen/close_forum_topic.
+    topic_bot2 = AsyncMock()
+    topic_bot2.reopen_forum_topic = AsyncMock()
+    topic_bot2.close_forum_topic = AsyncMock()
+    n = {"i": 0}
+
+    async def _closed_then_ok2():
+        n["i"] += 1
+        if n["i"] == 1:
+            raise BadRequest("Bad Request: TOPIC_CLOSED")
+        return "ok2"
+
+    assert await _run_with_closed_topic_retry(topic_bot2, -1002, 42, _closed_then_ok2) == "ok2"
+    topic_bot2.reopen_forum_topic.assert_awaited_once_with(
+        chat_id=-1002, message_thread_id=42
+    )
+    topic_bot2.close_forum_topic.assert_awaited_once_with(
+        chat_id=-1002, message_thread_id=42
+    )
+
+    # Reopen denied → original Topic_closed propagates; no close.
+    topic_bot3 = AsyncMock()
+    topic_bot3.reopen_forum_topic = AsyncMock(
+        side_effect=Forbidden("not enough rights")
+    )
+    topic_bot3.close_forum_topic = AsyncMock()
+
+    async def _always_closed():
+        raise BadRequest("Topic_closed")
+
+    try:
+        await _run_with_closed_topic_retry(topic_bot3, -1003, 7, _always_closed)
+        raise AssertionError("expected Topic_closed")
+    except BadRequest as exc:
+        assert _is_topic_closed_error(exc)
+    topic_bot3.close_forum_topic.assert_not_awaited()
+
+    # _send_test uses the same reopen→send→close path.
+    test_bot = AsyncMock()
+    send_n = {"i": 0}
+
+    async def _send_msg(**kwargs):
+        send_n["i"] += 1
+        if send_n["i"] == 1:
+            raise BadRequest("Topic_closed")
+        return SimpleNamespace(message_id=1)
+
+    test_bot.send_message = AsyncMock(side_effect=_send_msg)
+    test_bot.reopen_forum_topic = AsyncMock()
+    test_bot.close_forum_topic = AsyncMock()
+    assert await _send_test(test_bot, -1004, 9, "probe") is None
+    test_bot.reopen_forum_topic.assert_awaited_once()
+    test_bot.close_forum_topic.assert_awaited_once()
+    assert test_bot.send_message.await_count == 2
 
     # Pin service-message cleanup: delete «bot pinned a …» when we pinned.
     bot_id = 42

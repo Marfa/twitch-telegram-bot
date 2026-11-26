@@ -124,7 +124,7 @@ async def _deliver_alert_content(
     from message_fx import message_fx_disabled
 
     # Live alerts: deliver immediately (no typing/draft delay).
-    with message_fx_disabled():
+    async def _once():
         return await _deliver_alert_content_plain(
             bot,
             chat_id=chat_id,
@@ -140,6 +140,11 @@ async def _deliver_alert_content(
             parse_mode=parse_mode,
             prefer_media_message_id=prefer_media_message_id,
             on_media_fallback=on_media_fallback,
+        )
+
+    with message_fx_disabled():
+        return await _run_with_closed_topic_retry(
+            bot, chat_id, thread_id, _once
         )
 
 
@@ -276,6 +281,8 @@ async def _deliver_alert_content_plain(
                 **parse_kwargs,
             )
         except BadRequest as exc:
+            if _is_topic_closed_error(exc):
+                raise
             err = str(exc).lower()
             if parse_kwargs and ("parse" in err or "entity" in err or "tag" in err):
                 try:
@@ -286,6 +293,8 @@ async def _deliver_alert_content_plain(
                         **markup_kwargs,
                     )
                 except BadRequest as exc2:
+                    if _is_topic_closed_error(exc2):
+                        raise
                     logger.warning(
                         "Media send failed for %s (%s); falling back to text-only",
                         chat_id,
@@ -305,6 +314,8 @@ async def _deliver_alert_content_plain(
             try:
                 media_msg = await _send_media(**thread_kwargs)
             except BadRequest as exc:
+                if _is_topic_closed_error(exc):
+                    raise
                 logger.warning(
                     "Media send failed for %s (%s); falling back to text-only",
                     chat_id,
@@ -320,6 +331,8 @@ async def _deliver_alert_content_plain(
             try:
                 media_msg = await _send_media(**thread_kwargs)
             except BadRequest as exc:
+                if _is_topic_closed_error(exc):
+                    raise
                 logger.warning(
                     "Media send failed for %s after text (%s)",
                     chat_id,
@@ -542,6 +555,64 @@ def _is_chat_unreachable_error(exc: BaseException) -> bool:
 def _is_topic_closed_error(exc: BaseException) -> bool:
     # Thread-only; do not treat as chat-unreachable (other topics may still work).
     return "topic_closed" in _exc_text(exc)
+
+
+async def _reopen_closed_forum_topic(bot, chat_id: int, thread_id: int) -> bool:
+    """Temporarily reopen a closed forum topic. Needs can_manage_topics (or topic creator)."""
+    from dm_topics import GENERAL_TOPIC_ID
+
+    try:
+        if int(thread_id) == GENERAL_TOPIC_ID:
+            await bot.reopen_general_forum_topic(chat_id=chat_id)
+        else:
+            await bot.reopen_forum_topic(
+                chat_id=chat_id, message_thread_id=int(thread_id)
+            )
+        return True
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot reopen closed topic chat=%s thread=%s: %s",
+            chat_id,
+            thread_id,
+            exc,
+        )
+        return False
+
+
+async def _close_forum_topic_quiet(bot, chat_id: int, thread_id: int) -> None:
+    """Best-effort re-close after a closed-topic send. Log and continue on failure."""
+    from dm_topics import GENERAL_TOPIC_ID
+
+    try:
+        if int(thread_id) == GENERAL_TOPIC_ID:
+            await bot.close_general_forum_topic(chat_id=chat_id)
+        else:
+            await bot.close_forum_topic(
+                chat_id=chat_id, message_thread_id=int(thread_id)
+            )
+    except (BadRequest, Forbidden) as exc:
+        logger.warning(
+            "Cannot re-close topic chat=%s thread=%s: %s",
+            chat_id,
+            thread_id,
+            exc,
+        )
+
+
+async def _run_with_closed_topic_retry(bot, chat_id: int, thread_id: int | None, send_once):
+    """On Topic_closed: reopen → retry send → close again. Else run send_once once."""
+    try:
+        return await send_once()
+    except BadRequest as exc:
+        if not thread_id or not _is_topic_closed_error(exc):
+            raise
+        tid = int(thread_id)
+        if not await _reopen_closed_forum_topic(bot, chat_id, tid):
+            raise
+        try:
+            return await send_once()
+        finally:
+            await _close_forum_topic_quiet(bot, chat_id, tid)
 
 
 def test_fail_user_text(exc: BaseException, lang: str) -> str:
@@ -2618,8 +2689,12 @@ async def _send_test(
     kwargs: dict = {"chat_id": chat_id, "text": text}
     if thread_id:
         kwargs["message_thread_id"] = thread_id
-    try:
+
+    async def _once():
         await bot.send_message(**kwargs)
+
+    try:
+        await _run_with_closed_topic_retry(bot, chat_id, thread_id, _once)
         if db is not None:
             clear_chat_unreachable(db, chat_id)
         return None
