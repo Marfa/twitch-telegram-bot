@@ -8,7 +8,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/twitch-telegram-bot}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.vps.yml}"
 ENV_FILE="${ENV_FILE:-$APP_DIR/.env}"
-PG_IMAGE="${PG_IMAGE:-postgres:18-alpine}"
+PG_IMAGE="${PG_IMAGE:-postgres:19-alpine}"
 JOB_NAME="pg_sync_aiven"
 
 _ops_posthog() {

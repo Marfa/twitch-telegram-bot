@@ -141,9 +141,12 @@ if [[ "$DEPLOY_MODE" == "site" ]]; then
   echo "deploy: site-only sync failed; falling back to full recreate" >&2
 fi
 
-# Dump 17 and restore into 18 before compose up (no-op once db is already 18).
+# Dump 17→18 / 18→19 before compose up (each script no-ops once already on target).
 if [[ -f scripts/pg-upgrade-to-18.sh ]]; then
   bash scripts/pg-upgrade-to-18.sh
+fi
+if [[ -f scripts/pg-upgrade-to-19.sh ]]; then
+  bash scripts/pg-upgrade-to-19.sh
 fi
 
 # Build-first: image is compiled while the old bot container still runs;

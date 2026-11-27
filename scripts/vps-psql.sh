@@ -26,7 +26,7 @@
 #   VPS_APP_DIR         default /opt/twitch-telegram-bot
 #   VPS_PSQL_SOURCE     vps | aiven | auto (default auto)
 #   AIVEN_DATABASE_URL  postgres URL (never logged)
-#   AIVEN_PG_IMAGE      default postgres:18-alpine (docker fallback if no local psql)
+#   AIVEN_PG_IMAGE      default postgres:19-alpine (docker fallback if no local psql)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,7 +36,7 @@ VPS_SSH_HOST="${VPS_SSH_HOST:-bot.themarfa.name}"
 VPS_SSH_USER="${VPS_SSH_USER:-root}"
 VPS_APP_DIR="${VPS_APP_DIR:-/opt/twitch-telegram-bot}"
 VPS_PSQL_SOURCE="${VPS_PSQL_SOURCE:-auto}"
-AIVEN_PG_IMAGE="${AIVEN_PG_IMAGE:-postgres:18-alpine}"
+AIVEN_PG_IMAGE="${AIVEN_PG_IMAGE:-postgres:19-alpine}"
 
 # Optional leading --aiven / --vps (also via VPS_PSQL_SOURCE).
 if (($# > 0)); then
