@@ -172,6 +172,7 @@ async def _send_transport_retry_notification(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """Deliver a deferred alert once Telegram looks reachable again."""
+    import stream_platforms as sp
     import telegram_circuit
     from bot import _render_sub_template
 
@@ -216,6 +217,14 @@ async def _send_transport_retry_notification(
         return
     sub = _sub_for_delivery(db, sub)
     bot_data = context.application.bot_data
+    external = sp.is_external_subscription(
+        stream_platform=getattr(sub, "stream_platform", None),
+        twitch_user_id=sub.twitch_user_id,
+    )
+    # External channels alert on go-live only (the wizard clears end/category),
+    # and Helix cannot resolve their ext: ids, so other types have nothing to send.
+    if external and alert_type != "live":
+        return
 
     if alert_type == "end":
         if not sub.notify_on_end:
@@ -329,6 +338,45 @@ async def _send_transport_retry_notification(
 
     # Default: live (and category-watch digests that used alert_type=live).
     if not sub.notify_on_live and not is_category_watch_sub(sub):
+        return
+    if external:
+        state, stream = await asyncio.to_thread(_probe_external_stream, sub)
+        if state == "error":
+            if attempt < TRANSPORT_RETRY_MAX_ATTEMPTS:
+                enqueue_transport_alert_retry(
+                    db,
+                    jq,
+                    sub_id=sub_id,
+                    alert_type="live",
+                    stream_id=stream_id,
+                    transport_attempt=attempt + 1,
+                )
+            return
+        if state != "live":
+            return
+        if is_on_notify_cooldown(sub):
+            return
+        username = str(stream.get("user_login") or "")
+        text = _render_sub_template(
+            sub,
+            username,
+            "",
+            str(stream.get("title") or ""),
+            twitch=None,
+            stream=stream,
+        )
+        await _send_notification(
+            context.bot,
+            db,
+            sub,
+            text,
+            alert_type="live",
+            stream=stream,
+            stream_id=stream_id,
+            twitch=None,
+            bot_data=bot_data,
+            job_queue=jq,
+        )
         return
     try:
         live_streams = await asyncio.to_thread(
@@ -762,8 +810,12 @@ def restore_pending_alert_jobs(application: Application) -> int:
     return restored
 
 
-def _external_stream_snapshot(sub: Subscription) -> dict | None:
-    """Return a minimal live stream dict for an external sub, or None if offline."""
+def _probe_external_stream(sub: Subscription) -> tuple[str, dict]:
+    """Probe an external channel, telling a probe failure from an ended stream.
+
+    Returns ``("live", stream)``, ``("offline", {})`` or ``("error", {})``, so a
+    caller that retries keeps the alert when only the probe failed.
+    """
     import stream_platforms as sp
 
     ch = sp.channel_from_subscription(
@@ -773,20 +825,20 @@ def _external_stream_snapshot(sub: Subscription) -> dict | None:
         stream_url=getattr(sub, "stream_url", "") or "",
     )
     if ch is None:
-        return None
+        return "offline", {}
     try:
         online, stream_url = sp.external_live_state(ch)
     except Exception:
         logger.exception(
-            "External delayed probe failed sub=%s platform=%s",
+            "External live probe failed sub=%s platform=%s",
             sub.id,
             getattr(ch, "platform", ""),
         )
-        return None
+        return "error", {}
     if not online:
-        return None
+        return "offline", {}
     login = (ch.label or ch.channel_id or sub.twitch_username or "").strip()
-    return {
+    return "live", {
         "id": sub.twitch_user_id,
         "user_login": login,
         "user_name": login,
@@ -795,6 +847,12 @@ def _external_stream_snapshot(sub: Subscription) -> dict | None:
         "url": stream_url,
         "started_at": "",
     }
+
+
+def _external_stream_snapshot(sub: Subscription) -> dict | None:
+    """Return a minimal live stream dict for an external sub, or None if offline."""
+    state, stream = _probe_external_stream(sub)
+    return stream if state == "live" else None
 
 
 async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None:

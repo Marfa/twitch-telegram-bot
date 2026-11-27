@@ -289,10 +289,85 @@ def _check_circuit_open_defers_without_send() -> None:
     telegram_circuit.reset_for_tests()
 
 
+def _check_external_transport_retry() -> None:
+    """A deferred external go-live alert is delivered from the platform probe, not Helix."""
+    import stream_platforms as sp
+    from db import open_database
+    from handlers import notifications
+
+    async def _run() -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = open_database(Path(td) / "external_retry.db")
+            uid = 801
+            db.upsert_user(uid)
+            db.set_user_locale(uid, "en")
+            sub_id = db.add_subscription(
+                uid,
+                "sl4mtv",
+                "ext:kick:sl4mtv",
+                "{username} live",
+                "dm",
+                uid,
+                None,
+                stream_platform="kick",
+                stream_url="https://kick.com/sl4mtv",
+            )
+            sub = next(s for s in db.get_subscriptions_by_owner(uid) if s.id == sub_id)
+            assert sp.is_external_subscription(
+                stream_platform=sub.stream_platform,
+                twitch_user_id=sub.twitch_user_id,
+            ), "test sub must resolve as an external channel"
+
+            twitch = MagicMock()
+            twitch.get_live_streams = MagicMock(
+                side_effect=AssertionError("an ext: id must not reach Helix")
+            )
+            bot = AsyncMock()
+            bot.send_message = AsyncMock(return_value=MagicMock(message_id=7))
+
+            def _context(alert_type: str) -> MagicMock:
+                context = MagicMock()
+                context.application.bot_data = {"db": db, "twitch": twitch}
+                context.application.job_queue = None
+                context.bot = bot
+                context.job.data = {
+                    "sub_id": sub_id,
+                    "alert_type": alert_type,
+                    "stream_id": "ext:kick:sl4mtv",
+                    "transport_attempt": 1,
+                }
+                return context
+
+            with patch.object(
+                sp,
+                "external_live_state",
+                return_value=(True, "https://kick.com/sl4mtv"),
+            ):
+                await notifications._send_transport_retry_notification(_context("live"))
+            assert twitch.get_live_streams.call_count == 0, "ext: ids must not reach Helix"
+            assert bot.send_message.await_count == 1, "the deferred alert must reach the chat"
+
+            # The channel ended while Telegram was down: nothing to send, still no Helix.
+            bot.send_message.reset_mock()
+            with patch.object(sp, "external_live_state", return_value=(False, "")):
+                await notifications._send_transport_retry_notification(_context("live"))
+            assert bot.send_message.await_count == 0
+            assert twitch.get_live_streams.call_count == 0
+
+            # End / category retries have nothing to deliver for an external channel.
+            with patch.object(sp, "external_live_state", return_value=(True, "")):
+                await notifications._send_transport_retry_notification(_context("end"))
+            assert bot.send_message.await_count == 0
+            assert twitch.get_live_streams.call_count == 0
+
+    asyncio.run(_run())
+
+
 def run() -> None:
     _check_boundary()
     _check_alert_send_transport_error()
     _check_circuit_open_defers_without_send()
+    _check_external_transport_retry()
     _check_growth_report_fanout()
     _check_premium_expiry_loops()
     _check_pay_and_grace_senders_return_outcome()
