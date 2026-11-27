@@ -9,15 +9,21 @@
         "Authorization": "Bearer ${env:VIADUCT_MCP_TOKEN}"
       }
     },
+    "pingzen": {
+      "url": "https://pingzen.dev/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${env:PINGZEN_MCP_TOKEN}"
+      }
+    },
     "aiven": {
       "type": "http",
       "url": "https://mcp.aiven.live/mcp?read_only=true"
     },
     "vps-db": {
       "command": "python",
-      "args": ["scripts/mcp_vps_db.py"],
+      "args": ["${workspaceFolder}/scripts/mcp_vps_db.py"],
       "env": {
-        "VPS_SSH_KEY": ".ssh/artalk_vps"
+        "VPS_SSH_KEY": "${workspaceFolder}/.ssh/artalk_vps"
       }
     }
   }

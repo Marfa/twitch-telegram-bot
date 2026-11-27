@@ -22,25 +22,13 @@ MCP: `https://mcp.quietgridlabs.com/mcp`
 ## Подключение
 
 1. Аккаунт на https://c4.quietgridlabs.com/ → Settings → **MCP Access** → токен.
-2. Токен в `.env`: `VIADUCT_MCP_TOKEN=...` (не коммитить). Тот же токен, что для других проектов Marfa.
-3. MCP в `%USERPROFILE%\.cursor\mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "viaduct": {
-      "url": "https://mcp.quietgridlabs.com/mcp",
-      "headers": {
-        "Authorization": "Bearer ${env:VIADUCT_MCP_TOKEN}"
-      }
-    }
-  }
-}
-```
+2. Токен в encrypted `.env`: `dotenvx set VIADUCT_MCP_TOKEN "…"` (тот же токен, что для других проектов Marfa).
+3. MCP уже в **project** `.cursor/mcp.json` (`Bearer ${env:VIADUCT_MCP_TOKEN}`). Не дублировать в `~/.cursor/mcp.json`.
+4. Один раз на ПК: `./scripts/sync-cursor-mcp-env.sh` (Windows: `scripts\sync-cursor-mcp-env.ps1`) → полностью закрыть и открыть Cursor.
 
 Docs: https://c4.quietgridlabs.com/docs (MCP for Cursor). Health: `https://mcp.quietgridlabs.com/healthz`.
 
-4. Reload MCP / перезапуск Cursor. Проверка: `c4_whoami`, затем `c4_list_projects`.
+5. Проверка: `c4_whoami`, затем `c4_list_projects`.
 
 ## Когда использовать
 

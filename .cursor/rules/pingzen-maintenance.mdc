@@ -5,8 +5,8 @@ alwaysApply: true
 
 # PingZen Maintenance Windows
 
-Status page: https://pingzen.dev/status/bot-themarfa  
-MCP: `user-pingzen` (`create_maintenance` / `list_maintenance` / …).
+Status page: https://pingzen.dev/status/bot-themarfa 
+MCP: project `pingzen` in `.cursor/mcp.json` (`${env:PINGZEN_MCP_TOKEN}` via dotenvx + `scripts/sync-cursor-mcp-env.*`; tools `create_maintenance` / `list_maintenance` / …).
 
 Admin broadcast type for downtime notice: **`availability`**
 («Оповещения о доступности (бот / Twitch)» — recipients via `get_availability_recipients` / Settings toggle).

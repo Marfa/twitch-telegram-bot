@@ -56,8 +56,23 @@ Helpers: `scripts/env-run.sh` / `scripts/env-run.ps1`.
 2. Install `dotenvx` + `bw`, `bw login` (same Bitwarden account).
 3. Unlock / pull private key (custody `pull` when the local reference exists, or `bw get password <item-id>` → `.env.keys`).
 4. `dotenvx run -- python main.py`.
+5. Cursor MCP (once per PC): `./scripts/sync-cursor-mcp-env.sh` or `scripts\sync-cursor-mcp-env.ps1`, then **fully quit and reopen Cursor**. OAuth MCP (PostHog, Aiven, …) → Connect in Settings → MCP. VPS DB: `./scripts/vps-ssh-key-pull.sh`.
 
 `config.py` / `dotenv_loader.py` call `dotenvx decrypt --stdout` when they see `encrypted:` values.
+
+## Cursor MCP (project, all PCs)
+
+SoR for server list: committed [`.cursor/mcp.json`](../.cursor/mcp.json) (PostHog, Viaduct, PingZen, Aiven, `vps-db`).
+
+Secrets stay in encrypted `.env` as `VIADUCT_MCP_TOKEN` / `PINGZEN_MCP_TOKEN`. Cursor remote HTTP MCP **cannot** use `envFile` — only OS/process env — so after decrypt:
+
+```bash
+./scripts/sync-cursor-mcp-env.sh          # macOS / Linux
+# Windows:
+# powershell -ExecutionPolicy Bypass -File scripts\sync-cursor-mcp-env.ps1
+```
+
+Then fully quit and reopen Cursor. Do **not** put Bearer tokens in `~/.cursor/mcp.json` or in git plaintext. Personal MCP (Search Console, Cloudflare, …) may stay in the user file.
 
 ## Update a secret
 

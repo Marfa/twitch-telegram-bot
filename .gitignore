@@ -3,6 +3,9 @@
 .env.*.local
 .env.keys
 .env.keys.*
+# Cursor MCP env export from scripts/sync-cursor-mcp-env.* (secrets; never commit)
+.cursor/mcp-env.local.sh
+.cursor/mcp-env.local.ps1
 # Local VPS SSH private key (SoR = Bitwarden SSH key item; path via VPS_SSH_KEY)
 .ssh/
 .deploy-sha
