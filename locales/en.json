@@ -992,6 +992,7 @@
   "broadcast_started": "Broadcast started. The bot keeps working; stats arrive when it finishes.",
   "broadcast_scheduled": "Message scheduled.\nSend time: {when}\nRecipients will receive it automatically.",
   "broadcast_send_now": "Send now",
+  "broadcast_feedback_expired": "This broadcast is no longer available for feedback.",
   "scheduled_list_title": "Scheduled messages:",
   "scheduled_empty": "No scheduled messages.",
   "scheduled_line": "#{id} — {when}\n{type}\n{preview}",

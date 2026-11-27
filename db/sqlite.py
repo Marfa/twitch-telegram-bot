@@ -5928,18 +5928,25 @@ owner_id, twitch_username, twitch_user_id,
 
     def set_broadcast_feedback(
         self, broadcast_id: int, user_id: int, vote: int
-    ) -> None:
+    ) -> bool:
+        """Store a vote. False when the broadcast row is gone (purged) or vote invalid."""
         if vote not in (1, -1):
-            return
+            return False
         with self._conn() as conn:
-            conn.execute(
+            # INSERT … SELECT avoids FK / orphan writes when retention purge
+            # already deleted scheduled_broadcasts but Telegram still shows 👍/👎.
+            cur = conn.execute(
                 """
                 INSERT INTO broadcast_feedback (broadcast_id, user_id, vote)
-                VALUES (?, ?, ?)
+                SELECT ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1 FROM scheduled_broadcasts WHERE id = ?
+                )
                 ON CONFLICT(broadcast_id, user_id) DO UPDATE SET vote = excluded.vote
                 """,
-                (broadcast_id, user_id, vote),
+                (broadcast_id, user_id, vote, broadcast_id),
             )
+            return cur.rowcount > 0
 
     def clear_broadcast_feedback(self, broadcast_id: int, user_id: int) -> None:
         with self._conn() as conn:

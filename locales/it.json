@@ -973,6 +973,7 @@
   "broadcast_started": "Broadcast avviato. Il bot continua a funzionare; le statistiche arrivano quando finisce.",
   "broadcast_scheduled": "Messaggio programmato.\nOra di invio: {when}\nI destinatari lo riceveranno automaticamente.",
   "broadcast_send_now": "Invia ora",
+  "broadcast_feedback_expired": "Questo broadcast non è più disponibile per il feedback.",
   "scheduled_list_title": "Messaggi programmati:",
   "scheduled_empty": "Nessun messaggio programmato.",
   "scheduled_line": "#{id} — {when}\n{type}\n{preview}",

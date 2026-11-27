@@ -993,6 +993,7 @@
   "broadcast_started": "Рассылка запущена. Бот продолжает работать; статистика придёт по завершении.",
   "broadcast_scheduled": "Сообщение запланировано.\nВремя отправки: {when}\nПолучатели получат его автоматически.",
   "broadcast_send_now": "Отправить сейчас",
+  "broadcast_feedback_expired": "Эта рассылка больше недоступна для оценки.",
   "scheduled_list_title": "Запланированные сообщения:",
   "scheduled_empty": "Запланированных сообщений нет.",
   "scheduled_line": "#{id} — {when}\n{type}\n{preview}",

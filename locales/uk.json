@@ -973,6 +973,7 @@
   "broadcast_started": "Розсилку запущено. Бот продовжує працювати; статистика надійде після завершення.",
   "broadcast_scheduled": "Повідомлення заплановано.\nЧас надсилання: {when}\nОдержувачі отримають його автоматично.",
   "broadcast_send_now": "Надіслати зараз",
+  "broadcast_feedback_expired": "Ця розсилка більше недоступна для оцінки.",
   "scheduled_list_title": "Заплановані повідомлення:",
   "scheduled_empty": "Запланованих повідомлень немає.",
   "scheduled_line": "#{id} — {when}\n{type}\n{preview}",
