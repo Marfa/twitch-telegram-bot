@@ -19,6 +19,8 @@ from i18n import (
     SUPPORTED_LOCALES,
     btn,
     main_menu,
+    screen_is_sticky,
+    screen_key_for_markup,
     settings_menu,
     t,
     wizard_nav_inline,
@@ -333,18 +335,17 @@ def _coerce_main_reply_keyboard(
 ) -> ReplyKeyboardMarkup | ReplyKeyboardRemove | None:
     """Private chats may only sticky main_menu; coerce accidental submenus.
 
-    Callers often pass ``_menu(lang, user_id)`` without ``lang=`` on pulse.
-    Accept main_menu for any supported locale so we do not rewrite a correct
-    non-English sticky into DEFAULT_LOCALE.
+    The i18n screen registry declares which screen is sticky. Callers often
+    pass ``_menu(lang, user_id)`` without ``lang=`` on pulse, so any supported
+    locale of a sticky screen is accepted and nothing else is.
     """
     if reply_markup is None or isinstance(reply_markup, ReplyKeyboardRemove):
         return reply_markup
     if not isinstance(reply_markup, ReplyKeyboardMarkup):
         return reply_markup
     uid = int(user_id) if user_id is not None else int(chat_id)
-    for loc in SUPPORTED_LOCALES:
-        if reply_markup.keyboard == _menu(loc, uid).keyboard:
-            return reply_markup
+    if screen_is_sticky(screen_key_for_markup(reply_markup, sticky_only=True)):
+        return reply_markup
     locale = lang if lang in SUPPORTED_LOCALES else DEFAULT_LOCALE
     logger.warning(
         "Coerced non-main sticky reply keyboard for chat_id=%s to main_menu",
