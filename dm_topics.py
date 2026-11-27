@@ -604,6 +604,27 @@ async def resolve_alert_thread_id(
     return await ensure_user_topic(bot, db, sub.owner_id, key, lang=lang)
 
 
+async def resolve_user_topic_thread(
+    bot,
+    db,
+    user_id: int,
+    topic_key: str,
+    *,
+    lang: str | None = None,
+) -> int | None:
+    """Thread for a user-level alert that has no subscription (digests).
+
+    Returns None (General) when topics are off for this user.
+    """
+    if topic_key not in TOPIC_KEYS:
+        return None
+    if not db.is_topics_enabled(user_id):
+        return None
+    if lang is None:
+        lang = db.get_user_locale(user_id) or "en"
+    return await ensure_user_topic(bot, db, user_id, topic_key, lang=lang)
+
+
 def _thread_id_from_forum_topic(result: Any) -> int | None:
     if result is None:
         return None

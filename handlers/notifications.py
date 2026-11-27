@@ -1956,6 +1956,7 @@ async def _send_category_watch_digest_page(
     lang: str,
     offset: int,
     application: Application | None = None,
+    thread_id: int | None = None,
 ) -> None:
     from telegram.constants import ParseMode
 
@@ -1980,12 +1981,16 @@ async def _send_category_watch_digest_page(
     markup = (
         category_watch_digest_more_keyboard(lang, next_offset) if has_more else None
     )
+    thread_kwargs: dict = {}
+    if thread_id:
+        thread_kwargs["message_thread_id"] = thread_id
     await bot.send_message(
         chat_id,
         text,
         parse_mode=ParseMode.HTML,
         reply_markup=markup,
         disable_web_page_preview=True,
+        **thread_kwargs,
     )
     if application is not None and has_more:
         _store_category_watch_digest_pages(
@@ -2069,6 +2074,11 @@ async def check_category_watch_digest(context: ContextTypes.DEFAULT_TYPE) -> Non
             if not new_streams:
                 continue
             lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+            from dm_topics import resolve_alert_thread_id
+
+            thread_id = await resolve_alert_thread_id(
+                context.bot, db, sub, "game"
+            )
             try:
                 await _send_category_watch_digest_page(
                     context.bot,
@@ -2080,6 +2090,7 @@ async def check_category_watch_digest(context: ContextTypes.DEFAULT_TYPE) -> Non
                     lang=lang,
                     offset=0,
                     application=context.application,
+                    thread_id=thread_id,
                 )
             except Forbidden:
                 from handlers.delivery import apply_user_blocked
@@ -2122,6 +2133,11 @@ async def on_category_watch_digest_more(
         await query.edit_message_reply_markup(None)
     except BadRequest:
         pass
+    from dm_topics import resolve_user_topic_thread
+
+    thread_id = await resolve_user_topic_thread(
+        context.bot, db, user_id, "game", lang=lang
+    )
     await _send_category_watch_digest_page(
         context.bot,
         db,
@@ -2132,6 +2148,7 @@ async def on_category_watch_digest_more(
         lang=lang,
         offset=offset,
         application=context.application,
+        thread_id=thread_id,
     )
 
 

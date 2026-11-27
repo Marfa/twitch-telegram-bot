@@ -1220,6 +1220,12 @@ async def _send_giveaway_watch_notify(
     caption = f"{body}\n\n{igdb_attribution(lang)}"
     if len(caption) > 1024:
         caption = caption[:1020] + "…"
+    from dm_topics import resolve_alert_thread_id
+
+    thread_id = await resolve_alert_thread_id(bot, db, sub, "giveaway_watch")
+    thread_kwargs: dict[str, Any] = {}
+    if thread_id:
+        thread_kwargs["message_thread_id"] = thread_id
     try:
         if cover_mid:
             url = igdb_image_url(cover_mid)
@@ -1229,6 +1235,7 @@ async def _send_giveaway_watch_notify(
                     photo=url,
                     caption=caption,
                     parse_mode=ParseMode.HTML,
+                    **thread_kwargs,
                 )
                 return True
             except BadRequest:
@@ -1238,6 +1245,7 @@ async def _send_giveaway_watch_notify(
             caption,
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
+            **thread_kwargs,
         )
         return True
     except Forbidden:

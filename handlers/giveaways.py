@@ -1375,12 +1375,22 @@ async def check_giveaways_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
                 context.application, owner_id, new_entries, lang
             )
             db.set_giveaways_last_digest(owner_id, stored)
+            from dm_topics import resolve_user_topic_thread
+
+            thread_id = await resolve_user_topic_thread(
+                bot, db, owner_id, "giveaway_watch", lang=lang
+            )
+            send_kwargs: dict[str, Any] = {
+                "parse_mode": ParseMode.HTML,
+                "reply_markup": _details_keyboard(lang),
+                "disable_web_page_preview": True,
+            }
+            if thread_id:
+                send_kwargs["message_thread_id"] = thread_id
             await bot.send_message(
                 owner_id,
                 _summary_text(lang, stored),
-                parse_mode=ParseMode.HTML,
-                reply_markup=_details_keyboard(lang),
-                disable_web_page_preview=True,
+                **send_kwargs,
             )
             for e in stored:
                 db.mark_giveaway_seen(owner_id, e.source, e.external_id, seen_at=now)

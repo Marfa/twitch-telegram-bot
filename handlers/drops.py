@@ -790,13 +790,23 @@ async def _check_drops_digest(
         if now_ts - float(last_flush.get(owner_id) or 0) < _DIGEST_MIN_INTERVAL_SEC:
             continue
         text = _format_digest_alert(lang, new_camps)
+        from dm_topics import resolve_user_topic_thread
+
+        thread_id = await resolve_user_topic_thread(
+            context.bot, db, owner_id, "drops", lang=lang
+        )
+        send_kwargs: dict[str, Any] = {
+            "parse_mode": ParseMode.HTML,
+            "disable_web_page_preview": True,
+            "reply_markup": _digest_alert_keyboard(lang),
+        }
+        if thread_id:
+            send_kwargs["message_thread_id"] = thread_id
         try:
             await context.bot.send_message(
                 owner_id,
                 text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-                reply_markup=_digest_alert_keyboard(lang),
+                **send_kwargs,
             )
         except Exception:
             logger.exception("drops digest send failed owner=%s", owner_id)

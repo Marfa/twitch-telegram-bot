@@ -260,6 +260,7 @@ async def _send_game_card(
     lang: str = DEFAULT_LOCALE,
     reply_markup: InlineKeyboardMarkup | None = None,
     footer_html: str = "",
+    thread_id: int | None = None,
 ) -> None:
     from twitch import igdb_game_page_url
 
@@ -290,6 +291,9 @@ async def _send_game_card(
             db, game_id, lang=lang, name=game_name, summary=summary
         )
         caption = build_game_card_html(fields, lang, footer=footer)
+    thread_kwargs: dict[str, Any] = {}
+    if thread_id:
+        thread_kwargs["message_thread_id"] = thread_id
     if cover_mid:
         url = igdb_image_url(cover_mid)
         try:
@@ -299,6 +303,7 @@ async def _send_game_card(
                 caption=caption,
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup,
+                **thread_kwargs,
             )
             return
         except BadRequest:
@@ -309,6 +314,7 @@ async def _send_game_card(
         parse_mode=ParseMode.HTML,
         reply_markup=reply_markup,
         disable_web_page_preview=True,
+        **thread_kwargs,
     )
 
 
@@ -1238,6 +1244,9 @@ async def _send_release_notify(
     summary = str(game.get("summary") or "")
     footer = t("release_notify_paused_note", lang) if pausing else ""
     markup = _release_delete_keyboard(sub.id, lang) if pausing else None
+    from dm_topics import resolve_alert_thread_id
+
+    thread_id = await resolve_alert_thread_id(bot, db, sub, "release")
     try:
         await _send_game_card(
             bot,
@@ -1250,6 +1259,7 @@ async def _send_release_notify(
             lang=lang,
             reply_markup=markup,
             footer_html=footer,
+            thread_id=thread_id,
         )
     except Exception:
         logger.exception(
