@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Twitch X Telegram — оповещения о стримах</title>
+  <meta name="description" content="Старт стрима на Twitch, YouTube Live, TikTok, VK Play, GoodGame и Kick — в Telegram, Discord, Max или на ваш HTTPS webhook. Бесплатно и Premium за Stars." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --cream: #e8e6de;
+      --ink: #111111;
+      --feral: #e83d1b;
+      --border: 1.5px solid var(--ink);
+      --serif: "Libre Baskerville", "Times New Roman", serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background: #cfcbc0;
+      color: var(--ink);
+      font-family: var(--mono);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      min-height: 100vh;
+      padding: 28px 16px 48px;
+      display: flex;
+      justify-content: center;
+    }
+
+    .shell {
+      width: min(920px, 100%);
+      background: var(--cream);
+      border: var(--border);
+      box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.12);
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 16px;
+      border-bottom: var(--border);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .topbar a {
+      color: var(--ink);
+      text-underline-offset: 3px;
+    }
+
+    .brand-row {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      border-bottom: var(--border);
+    }
+
+    .brand {
+      padding: 28px 24px 26px;
+      border-right: var(--border);
+    }
+
+    .logo {
+      font-family: var(--serif);
+      font-size: clamp(36px, 6.2vw, 58px);
+      font-weight: 700;
+      line-height: 0.95;
+      letter-spacing: -0.03em;
+    }
+
+    .logo .dot { color: var(--feral); }
+
+    .tagline {
+      margin-top: 14px;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      line-height: 1.5;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px 18px;
+      padding: 28px 24px;
+      align-content: center;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .meta dt {
+      color: #666;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+
+    .meta dd { font-weight: 500; }
+
+    .meta .live dt,
+    .meta .live dd { color: var(--feral); }
+
+    .ticker {
+      overflow: hidden;
+      background: var(--ink);
+      color: var(--cream);
+      border-bottom: var(--border);
+      white-space: nowrap;
+    }
+
+    .ticker-track {
+      display: inline-flex;
+      align-items: center;
+      padding: 11px 0;
+      animation: marquee 32s linear infinite;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .ticker-track span { padding: 0 14px; }
+    .ticker-track .sep { color: var(--feral); padding: 0; }
+
+    @keyframes marquee {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+    .problem {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      border-bottom: var(--border);
+    }
+
+    .problem-label {
+      padding: 22px 16px;
+      border-right: var(--border);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      line-height: 1.6;
+    }
+
+    .problem-label .num { color: var(--feral); }
+
+    .problem-body { padding: 28px 28px 36px 32px; }
+
+    .problem-body h1 {
+      font-family: var(--serif);
+      font-style: italic;
+      font-weight: 400;
+      font-size: clamp(26px, 4vw, 40px);
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      max-width: 18ch;
+      margin-bottom: 22px;
+    }
+
+    .problem-body p {
+      font-size: 13px;
+      line-height: 1.75;
+      max-width: 58ch;
+      color: #222;
+    }
+
+    .fix-bar {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      background: var(--feral);
+      border-bottom: var(--border);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+
+    .fix-bar .num {
+      padding: 14px 16px;
+      border-right: var(--border);
+    }
+
+    .fix-bar .label { padding: 14px 24px; }
+
+    .stream {
+      background: var(--feral);
+      color: #fff;
+      padding: 40px 28px 28px;
+    }
+
+    .stream h2 {
+      font-family: var(--serif);
+      font-size: clamp(42px, 8vw, 72px);
+      font-weight: 700;
+      line-height: 0.95;
+      letter-spacing: -0.03em;
+      margin-bottom: 16px;
+    }
+
+    .stream p {
+      font-size: 13px;
+      line-height: 1.7;
+      max-width: 56ch;
+      opacity: 0.95;
+      margin-bottom: 22px;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      border-top: var(--border);
+      margin: 0 -28px;
+    }
+
+    .feat {
+      padding: 18px 28px;
+      border-bottom: var(--border);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .feat:nth-child(odd) { border-right: var(--border); }
+    .feat strong {
+      display: block;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 24px 0 12px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      padding: 12px 16px;
+      border: 1.5px solid #fff;
+      color: #fff;
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+      font-weight: 500;
+      background: transparent;
+    }
+
+    .btn.solid {
+      background: #fff;
+      color: var(--feral);
+    }
+
+    .btn:hover { opacity: 0.9; }
+
+    .foot {
+      padding: 14px 28px 22px;
+      font-size: 11px;
+      line-height: 1.6;
+      opacity: 0.9;
+      border-top: var(--border);
+      margin: 8px -28px 0;
+    }
+
+    .foot a { color: #fff; }
+
+    @media (max-width: 720px) {
+      body { padding: 12px 8px 32px; }
+      .brand-row, .problem, .fix-bar, .features {
+        grid-template-columns: 1fr;
+      }
+      .brand, .problem-label, .fix-bar .num, .feat:nth-child(odd) {
+        border-right: none;
+      }
+      .brand, .problem-label, .fix-bar .num {
+        border-bottom: var(--border);
+      }
+      .problem-body h1 { max-width: none; }
+      .features { margin: 0 -20px; }
+      .stream { padding: 32px 20px 20px; }
+      .feat { padding: 16px 20px; }
+      .foot { margin: 8px -20px 0; padding: 14px 20px 20px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>Twitch X Telegram — Dispatch № 01</div>
+      <a href="https://twitchbot.games/" target="_blank" rel="noopener">Сайт ↗</a>
+    </header>
+
+    <section class="brand-row">
+      <div class="brand">
+        <div class="logo">Twitch X Telegram<span class="dot">.</span></div>
+        <div class="tagline">Оповещения о стримах в Telegram</div>
+      </div>
+      <dl class="meta">
+        <div>
+          <dt>План</dt>
+          <dd>Free + Premium</dd>
+        </div>
+        <div>
+          <dt>Языки</dt>
+          <dd>RU / EN / UK / IT</dd>
+        </div>
+        <div>
+          <dt>Лимит free</dt>
+          <dd>5 активных</dd>
+        </div>
+        <div class="live">
+          <dt>Статус</dt>
+          <dd><a href="https://pingzen.dev/status/bot-themarfa" style="color:inherit">Live Now</a></dd>
+        </div>
+      </dl>
+    </section>
+
+    <div class="ticker" aria-hidden="true">
+      <div class="ticker-track">
+        <span>Twitch</span><span class="sep">•</span>
+        <span>YouTube Live</span><span class="sep">•</span>
+        <span>TikTok</span><span class="sep">•</span>
+        <span>VK Play</span><span class="sep">•</span>
+        <span>GoodGame</span><span class="sep">•</span>
+        <span>Kick</span><span class="sep">•</span>
+        <span>Telegram · Discord · Max · Webhook</span><span class="sep">•</span>
+        <span>Twitch</span><span class="sep">•</span>
+        <span>YouTube Live</span><span class="sep">•</span>
+        <span>TikTok</span><span class="sep">•</span>
+        <span>VK Play</span><span class="sep">•</span>
+        <span>GoodGame</span><span class="sep">•</span>
+        <span>Kick</span><span class="sep">•</span>
+        <span>Telegram · Discord · Max · Webhook</span><span class="sep">•</span>
+      </div>
+    </div>
+
+    <section class="problem">
+      <aside class="problem-label">
+        <span class="num">(01)</span> / Суть
+      </aside>
+      <div class="problem-body">
+        <h1>Не пропустите стрим, который ждёте.</h1>
+        <p>
+          Выберите канал Twitch или ссылку на старт эфира YouTube Live, TikTok,
+          VK Play Live, GoodGame или Kick; момент оповещения и куда слать —
+          личка, канал, Discord, Max или подписанный webhook.
+        </p>
+      </div>
+    </section>
+
+    <div class="fix-bar">
+      <div class="num">(02)</div>
+      <div class="label">Что умеет бот — кратко</div>
+    </div>
+
+    <section class="stream">
+      <h2>Алерты.</h2>
+      <p>
+        Старт стрима, смена категории, предстоящий по расписанию Twitch,
+        конец эфира, Drops, оповещения по игре, релизы и раздачи — шаблоны
+        с плейсхолдерами, превью и обложки.
+      </p>
+
+      <div class="features">
+        <div class="feat">
+          <strong>Типы оповещений</strong>
+          Старт (Twitch + другие площадки), категория, schedule, конец эфира, Drops, игра, релизы, раздачи.
+        </div>
+        <div class="feat">
+          <strong>Куда угодно</strong>
+          Личка, канал/группа Telegram (темы), Discord Incoming Webhook, ЛС Max, HTTPS JSON webhook с HMAC.
+        </div>
+        <div class="feat">
+          <strong>Импорт фолловов</strong>
+          OAuth один раз — подтянуть фолловы в подписки. Premium синхронизирует автоматически.
+        </div>
+        <div class="feat">
+          <strong>Ещё</strong>
+          «Мне повезёт», Mini App чата, расписание, AI-клипы из VOD, статистика канала — больше на Premium.
+        </div>
+      </div>
+
+      <div class="cta-row">
+        <a class="btn solid" href="https://t.me/twitchbot_game?start=site">Открыть в Telegram</a>
+        <a class="btn" href="https://twitchbot.games/guide?lang=ru">Читать инструкцию</a>
+        <a class="btn" href="https://t.me/twitch2telegram_bot?start=site">@twitch2telegram_bot</a>
+      </div>
+
+      <div class="foot">
+        Бесплатно: старт стрима и до 5 активных подписок. Premium — Stars в Telegram.
+        Не аффилировано с Twitch. Games metadata is powered by
+        <a href="https://www.igdb.com">IGDB.com</a>.
+      </div>
+    </section>
+  </main>
+</body>
+</html>

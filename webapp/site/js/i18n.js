@@ -35,7 +35,22 @@
         "OAuth once and pull Twitch follows into subscriptions. Premium can keep them in sync automatically.",
       feat_extra_t: "Extras",
       feat_extra_d:
-        "Lucky pick, stream chat Mini App, schedule tools, AI clips from VOD, channel stats — open more with Premium.",
+        "Lucky pick, AI clips from VOD, channel stats — open more with Premium.",
+      screens_title: "Settings, history, schedule, chat",
+      screens_lead:
+        "The four screens you touch every day: tune alerts once, check what was sent, plan the week, and jump into stream chat.",
+      card_settings_t: "Settings",
+      card_settings_d:
+        "Default templates and options, language, ignored words, buttons, and destinations — all in one menu.",
+      card_history_t: "History",
+      card_history_d:
+        "Every alert the bot sent: what fired, when, and where it went. 7 days on Free, longer on Premium.",
+      card_schedule_t: "Schedule",
+      card_schedule_d:
+        "Weekly Twitch schedule, an upcoming-stream reminder before the slot, plus /when, /day, and /week.",
+      card_chat_t: "Chat",
+      card_chat_d:
+        "Stream chat Mini App inside Telegram: read and post without daily limits, with a chat button right in the alert.",
       feat_langs_t: "Four languages",
       feat_langs_d:
         "Russian, English, Ukrainian, and Italian in the bot UI. This site follows your browser locale by default.",
@@ -123,7 +138,22 @@
         "OAuth один раз — подтянуть фолловы в подписки. Premium может синхронизировать их автоматически.",
       feat_extra_t: "Ещё",
       feat_extra_d:
-        "«Мне повезёт», Mini App чата, расписание, AI-клипы из VOD, статистика канала — больше на Premium.",
+        "«Мне повезёт», AI-клипы из VOD, статистика канала — больше на Premium.",
+      screens_title: "Настройки, история, расписание, чат",
+      screens_lead:
+        "Четыре экрана на каждый день: один раз настроить оповещения, посмотреть, что уже ушло, спланировать неделю и зайти в чат стрима.",
+      card_settings_t: "Настройки",
+      card_settings_d:
+        "Шаблоны и опции по умолчанию, язык, игнорируемые слова, кнопки и куда слать — всё в одном меню.",
+      card_history_t: "История",
+      card_history_d:
+        "Каждое отправленное оповещение: что сработало, когда и куда ушло. 7 дней бесплатно, дольше — на Premium.",
+      card_schedule_t: "Расписание",
+      card_schedule_d:
+        "Недельное расписание Twitch, напоминание до эфира, а ещё /when, /day и /week прямо в чате.",
+      card_chat_t: "Чат",
+      card_chat_d:
+        "Mini App чата стрима в Telegram: читать и писать без дневных лимитов, кнопка чата — в самом оповещении.",
       feat_langs_t: "Четыре языка",
       feat_langs_d:
         "Русский, English, українська и italiano в боте. Сайт по умолчанию берёт язык браузера.",
@@ -211,7 +241,22 @@
         "OAuth один раз — підтягнути фоллови. Premium може синхронізувати їх автоматично.",
       feat_extra_t: "Ще",
       feat_extra_d:
-        "«Мені пощастить», Mini App чату, розклад, AI-кліпи з VOD, статистика каналу.",
+        "«Мені пощастить», AI-кліпи з VOD, статистика каналу — більше на Premium.",
+      screens_title: "Налаштування, історія, розклад, чат",
+      screens_lead:
+        "Чотири екрани на щодень: один раз налаштувати сповіщення, подивитися, що вже надіслано, спланувати тиждень і зайти в чат стріму.",
+      card_settings_t: "Налаштування",
+      card_settings_d:
+        "Шаблони й опції за замовчуванням, мова, ігноровані слова, кнопки та куди надсилати — все в одному меню.",
+      card_history_t: "Історія",
+      card_history_d:
+        "Кожне надіслане сповіщення: що спрацювало, коли і куди пішло. 7 днів безкоштовно, довше — на Premium.",
+      card_schedule_t: "Розклад",
+      card_schedule_d:
+        "Тижневий розклад Twitch, нагадування перед ефіром, а також /when, /day і /week у чаті.",
+      card_chat_t: "Чат",
+      card_chat_d:
+        "Mini App чату стріму в Telegram: читати й писати без денних лімітів, кнопка чату — у самому сповіщенні.",
       feat_langs_t: "Чотири мови",
       feat_langs_d:
         "Українська, російська, English та italiano в боті. Сайт за замовчуванням бере мову браузера.",
@@ -299,7 +344,22 @@
         "OAuth una volta e importa i follow Twitch. Premium può sincronizzarli automaticamente.",
       feat_extra_t: "Extra",
       feat_extra_d:
-        "Lucky pick, Mini App chat, schedule, AI clip da VOD, stats canale — di più con Premium.",
+        "Lucky pick, AI clip da VOD, stats canale — di più con Premium.",
+      screens_title: "Impostazioni, cronologia, schedule, chat",
+      screens_lead:
+        "Le quattro schermate di ogni giorno: configura gli avvisi una volta, controlla cosa è stato inviato, pianifica la settimana ed entra nella chat dello stream.",
+      card_settings_t: "Impostazioni",
+      card_settings_d:
+        "Template e opzioni predefiniti, lingua, parole ignorate, pulsanti e destinazioni — tutto in un menu.",
+      card_history_t: "Cronologia",
+      card_history_d:
+        "Ogni avviso inviato: cosa è scattato, quando e dove è arrivato. 7 giorni gratis, di più con Premium.",
+      card_schedule_t: "Schedule",
+      card_schedule_d:
+        "Schedule settimanale Twitch, promemoria prima dello slot e /when, /day e /week in chat.",
+      card_chat_t: "Chat",
+      card_chat_d:
+        "Mini App della chat dello stream in Telegram: leggi e scrivi senza limiti giornalieri, col pulsante chat nell’avviso.",
       feat_langs_t: "Quattro lingue",
       feat_langs_d:
         "Italiano, inglese, russo e ucraino nel bot. Il sito usa la lingua del browser di default.",

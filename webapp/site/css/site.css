@@ -95,6 +95,76 @@
   border-color: #ffffff !important;
 }
 
+/* Four everyday screens: settings / history / schedule / chat */
+#screens {
+  background: #f4f4f4;
+  padding: 10rem 0 9rem;
+}
+
+#screens .screens-intro {
+  padding-bottom: 4.8rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  margin-bottom: 4.8rem;
+}
+
+#screens .screens-intro .lead {
+  margin: 0;
+}
+
+.screens-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2.2rem;
+}
+
+.screen-card {
+  background: #ffffff;
+  border-radius: 12px;
+  border-top: 3px solid #39b54a;
+  padding: 3.2rem 2.6rem 3.4rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.07);
+}
+
+.screen-card .icon {
+  display: inline-block;
+  margin-bottom: 1.2rem;
+}
+
+.screen-card .icon i {
+  color: #39b54a;
+  font-size: 4.4rem;
+}
+
+.screen-card h3 {
+  font-family: "montserrat-semibold", sans-serif;
+  font-size: 1.9rem;
+  color: #151515;
+  margin: 0 0 1rem;
+}
+
+.screen-card p {
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.7;
+  color: #616161;
+}
+
+@media only screen and (max-width: 1024px) {
+  .screens-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media only screen and (max-width: 650px) {
+  #screens {
+    padding: 7rem 0 6rem;
+  }
+
+  .screens-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 .about-how-steps a {
   color: #39b54a;
   text-decoration: underline;
