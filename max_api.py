@@ -16,6 +16,7 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, urlunsplit
 
 import certifi
 import requests
@@ -220,18 +221,55 @@ def _unlink_quiet(path: Path | None) -> None:
         logger.warning("Failed to delete temp Max image %s: %s", path, exc)
 
 
+# Only image CDNs the bot itself produces may be fetched. A user-editable URL
+# must never reach internal services (CodeQL py/full-ssrf).
+_IMAGE_HOSTS = (
+    "static-cdn.jtvnw.net",
+    "clips-media-assets2.twitch.tv",
+    "images.igdb.com",
+)
+
+
+def _trusted_image_url(raw: str) -> str | None:
+    """Canonical https image URL on a known CDN, or None when not allowed."""
+    text = (raw or "").strip()
+    if not text or len(text) > 2048:
+        return None
+    try:
+        parts = urlparse(text)
+    except ValueError:
+        return None
+    if parts.scheme.lower() != "https" or parts.username or parts.password:
+        return None
+    if parts.port not in (None, 443):
+        return None
+    host = (parts.hostname or "").lower().rstrip(".")
+    if not any(
+        host == allowed or host.endswith("." + allowed) for allowed in _IMAGE_HOSTS
+    ):
+        return None
+    return urlunsplit(("https", host, parts.path or "/", parts.query, ""))
+
+
 def _download_image_to_temp(url: str, *, session: requests.Session | None = None) -> Path:
     """Download image to a temp file. Caller must delete the path (use finally)."""
-    href = (url or "").strip()
-    if not href.startswith(("http://", "https://")):
-        raise MaxApiError("image url required", code="proto.payload")
+    href = _trusted_image_url(url)
+    if href is None:
+        raise MaxApiError("image url not allowed", code="proto.payload")
     http = _http(session)
     try:
-        resp = http.get(href, timeout=30, verify=True, stream=True)
+        resp = http.get(
+            href, timeout=30, verify=True, stream=True, allow_redirects=False
+        )
     except requests.RequestException as exc:
         raise MaxApiError(str(exc)) from exc
     path: Path | None = None
     try:
+        if resp.is_redirect:
+            raise MaxApiError(
+                f"image download redirect http {resp.status_code}",
+                status_code=resp.status_code,
+            )
         if resp.status_code >= 400:
             raise MaxApiError(
                 f"image download http {resp.status_code}",

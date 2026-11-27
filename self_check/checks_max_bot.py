@@ -43,6 +43,26 @@ def _check_image_upload_fallback() -> None:
         {"photos": {"abc": {"token": "tok-1"}}}
     ) == "tok-1"
 
+    # Image downloads are limited to the CDNs the bot produces (no SSRF).
+    assert max_api._trusted_image_url(
+        "https://static-cdn.jtvnw.net/ttv-boxart/1-144x192.jpg?t=1"
+    ) == "https://static-cdn.jtvnw.net/ttv-boxart/1-144x192.jpg?t=1"
+    assert max_api._trusted_image_url("https://images.igdb.com/igdb/image/upload/t_cover_big/x.jpg")
+    for blocked in (
+        "http://static-cdn.jtvnw.net/x.jpg",
+        "https://evil.example/x.jpg",
+        "https://static-cdn.jtvnw.net@127.0.0.1/x.jpg",
+        "https://static-cdn.jtvnw.net.evil.example/x.jpg",
+        "https://127.0.0.1/x.jpg",
+        "https://static-cdn.jtvnw.net:8443/x.jpg",
+    ):
+        assert max_api._trusted_image_url(blocked) is None, blocked
+    try:
+        max_api._download_image_to_temp("https://evil.example/x.jpg")
+        raise AssertionError("expected MaxApiError")
+    except max_api.MaxApiError:
+        pass
+
     # Temp file must be gone after success and after failure.
     import os
     import tempfile
