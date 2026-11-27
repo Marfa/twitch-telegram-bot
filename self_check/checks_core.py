@@ -796,7 +796,7 @@ def check_core() -> None:
     privacy_html = _privacy_page("en")
     assert b"Privacy" in privacy_html or b"privacy" in privacy_html.lower()
     assert "Developer Services Agreement".encode() in privacy_html
-    assert b"page-docs" in privacy_html and b"/site/css/site.css" in privacy_html
+    assert b"sw-doc" in privacy_html and b"/site/css/stillwater.css" in privacy_html
     from scripts.classify_deploy_paths import classify_deploy_paths
 
     assert classify_deploy_paths([]) == "noop"
@@ -2556,7 +2556,7 @@ def check_core() -> None:
         guide = urllib.request.urlopen(
             f"http://127.0.0.1:{port}/guide?lang=ru", timeout=2
         ).read()
-        assert b"page-docs" in guide and b"\xd0\x98\xd0\xbd\xd1\x81\xd1\x82\xd1\x80\xd1\x83\xd0\xba\xd1\x86\xd0\xb8\xd1\x8f" in guide
+        assert b"sw-doc" in guide and b"\xd0\x98\xd0\xbd\xd1\x81\xd1\x82\xd1\x80\xd1\x83\xd0\xba\xd1\x86\xd0\xb8\xd1\x8f" in guide
         clear_probe_cache_for_tests()
         with urllib.request.urlopen(
             f"http://127.0.0.1:{port}/health/c/db", timeout=2

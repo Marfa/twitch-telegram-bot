@@ -228,8 +228,8 @@ def check_outbound_webhook_docs_and_example_aligned() -> None:
     assert "<strong>Webhook</strong>" in rendered
     page = (_webhook_docs_page("en") or b"").decode("utf-8")
     assert "Outbound webhook" in page and "<table>" in page
-    assert 'class="page-docs"' in page
-    assert "/site/css/main.css" in page
+    assert 'class="sw"' in page and "sw-doc" in page
+    assert "/site/css/stillwater.css" in page
     assert "white-space:pre-wrap" not in page
     assert (
         "github.com/Marfa/twitch-telegram-bot/blob/main/outbound_webhook.py"
