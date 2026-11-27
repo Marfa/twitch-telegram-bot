@@ -1426,14 +1426,16 @@ async def set_default_stream_chat_menu_button(bot: Any) -> None:
 
 
 def _private_bot_commands(lang: str) -> list[BotCommand]:
-    """Slash commands shown in the private-chat Menu Button."""
+    """Slash commands in the private Menu Button — same order as main reply keyboard."""
     return [
         BotCommand("start", t("cmd_start_desc", lang)[:256]),
         BotCommand("new", t("cmd_new_desc", lang)[:256]),
-        BotCommand("etc", t("cmd_etc_desc", lang)[:256]),
-        BotCommand("chat", t("cmd_chat_desc", lang)[:256]),
-        BotCommand("help", t("cmd_help_desc", lang)[:256]),
+        BotCommand("import", t("cmd_import_desc", lang)[:256]),
+        BotCommand("list", t("cmd_list_desc", lang)[:256]),
+        BotCommand("history", t("cmd_history_desc", lang)[:256]),
+        BotCommand("other", t("cmd_other_desc", lang)[:256]),
         BotCommand("settings", t("cmd_settings_desc", lang)[:256]),
+        BotCommand("help", t("cmd_help_desc", lang)[:256]),
     ]
 
 

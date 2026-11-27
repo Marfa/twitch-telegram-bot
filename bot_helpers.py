@@ -184,6 +184,10 @@ _group_setup_notified: set[tuple[int, int]] = set()
 GROUP_DM_ONLY_COMMANDS = (
     "start",
     "new",
+    "import",
+    "list",
+    "history",
+    "other",
     "etc",
     "chat",
     "help",

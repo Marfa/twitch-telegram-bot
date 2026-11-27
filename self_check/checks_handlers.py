@@ -2155,10 +2155,12 @@ def check_handlers() -> None:
         assert [c.command for c in first_cmds] == [
             "start",
             "new",
-            "etc",
-            "chat",
-            "help",
+            "import",
+            "list",
+            "history",
+            "other",
             "settings",
+            "help",
         ]
         with patch(
             "handlers.settings.ensure_private_bot_commands", new_callable=AsyncMock

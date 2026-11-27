@@ -2305,6 +2305,14 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
         application, bot = _app(db)
         cap = _BotCapture()
         cap.wrap(bot)
+        update = _msg_update(_FREE_UID, "/other", cap)
+        ctx = _ctx(application)
+        await open_other_menu(update, ctx)
+        cap.assert_turn("cmd_other_other_menu")
+
+        application, bot = _app(db)
+        cap = _BotCapture()
+        cap.wrap(bot)
         update = _msg_update(_FREE_UID, "/new", cap)
         ctx = _ctx(application)
         with patch("handlers.wizard.analytics.capture"):
@@ -2313,7 +2321,25 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
         cap.assert_turn("cmd_new_alert_type")
 
     cmds = [c.command for c in _private_bot_commands("ru")]
-    assert cmds == ["start", "new", "etc", "chat", "help", "settings"]
+    assert cmds == [
+        "start",
+        "new",
+        "import",
+        "list",
+        "history",
+        "other",
+        "settings",
+        "help",
+    ]
+    # Descriptions match reply-keyboard labels (without leading emoji).
+    by_cmd = {c.command: c.description for c in _private_bot_commands("ru")}
+    assert by_cmd["new"] in btn("new", "ru")
+    assert by_cmd["import"] in btn("import_twitch", "ru")
+    assert by_cmd["list"] in btn("list", "ru")
+    assert by_cmd["history"] in btn("alert_history", "ru")
+    assert by_cmd["other"] in btn("other", "ru")
+    assert by_cmd["settings"] in btn("settings", "ru")
+    assert by_cmd["help"] in btn("feedback", "ru")
 
 
 async def _scenario_other_game_info(db) -> None:

@@ -64,6 +64,10 @@ def _check_premium_and_helpers() -> None:
     for cmd in (
         "start",
         "new",
+        "import",
+        "list",
+        "history",
+        "other",
         "etc",
         "chat",
         "help",

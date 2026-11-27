@@ -2961,6 +2961,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("import_twitch"), start_twitch_import),
         group=0,
     )
+    app.add_handler(CommandHandler("import", start_twitch_import), group=0)
     app.add_handler(
         CallbackQueryHandler(cancel_twitch_import, pattern=r"^import_oauth:cancel$"),
         group=0,
@@ -2985,6 +2986,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("list"), list_subscriptions),
         group=0,
     )
+    app.add_handler(CommandHandler("list", list_subscriptions), group=0)
     app.add_handler(
         MessageHandler(_btn_filter("cart"), open_cart_menu),
         group=0,
@@ -3063,6 +3065,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("alert_history"), show_alert_history),
         group=0,
     )
+    app.add_handler(CommandHandler("history", show_alert_history), group=0)
     app.add_handler(
         CallbackQueryHandler(
             on_alert_history_page, pattern=r"^alert_history:page:\d+$"
@@ -3101,6 +3104,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
         MessageHandler(_btn_filter("other"), open_other_menu),
         group=0,
     )
+    app.add_handler(CommandHandler("other", open_other_menu), group=0)
     app.add_handler(CommandHandler("etc", open_other_menu), group=0)
     app.add_handler(
         MessageHandler(_btn_filter("chat"), open_stream_chat),

@@ -44,7 +44,7 @@
 | Partner program | Referral link, 10% of invitees’ Stars Premium, manual withdrawal requests |
 | Admin | Background broadcast; scheduled sends; stats; DeepL; withdrawals; demo; **daily digest of new Premium payments** (purchase source from analytics) |
 | Analytics | [PostHog](https://posthog.com): usage events, Error tracking, Logs (WARNING+), daily `daily_bot_stats` (03:00 UTC), ops cron (`ops_job_ok` / `ops_job_failed` / `ops_job_skipped` for pg-backup and Aiven DR). [Polylane](https://polylane.com): poll new issues → admin DMs |
-| Commands | Menu: `/start`, `/new`, `/etc`, `/chat`, `/help`, `/settings`; also `/cancel`, `/schedule`, `/when`, `/day`, `/week`, `/feedback` |
+| Commands | Menu: `/start`, `/new`, `/import`, `/list`, `/history`, `/other`, `/settings`, `/help`; also `/cancel`, `/schedule`, `/when`, `/day`, `/week`, `/feedback`, `/chat`, `/etc` |
 | Deploy | VPS (Docker) |
 
 ## Premium
@@ -231,7 +231,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 
 ### Twitch stream chat
 
-**📦 Other → 💬 Chat** and New alert → Other: Mini App opens immediately (WebApp button). Menu Button next to the input lists `/start` `/new` `/etc` `/chat` `/help` `/settings`. Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + send via the field under chat; **Simple** = IRC). Read and send are free with no daily cap.
+**📦 Other → 💬 Chat** and New alert → Other: Mini App opens immediately (WebApp button). Menu Button next to the input lists `/start` `/new` `/import` `/list` `/history` `/other` `/settings` `/help` (mirrors the reply keyboard). Mini App: live streams from active subscriptions, search by name/link, stream chat (Twitch embed + send via the field under chat; **Simple** = IRC). Read and send are free with no daily cap.
 
 ### Pause notifications
 
@@ -242,17 +242,19 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | Button / command | Action |
 |---|---|
 | `/start` | Main menu |
-| `/new` | New alert |
-| `/etc` | Other section |
-| `/chat` | Stream chat Mini App (inline button; from Other — WebApp opens immediately) |
-| `/help` | Same as ❓ Help / `/feedback` |
+| `/new` | ➕ New subscription |
+| `/import` | ⬇️ Import subscriptions |
+| `/list` | 📋 My subscriptions |
+| `/history` | 📜 Alert history |
+| `/other` | 📦 Other (alias `/etc`) |
+| `/settings` | ⚙️ Settings |
+| `/help` | ❓ Help (alias `/feedback`) |
+| `/chat` | Stream chat Mini App (from Other — WebApp opens immediately; not in Menu Button) |
 | `/cancel` | Cancel current wizard |
 | `/schedule` | Manage schedule |
 | `/when` | When is the stream? In a group (next Twitch schedule slot; witty reply if none). Slash reply is ephemeral (only the caller; status → result; no auto-delete). Multiple streamers — pick buttons. Free-text “When stream?” stays a public reply |
 | `/day` | Today’s schedule (MSK): `- date time game` lines. Also “schedule for the day”. In a group, slash is ephemeral like `/when` |
 | `/week` | Next 7 days (MSK). Also “schedule for the week”. All other bot management is DM-only |
-| `/feedback` | Feedback |
-| `/settings` | Settings |
 | ➕ New subscription | Alert type → wizard |
 | ⬇️ Import subscriptions | OAuth → one-time or sync |
 | 📋 My subscriptions | List with enable/disable, edit, delete, share; **🗑 Delete** (multi-select) / **🧺 Cart** / **⏸ Pause** — last inline on the same message |
