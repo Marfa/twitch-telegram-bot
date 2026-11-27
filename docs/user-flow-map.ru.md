@@ -547,7 +547,7 @@ flowchart TD
 
 Тот же экран: кнопка **`❓ Помощь`**, `/feedback` и `/help`.
 
-Текст: трудности / оплата / идеи → [@immarfa](https://t.me/immarfa) + ваш user id; ссылки Twitch / Telegram / сайт / [статус](https://pingzen.dev/status/bot-themarfa); предложение сначала открыть инструкцию; атрибуция: *Games metadata is powered by* [IGDB.com](https://www.igdb.com) (локальные CSV-дампы, суточный sync; Commercial Addendum).
+Текст: трудности / оплата / идеи → [@immarfa](https://t.me/immarfa) + ваш user id; ссылки Twitch / Telegram / [чат @themarfa_gaming](https://t.me/themarfa_gaming) / сайт / [статус](https://pingzen.dev/status/bot-themarfa); предложение сначала открыть инструкцию; атрибуция: *Games metadata is powered by* [IGDB.com](https://www.igdb.com) (локальные CSV-дампы, суточный sync; Commercial Addendum).
 
 Inline под сообщением: **`Справка`** → `PUBLIC_BASE_URL/guide?lang=ru` (прод: https://twitchbot.games/guide). Если `PUBLIC_BASE_URL` пуст — Reply главное меню (без URL-кнопки).
 

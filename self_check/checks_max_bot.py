@@ -288,10 +288,11 @@ def _check_help_and_commands_payload() -> None:
         "help",
     ]
     assert all(c.get("description") for c in cmds)
-    # /help == Telegram «❓ Помощь»: feedback copy + @immarfa + guide links
+    # /help == Telegram «❓ Помощь»: feedback copy + @immarfa + chat + guide links
     with patch("i18n.guide_url", return_value="https://twitchbot.games/guide?lang=ru"):
         help_ru, atts_ru = max_bot._help_screen("ru", user_id=42)
     assert "@immarfa" in help_ru
+    assert "themarfa_gaming" in help_ru
     assert "42" in help_ru
     assert "<code>" not in help_ru
     assert "<a " not in help_ru
@@ -304,10 +305,35 @@ def _check_help_and_commands_payload() -> None:
         if isinstance(b, dict) and b.get("type") == "link"
     ]
     urls = [str(b.get("url") or "") for b in link_btns]
+    labels = [str(b.get("text") or "") for b in link_btns]
     assert any("t.me/immarfa" in u for u in urls)
+    assert any("t.me/themarfa_gaming" in u for u in urls)
+    assert any("@themarfa_gaming" in lab for lab in labels)
     assert any("guide" in u for u in urls)
+    # Max is RU-only even if caller passes another locale.
     help_en, _ = max_bot._help_screen("en", user_id=1)
-    assert "developer" in help_en.lower() or "immarfa" in help_en.lower()
+    assert "разработчику" in help_en.lower() or "@immarfa" in help_en
+    assert "themarfa_gaming" in help_en
+    from i18n import t as tr
+
+    mid = tr("start_welcome", "ru").split("\n\n")[1].strip()
+    for loc in ("ru", "en", "uk", "it"):
+        assert max_bot._normalize_lang(loc) == "ru"
+        start_text, start_atts = max_bot._menu_start(loc)
+        assert mid in start_text
+        assert "Выберите" in start_text
+        start_links = [
+            b
+            for att in (start_atts or [])
+            for row in (att.get("payload") or {}).get("buttons") or []
+            for b in row
+            if isinstance(b, dict) and b.get("type") == "link"
+        ]
+        assert any(
+            "@themarfa_gaming" in str(b.get("text") or "")
+            and "t.me/themarfa_gaming" in str(b.get("url") or "")
+            for b in start_links
+        ), loc
 
 
 def _check_payload_plain_text_no_redos() -> None:

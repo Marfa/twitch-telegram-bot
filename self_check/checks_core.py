@@ -3588,7 +3588,29 @@ def check_core() -> None:
         assert btn("settings", loc)
         assert btn("sync_subs", loc)
         assert btn("language", loc)
-        assert tr("start_welcome", loc)
+        welcome = tr("start_welcome", loc)
+        assert welcome
+        # Same facts/structure as RU for every locale (3 paragraphs, platforms, links).
+        welcome_parts = welcome.split("\n\n")
+        assert len(welcome_parts) == 3, loc
+        for platform in (
+            "Twitch",
+            "YouTube Live",
+            "TikTok",
+            "VK Play Live",
+            "GoodGame",
+            "Trovo",
+            "Kick",
+            "Telegram",
+            "Discord",
+        ):
+            assert platform in welcome_parts[0], (loc, platform)
+        assert "ebhook" in welcome_parts[0].lower(), loc
+        mid = welcome_parts[1]
+        assert "@themarfa_gaming" in mid and "https://www.twitch.tv/marfapr" in mid, loc
+        assert "|" in mid, loc
+        new_label = btn("new", loc).lstrip("➕ ").strip()
+        assert new_label in welcome_parts[2], (loc, new_label)
         assert tr("start_welcome_demo", loc, channel="marfapr")
         assert tr("start_welcome_demo_offer", loc, channel="marfapr")
         assert tr("welcome_demo_offer_declined", loc)
@@ -3738,6 +3760,17 @@ def check_core() -> None:
         fb = tr("feedback", loc, user_id=1)
         assert "t.me/immarfa" in fb
         assert "@immarfa" in fb
+        # Help links: same order/URLs in every locale (Chat under Telegram).
+        fb_urls = [
+            "https://www.twitch.tv/marfapr",
+            "https://t.me/themarfa",
+            "https://t.me/themarfa_gaming",
+            "https://blog.themarfa.name/",
+            "https://pingzen.dev/status/bot-themarfa",
+        ]
+        fb_pos = [fb.find(u) for u in fb_urls]
+        assert all(p >= 0 for p in fb_pos), (loc, fb_pos)
+        assert fb_pos == sorted(fb_pos), (loc, fb_pos)
         assert tr("schedule_live_add_prompt", loc)
         assert tr("setup_schedule_only_done", loc, sub_id=1, twitch_username="x", schedule_reminder_note="r", dest="d", thread_note="")
         assert tr("alert_type_prompt", loc)
@@ -3888,6 +3921,7 @@ def check_core() -> None:
         assert "42" in feedback
         assert "<code>42</code>" in feedback
         assert "@immarfa" in feedback
+        assert "t.me/themarfa_gaming" in feedback
         assert "pingzen.dev/status/bot-themarfa" in feedback
         assert "igdb.com" in feedback.lower()
         from i18n import igdb_attribution

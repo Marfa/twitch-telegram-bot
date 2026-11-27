@@ -746,28 +746,34 @@ def _btn_link(text: str, url: str) -> dict[str, Any]:
     return {"type": "link", "text": text[:64], "url": url}
 
 
-def _menu_start(lang: str) -> tuple[str, list[dict[str, Any]]]:
-    en = lang.startswith("en")
-    if en:
-        text = (
-            "Twitch stream alerts → MAX.\n"
-            "Alerts are configured in Telegram; this bot only delivers them here.\n\n"
-            "Pick what fits you:"
-        )
-        rows = [
-            [_btn_cb("I already have an alert", _CB_HAVE)],
-            [_btn_cb("Create an alert", _CB_NEW)],
-        ]
-    else:
-        text = (
-            "Оповещения о стримах Twitch → MAX.\n"
-            "Настройка — в Telegram; этот бот только доставляет сюда.\n\n"
-            "Выберите, что вам подходит:"
-        )
-        rows = [
-            [_btn_cb("Есть настроенное оповещение", _CB_HAVE)],
-            [_btn_cb("Создать оповещение", _CB_NEW)],
-        ]
+_DEV_TG_URL = "https://t.me/immarfa"
+_CHAT_TG_URL = "https://t.me/themarfa_gaming"
+
+
+def _welcome_community_line() -> str:
+    """RU middle line from Telegram ``start_welcome`` (chat + Twitch)."""
+    from i18n import t
+
+    parts = t("start_welcome", "ru").split("\n\n")
+    if len(parts) >= 2:
+        return parts[1].strip()
+    return "Чат @themarfa_gaming | Twitch https://www.twitch.tv/marfapr"
+
+
+def _menu_start(_lang: str = "ru") -> tuple[str, list[dict[str, Any]]]:
+    # Max UI is RU-only (audience in Russia).
+    line = _welcome_community_line()
+    text = (
+        "Оповещения о стримах Twitch → MAX.\n"
+        "Настройка — в Telegram; этот бот только доставляет сюда.\n\n"
+        f"{line}\n\n"
+        "Выберите, что вам подходит:"
+    )
+    rows = [
+        [_btn_link("@themarfa_gaming", _CHAT_TG_URL)],
+        [_btn_cb("Есть настроенное оповещение", _CB_HAVE)],
+        [_btn_cb("Создать оповещение", _CB_NEW)],
+    ]
     return text, _kb(*rows)
 
 
@@ -924,20 +930,21 @@ def _list_dests_text(*, lang: str, dests: list[Any]) -> str:
     return "\n".join(lines)
 
 
-_DEV_TG_URL = "https://t.me/immarfa"
-
-
 def _help_screen(
-    lang: str, *, user_id: int = 0
+    _lang: str = "ru", *, user_id: int = 0
 ) -> tuple[str, list[dict[str, Any]] | None]:
-    """Same content as Telegram «❓ Помощь» / ``/feedback`` / ``/help``."""
+    """Same content as Telegram «❓ Помощь» / ``/feedback`` / ``/help`` (RU-only)."""
     from i18n import btn, guide_url, t
     from translate import telegram_html_to_plain
 
+    lang = "ru"
     text = telegram_html_to_plain(
         t("feedback", lang, user_id=int(user_id) if user_id else 0)
     ).strip()
-    rows: list[list[dict[str, Any]]] = [[_btn_link("@immarfa", _DEV_TG_URL)]]
+    rows: list[list[dict[str, Any]]] = [
+        [_btn_link("@immarfa", _DEV_TG_URL)],
+        [_btn_link("@themarfa_gaming", _CHAT_TG_URL)],
+    ]
     guide = guide_url(lang)
     if guide:
         rows.append([_btn_link(btn("guide", lang), guide)])
@@ -986,13 +993,8 @@ def _err_no_write(lang: str) -> str:
     return "Бот не может писать сюда. Выдайте право писать и снова /link."
 
 
-def _normalize_lang(locale: str) -> str:
-    raw = (locale or "").strip().lower().replace("_", "-")
-    if not raw:
-        return "ru"
-    primary = raw.split("-", 1)[0]
-    if primary in ("en", "ru", "uk", "it"):
-        return primary
+def _normalize_lang(_locale: str = "") -> str:
+    """Max UI is Russian-only (users in Russia)."""
     return "ru"
 
 
