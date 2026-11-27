@@ -79,14 +79,19 @@ jobs:
             path.write_text("".join(lines), encoding="utf-8")
             print("TELEGRAM_BOT_TOKEN updated in .env (value not logged)")
             PY
-            docker compose -f compose.vps.yml up -d --force-recreate bot
-            for i in $(seq 1 30); do
-              if curl -fsS --max-time 3 https://bot.themarfa.name/health >/dev/null 2>&1; then
-                echo "health ok after recreate (${i})"
-                break
-              fi
-              sleep 2
-            done
+            if [[ ! -f scripts/bot-maintenance.sh ]]; then
+              echo "error: scripts/bot-maintenance.sh missing on the VPS" >&2
+              exit 1
+            fi
+            # Recreate through the one maintenance window: it snapshots the
+            # running image, recreates the bot and exits nonzero when /health
+            # never comes back.
+            if ! bash scripts/bot-maintenance.sh --health-url https://bot.themarfa.name/health; then
+              echo "error: the bot did not come back after the token change; restoring the previous .env" >&2
+              cp -a /tmp/twitch-telegram-bot.env.bak-before-token-rotate .env
+              bash scripts/bot-maintenance.sh --health-url https://bot.themarfa.name/health || true
+              exit 1
+            fi
             docker compose -f compose.vps.yml exec -T bot python - <<'PY'
             import os, urllib.request, json
             token = os.environ["TELEGRAM_BOT_TOKEN"]

@@ -38,19 +38,14 @@ jobs:
               echo "error: freeze script missing after pull" >&2
               exit 1
             fi
-            docker compose -f compose.vps.yml up -d --force-recreate bot
-            for i in $(seq 1 40); do
-              if curl -fsS --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
-                echo "health ok after ${i} checks"
-                break
-              fi
-              if [[ "$i" -eq 40 ]]; then
-                echo "error: /health not ready" >&2
-                docker compose -f compose.vps.yml logs --tail=80 bot || true
-                exit 1
-              fi
-              sleep 3
-            done
+            if [[ ! -f scripts/bot-maintenance.sh ]]; then
+              echo "error: scripts/bot-maintenance.sh missing after pull" >&2
+              exit 1
+            fi
+            # Recreate through the one maintenance window: it snapshots the
+            # running image, recreates the bot with the frozen .env, waits for
+            # /health and exits nonzero when the bot does not come back.
+            bash scripts/bot-maintenance.sh --health-tries 40 --health-interval 3
             # Presence-only checks in the running container (no secret values).
             docker compose -f compose.vps.yml exec -T bot python - <<'PY'
             import hashlib, os

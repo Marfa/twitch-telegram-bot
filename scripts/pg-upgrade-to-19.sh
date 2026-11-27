@@ -5,6 +5,8 @@
 # Frozen dump (not rotated by nightly): /var/backups/twitch-telegram-bot/pre-pg19-upgrade.sql.gz
 # Rollback if restore fails: compose from git HEAD^ (18 + pg-data-18 volume).
 #
+# Run through scripts/bot-maintenance.sh, which stops the bot for the dump.
+#
 # Requires compose.vps.yml: image postgres:19-alpine and volume pg-data-19
 # (new empty volume — do not reuse pg-data-18; PG 18+ stores
 # /var/lib/postgresql/<major>/docker under the mount).
@@ -19,15 +21,6 @@ COUNTS_AFTER="$BACKUP_DIR/post-pg19-counts.txt"
 
 cd "$APP_DIR"
 
-if ! grep -q 'image: postgres:19-alpine' "$COMPOSE_FILE"; then
-  exit 0
-fi
-
-if ! grep -q 'pg-data-19:' "$COMPOSE_FILE"; then
-  echo "ERROR: pg-upgrade-to-19: compose must use volume pg-data-19 (not pg-data-18)" >&2
-  exit 1
-fi
-
 db_id() {
   docker compose -f "$COMPOSE_FILE" ps -aq db 2>/dev/null || true
 }
@@ -39,6 +32,27 @@ running_image() {
   docker inspect -f '{{.Config.Image}}' "$id" 2>/dev/null || return 1
 }
 
+# --check-needed: 0 when the dump/restore still has to run, 1 when this database
+# already runs the target major. scripts/vps-deploy.sh asks before it opens the
+# maintenance window, which would otherwise restart the bot for nothing.
+if [[ "${1:-}" == "--check-needed" ]]; then
+  grep -q 'image: postgres:19-alpine' "$COMPOSE_FILE" || exit 1
+  img="$(running_image || true)"
+  if [[ "$img" == *postgres:19* ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+if ! grep -q 'image: postgres:19-alpine' "$COMPOSE_FILE"; then
+  exit 0
+fi
+
+if ! grep -q 'pg-data-19:' "$COMPOSE_FILE"; then
+  echo "ERROR: pg-upgrade-to-19: compose must use volume pg-data-19 (not pg-data-18)" >&2
+  exit 1
+fi
+
 wait_db() {
   local i
   for i in $(seq 1 60); do
@@ -49,21 +63,6 @@ wait_db() {
   done
   echo "ERROR: pg-upgrade-to-19: db never became ready" >&2
   return 1
-}
-
-write_counts() {
-  local out="$1"
-  docker compose -f "$COMPOSE_FILE" exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -At -c "
-SELECT t || E'\t' || c::text FROM (
-  SELECT 'alert_history'::text AS t, COUNT(*)::bigint AS c FROM alert_history
-  UNION ALL SELECT 'referral_credits', COUNT(*) FROM referral_credits
-  UNION ALL SELECT 'referral_withdrawals', COUNT(*) FROM referral_withdrawals
-  UNION ALL SELECT 'scheduled_broadcasts', COUNT(*) FROM scheduled_broadcasts
-  UNION ALL SELECT 'subscriptions', COUNT(*) FROM subscriptions
-  UNION ALL SELECT 'twitch_sync', COUNT(*) FROM twitch_sync
-  UNION ALL SELECT 'users', COUNT(*) FROM users
-) x ORDER BY t;
-" >"$out"
 }
 
 rollback_18() {
@@ -92,9 +91,14 @@ if [[ "$img" != *postgres:18* ]]; then
   exit 1
 fi
 
+# The dump needs the bot stopped, which scripts/bot-maintenance.sh does.
+if [[ "${BOT_MAINTENANCE_WINDOW:-0}" != "1" ]]; then
+  echo "ERROR: pg-upgrade-to-19: run through scripts/bot-maintenance.sh (the bot must be stopped for the dump)" >&2
+  exit 1
+fi
+
 echo "pg-upgrade-to-19: dumping $img"
 mkdir -p "$BACKUP_DIR"
-docker compose -f "$COMPOSE_FILE" stop bot
 bash "$APP_DIR/scripts/pg-backup.sh"
 latest="$(ls -1t "$BACKUP_DIR"/bot-*.sql.gz | head -n 1)"
 cp -a "$latest" "$FROZEN"
@@ -103,7 +107,7 @@ if [[ -d /root && -w /root ]]; then
 fi
 echo "pg-upgrade-to-19: frozen dump $FROZEN ($(du -h "$FROZEN" | awk '{print $1}'))"
 
-write_counts "$COUNTS_BEFORE"
+bash "$APP_DIR/scripts/pg-row-counts.sh" "$COUNTS_BEFORE"
 echo "pg-upgrade-to-19: counts before:"
 cat "$COUNTS_BEFORE"
 
@@ -117,7 +121,7 @@ if ! gunzip -c "$FROZEN" | docker compose -f "$COMPOSE_FILE" exec -T db psql -U 
   exit 1
 fi
 
-write_counts "$COUNTS_AFTER"
+bash "$APP_DIR/scripts/pg-row-counts.sh" "$COUNTS_AFTER"
 echo "pg-upgrade-to-19: counts after:"
 cat "$COUNTS_AFTER"
 
