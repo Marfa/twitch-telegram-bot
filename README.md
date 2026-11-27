@@ -7,11 +7,15 @@
 
 English: [README.en.md](README.en.md)
 
-| Расписание | История |
+| Главное меню | Типы оповещений |
 |---|---|
+| ![Главное меню](assets/gallery/ph-gallery-01-main-menu.ru.png) | ![Типы оповещений](assets/gallery/ph-gallery-02-alert-types.ru.png) |
+| Шаблон + плейсхолдеры |
+| ![Шаблон](assets/gallery/ph-gallery-03-templates.ru.png) |
+| Куда слать | Импорт из Twitch |
+| ![Куда слать](assets/gallery/ph-gallery-05-destinations.ru.png) | ![Импорт из Twitch](assets/gallery/ph-gallery-06-import-twitch.ru.png) |
+| Расписание | История |
 | ![Расписание](assets/gallery/ph-gallery-07-schedule.ru.png) | ![История](assets/gallery/ph-gallery-08-history.ru.png) |
-| Куда слать | Типы оповещений |
-| ![Куда слать](assets/gallery/ph-gallery-05-destinations.ru.png) | ![Типы оповещений](assets/gallery/ph-gallery-02-alert-types.ru.png) |
 
 | Возможность | Как работает |
 |---|---|

@@ -296,15 +296,15 @@ def check_web_site_locale_helpers() -> None:
     assert web_site.safe_file(web_site.SITE_DIR, "/etc/passwd") is None
     gallery = web_site.ASSETS_DIR / "gallery" / "ph-gallery-01-main-menu.ru.png"
     assert gallery.is_file()
-    card = web_site.ASSETS_DIR / "gallery" / "cards" / "card-schedule.ru.png"
+    card = web_site.ASSETS_DIR / "gallery" / "cards" / "card-alerts.ru.png"
     assert card.is_file()
     landing = web_site.landing_page() or b""
     # The Stillwater layout sets its backgrounds through CSS custom properties.
     assert b'url("/assets/gallery/ph-gallery-01-main-menu.ru.png")' in landing
     assert b"/site/css/stillwater.css" in landing
-    assert b"/assets/gallery/cards/card-schedule.ru.png" in landing
-    assert "Расписание".encode() in landing and "История".encode() in landing
-    assert "Типы оповещений".encode() in landing and "Чат".encode() in landing
+    assert b"/assets/gallery/cards/card-alerts.ru.png" in landing
+    assert "Настройки".encode() in landing and "История".encode() in landing
+    assert "Расписание".encode() in landing and "Чат".encode() in landing
     hero = web_site.SITE_DIR / "images" / "hero-bg.jpg"
     if hero.is_file():
         assert b'url("/site/images/hero-bg.jpg")' in landing
