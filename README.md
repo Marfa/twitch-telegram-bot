@@ -359,6 +359,7 @@ python main.py
 | `BOTHUB_IMAGE_MODEL_FALLBACK` | Fallback при CAPS / коде ошибки NOT_ENOUGH_TOKENS (по умолчанию `gemini-2.5-flash-image`; пусто = без fallback) |
 | `ISTHEREANYDEAL_API_KEY` | (опц.) IsThereAnyDeal — раздачи игр; без ключа работает только GamerPower |
 | `YOUTUBE_API_KEY` | (опц.) YouTube Data API v3 — проверка онлайн для Мультистрима (Google Cloud → API key) |
+| `YOUTUBE_SEARCH_CALLS_PER_DAY` | Бюджет поисковых вызовов YouTube в сутки на все опрашиваемые каналы, по умолчанию 90 (`search.list` стоит 100 единиц квоты) |
 | `STREAM_PREVIEW_REFRESH_SECONDS` | Интервал обновления превью/MP4 на эфире (по умолчанию 1800) |
 | `POSTHOG_API_KEY` | PostHog **Project API key** (`phc_…`). Без ключа аналитика выключена |
 | `POSTHOG_HOST` | Ingestion host (по умолчанию `https://us.i.posthog.com`; EU: `https://eu.i.posthog.com`) |

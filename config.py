@@ -142,6 +142,11 @@ ISTHEREANYDEAL_API_KEY = os.getenv("ISTHEREANYDEAL_API_KEY", "").strip()
 # Optional: YouTube Data API v3 key — multistream live checks for YouTube channels.
 # Create at https://console.cloud.google.com/ (enable YouTube Data API v3 → API key).
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
+# One search.list call costs 100 units of the project quota, so the default
+# 10,000-unit day allows about 100 search calls. The YouTube live probe
+# spreads that allowance over the channels it polls. Raise this after a
+# quota increase in Google Cloud.
+YOUTUBE_SEARCH_CALLS_PER_DAY = int(os.getenv("YOUTUBE_SEARCH_CALLS_PER_DAY", "90"))
 # How often to refresh stream preview photo / video MP4 while live (seconds).
 STREAM_PREVIEW_REFRESH_SECONDS = int(os.getenv("STREAM_PREVIEW_REFRESH_SECONDS", "1800"))
 BOT_VERSION = (os.getenv("BOT_VERSION") or "dev").strip() or "dev"

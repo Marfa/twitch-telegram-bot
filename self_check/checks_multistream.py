@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import time
+
 from multistream import (
     MultistreamChannel,
     dump_multistream_channels,
@@ -150,3 +153,112 @@ def check_multistream_prompt_i18n_format() -> None:
         assert "Abver" in filled
         assert "{goodgame_status}" in filled
         assert "{tiktok_status}" in filled
+
+
+class _FakeYouTubeResponse:
+    """Minimal stand-in for a requests.Response from the YouTube API."""
+
+    def __init__(self, status_code: int, payload: dict) -> None:
+        self.status_code = status_code
+        self.text = json.dumps(payload)
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class _FakeYouTubeSession:
+    def __init__(self, responses: list[tuple[int, dict]]) -> None:
+        self.responses = list(responses)
+        self.calls: list[dict] = []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append(dict(params or {}))
+        status, payload = self.responses.pop(0) if self.responses else (200, {})
+        return _FakeYouTubeResponse(status, payload)
+
+
+def _reset_youtube_probe() -> None:
+    import multistream as ms
+
+    ms.youtube_search_budget = ms.YouTubeSearchBudget()
+    ms.youtube_live_cache.clear()
+    ms._youtube_live_seen.clear()
+
+
+def check_youtube_live_probe_quota() -> None:
+    """A 60 s poll must not spend the 100-call daily search quota in 100 minutes."""
+    from unittest.mock import patch
+
+    import multistream as ms
+
+    with patch("multistream.YOUTUBE_API_KEY", "test-key"):
+        # The cached answer serves every poll tick between two probes, and a
+        # one-shot gate can still ask for a new probe.
+        _reset_youtube_probe()
+        fake = _FakeYouTubeSession(
+            [
+                (200, {"items": [{"id": {"videoId": "vid-1"}}]}),
+                (200, {"items": []}),
+            ]
+        )
+        with patch("multistream._SESSION", fake):
+            assert ms._youtube_live_video_id("UC1") == "vid-1"
+            assert ms._youtube_live_video_id("UC1") == "vid-1"
+            assert ms._youtube_live_video_id("UC1") == "vid-1"
+            assert len(fake.calls) == 1
+            assert ms._youtube_live_video_id("UC1", fresh=True) is None
+            assert len(fake.calls) == 2
+
+        # A 429 keeps the last known answer; a channel with no answer reports a
+        # deferred probe, so live alerts keep the previous state.
+        _reset_youtube_probe()
+        fake = _FakeYouTubeSession(
+            [
+                (200, {"items": []}),
+                (429, {"error": {"errors": [{"reason": "quotaExceeded"}]}}),
+            ]
+        )
+        with patch("multistream._SESSION", fake), patch(
+            "multistream.youtube_live_probe_interval", return_value=0.0
+        ):
+            assert ms._youtube_live_video_id("UC1") is None
+            failed = False
+            try:
+                ms._youtube_live_video_id("UC1")
+            except RuntimeError:
+                failed = True
+            assert failed, "a 429 must not look like an offline channel"
+            assert ms._youtube_live_video_id("UC1") is None
+            deferred = False
+            try:
+                ms._youtube_live_video_id("UC2")
+            except RuntimeError:
+                deferred = True
+            assert deferred, "no cached answer and a spent quota defers the probe"
+        assert len(fake.calls) == 2
+
+        # The window refuses calls past the allowance.
+        _reset_youtube_probe()
+        budget = ms.youtube_search_budget
+        budget.spend(2)
+        budget.spend(2)
+        over = False
+        try:
+            budget.spend(2)
+        except ms.YouTubeSearchQuotaExhausted:
+            over = True
+        assert over
+        assert budget.wait_seconds(2) > 0
+
+        # One probe turn is the day divided between the polled channels, so the
+        # allowance covers every channel instead of the first one taking it.
+        _reset_youtube_probe()
+        now = time.monotonic()
+        ms._youtube_live_seen.update({"UC1": now, "UC2": now})
+        interval = ms.youtube_live_probe_interval(now)
+        per_channel = ms._YOUTUBE_SEARCH_WINDOW_SEC * 2 / ms.YOUTUBE_SEARCH_CALLS_PER_DAY
+        assert interval >= per_channel - 1
+        spent_per_day = 2 * ms._YOUTUBE_SEARCH_WINDOW_SEC / interval
+        assert spent_per_day <= ms.YOUTUBE_SEARCH_CALLS_PER_DAY
+        _reset_youtube_probe()

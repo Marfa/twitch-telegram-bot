@@ -164,9 +164,11 @@ def main() -> None:
         check_multistream_parse_urls,
         check_multistream_prompt_i18n_format,
         check_multistream_status_placeholders,
+        check_youtube_live_probe_quota,
     )
 
     check_multistream_parse_urls()
+    check_youtube_live_probe_quota()
     check_multistream_dump_roundtrip()
     check_multistream_status_placeholders()
     check_multistream_prompt_i18n_format()
