@@ -77,7 +77,7 @@ if __name__ == "__main__":
         == "site"
     )
     assert (
-        classify_deploy_paths(["assets/gallery/ph-gallery-01-main-menu.png"])
+        classify_deploy_paths(["assets/gallery/ph-gallery-02-alert-types.png"])
         == "site"
     )
     assert classify_deploy_paths(["webapp/guide/ru.html"]) == "site"

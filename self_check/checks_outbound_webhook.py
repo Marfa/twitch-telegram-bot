@@ -288,23 +288,42 @@ def check_web_site_locale_helpers() -> None:
     assert web_site.request_lang("uk", "en-US") == "uk"
     assert web_site.request_lang(None, "uk-UA,uk;q=0.8") == "uk"
     assert web_site.landing_page() is not None
+    assert web_site.features_page("ru") is not None
+    assert web_site.pricing_page("ru") is not None
     assert web_site.sitemap_bytes() is not None
     assert web_site.robots_bytes() is not None
     assert web_site.safe_file(web_site.SITE_DIR, "../health.py") is None
     assert web_site.safe_file(web_site.SITE_DIR, "css/main.css") is not None
     assert web_site.safe_file(web_site.SITE_DIR, "css/../../health.py") is None
     assert web_site.safe_file(web_site.SITE_DIR, "/etc/passwd") is None
-    gallery = web_site.ASSETS_DIR / "gallery" / "ph-gallery-01-main-menu.ru.png"
+    gallery = web_site.ASSETS_DIR / "gallery" / "ph-gallery-02-alert-types.ru.png"
     assert gallery.is_file()
+    assert not (web_site.ASSETS_DIR / "gallery" / "ph-gallery-01-main-menu.ru.png").is_file()
+    assert not (web_site.ASSETS_DIR / "gallery" / "ph-gallery-03-templates.ru.png").is_file()
+    assert not (web_site.ASSETS_DIR / "gallery" / "ph-gallery-06-import-twitch.ru.png").is_file()
     card = web_site.ASSETS_DIR / "gallery" / "cards" / "card-alerts.ru.png"
     assert card.is_file()
+    assert (web_site.ASSETS_DIR / "gallery" / "cards" / "card-settings.ru.png").is_file()
+    assert (web_site.ASSETS_DIR / "gallery" / "cards" / "card-chat.ru.png").is_file()
     landing = web_site.landing_page() or b""
-    # The Stillwater layout sets its backgrounds through CSS custom properties.
-    assert b'url("/assets/gallery/ph-gallery-01-main-menu.ru.png")' in landing
+    assert b'url("/site/images/hero-bg.jpg")' in landing
     assert b"/site/css/stillwater.css" in landing
     assert b"/assets/gallery/cards/card-alerts.ru.png" in landing
+    assert b"/assets/gallery/cards/card-settings.ru.png" in landing
+    assert b"/assets/gallery/cards/card-chat.ru.png" in landing
+    assert b'href="/features?lang=ru"' in landing
+    assert b'href="/pricing?lang=ru"' in landing
+    assert b"sw-footer" in landing
+    assert b"grid-template-columns: repeat(3, minmax(0, 1fr))" in landing
     assert "Настройки".encode() in landing and "История".encode() in landing
     assert "Расписание".encode() in landing and "Чат".encode() in landing
+    features = web_site.features_page("ru")
+    pricing = web_site.pricing_page("ru")
+    assert "Возможности".encode() in features and b"sw-footer" in features
+    assert "Тарифы".encode() in pricing and b"20 Stars" in pricing
+    sitemap = web_site.sitemap_bytes() or b""
+    assert b"/features" in sitemap and b"/pricing" in sitemap
+    assert b"/classic" not in sitemap
     hero = web_site.SITE_DIR / "images" / "hero-bg.jpg"
     if hero.is_file():
         assert b'url("/site/images/hero-bg.jpg")' in landing

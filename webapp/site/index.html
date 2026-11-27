@@ -18,9 +18,6 @@
   <style>
     :root {
       --hero: url("/site/images/hero-bg.jpg");
-      --shot-menu: url("/assets/gallery/ph-gallery-01-main-menu.ru.png");
-      --shot-types: url("/assets/gallery/ph-gallery-02-alert-types.ru.png");
-      --shot-dest: url("/assets/gallery/ph-gallery-05-destinations.ru.png");
     }
 
     body.sw { overflow-x: hidden; }
@@ -143,6 +140,16 @@
       padding-top: 26px;
       border-top: 1px solid var(--sw-line);
       max-width: 480px;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .stats:hover strong { color: var(--sw-sage); }
+
+    .footnote a {
+      color: var(--sw-sage);
+      text-decoration: underline;
+      text-underline-offset: 2px;
     }
 
     .stats strong {
@@ -215,29 +222,18 @@
     }
 
     .cards {
-      display: flex;
-      align-items: stretch;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 14px;
       width: 100%;
       padding: 8px 28px 20px;
-      overflow-x: auto;
-      overflow-y: hidden;
-      scroll-snap-type: x mandatory;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: thin;
-    }
-
-    .cards::-webkit-scrollbar { height: 8px; }
-    .cards::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.45);
-      border-radius: 999px;
+      overflow: visible;
     }
 
     .card {
-      flex: 0 0 220px;
-      scroll-snap-align: start;
       display: flex;
       flex-direction: column;
+      min-width: 0;
       background: rgba(255, 255, 255, 0.95);
       backdrop-filter: blur(16px);
       border-radius: 24px;
@@ -323,13 +319,41 @@
       padding: 0 16px 18px;
     }
 
+    .landing-footer {
+      width: min(1080px, 100%);
+      margin: 0 auto;
+      padding: 28px 20px 48px;
+    }
+
+    @media (max-width: 1200px) and (min-width: 981px) {
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .card-media { height: 148px; }
+    }
+
     @media (max-width: 980px) {
       .page { grid-template-columns: 1fr; }
       .left { padding: 20px 20px 24px; }
       .nav-links-desktop { display: none; }
       .right { min-height: 62vh; }
       .cards-wrap { padding-top: 72px; }
-      .card { flex-basis: min(230px, 78vw); }
+      .cards {
+        display: flex;
+        align-items: stretch;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+      }
+      .cards::-webkit-scrollbar { height: 8px; }
+      .cards::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.45);
+        border-radius: 999px;
+      }
+      .card {
+        flex: 0 0 min(230px, 78vw);
+        scroll-snap-align: start;
+      }
       .cards-hint { display: block; }
     }
   </style>
@@ -343,8 +367,8 @@
           Twitch X Telegram
         </a>
         <nav class="sw-nav-links nav-links-desktop" aria-label="Навигация">
-          <a href="#features">Возможности</a>
-          <a href="#pricing">Тарифы</a>
+          <a href="/features?lang=ru">Возможности</a>
+          <a href="/pricing?lang=ru">Тарифы</a>
           <a href="/guide?lang=ru">Инструкция</a>
           <a class="sw-cta" href="https://t.me/twitchbot_game?start=site">Открыть бота</a>
         </nav>
@@ -375,7 +399,7 @@
             Читать инструкцию
           </a>
         </div>
-        <div class="stats" id="pricing" aria-label="Кратко о тарифах">
+        <a class="stats" href="/pricing?lang=ru" aria-label="Кратко о тарифах">
           <div>
             <strong>5</strong>
             <span>Активных free</span>
@@ -388,9 +412,10 @@
             <strong>от 20</strong>
             <span>Stars Premium</span>
           </div>
-        </div>
-        <p class="footnote" id="features">
-          Бесплатно: тип «начало стрима». Premium открывает остальные типы, sync фолловов,
+        </a>
+        <p class="footnote">
+          Бесплатно: тип «начало стрима». <a href="/features?lang=ru">Возможности</a>
+          и <a href="/pricing?lang=ru">тарифы</a> — Premium открывает остальные типы, sync фолловов,
           продвинутые опции, историю, AI-клипы и другое.
         </p>
       </div>
@@ -479,6 +504,36 @@
       </div>
       <p class="cards-hint">Листайте карточки →</p>
     </section>
+  </div>
+
+  <div class="landing-footer">
+    <footer class="sw-footer">
+      <div>
+        <h4>Twitch X Telegram</h4>
+        <p>Оповещения о стримах с разных площадок для Telegram и Discord. Сделано Marfa. Не аффилировано с Twitch.</p>
+      </div>
+      <div>
+        <h4>Контакты</h4>
+        <p><a href="https://t.me/immarfa">@immarfa</a><br>
+        <a href="mailto:biz@themarfa.name">biz@themarfa.name</a></p>
+      </div>
+      <div>
+        <h4>Ссылки</h4>
+        <ul>
+          <li><a href="/">Главная</a></li>
+          <li><a href="/features?lang=ru">Возможности</a></li>
+          <li><a href="/pricing?lang=ru">Тарифы</a></li>
+          <li><a href="/guide?lang=ru">Инструкция</a></li>
+          <li><a href="/webhook?lang=ru">Документация webhook</a></li>
+          <li><a href="/privacy?lang=ru">Конфиденциальность</a></li>
+          <li><a href="/placeholders?lang=ru">Плейсхолдеры</a></li>
+          <li><a href="https://github.com/Marfa/twitch-telegram-bot">GitHub</a></li>
+          <li><a href="https://www.donationalerts.com/r/themarfa">Донат</a></li>
+          <li><a href="https://nowpayments.io/donation/themarfa">Донат криптой</a></li>
+        </ul>
+      </div>
+      <div class="sw-copy">© Marfa — Twitch X Telegram</div>
+    </footer>
   </div>
 </body>
 </html>

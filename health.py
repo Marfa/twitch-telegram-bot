@@ -1600,6 +1600,30 @@ class _HealthHandler(BaseHTTPRequestHandler):
                 cache_control="public, max-age=300",
             )
             return
+        if path == "/features":
+            import web_site
+
+            lang = _request_lang(self)
+            body = web_site.features_page(lang)
+            _send_bytes(
+                self,
+                body,
+                content_type="text/html; charset=utf-8",
+                cache_control="public, max-age=300",
+            )
+            return
+        if path == "/pricing":
+            import web_site
+
+            lang = _request_lang(self)
+            body = web_site.pricing_page(lang)
+            _send_bytes(
+                self,
+                body,
+                content_type="text/html; charset=utf-8",
+                cache_control="public, max-age=300",
+            )
+            return
         if path == "/webhook":
             lang = _request_lang(self)
             body = _webhook_docs_page(lang)

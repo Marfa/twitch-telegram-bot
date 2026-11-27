@@ -33,6 +33,8 @@ _UI = {
     "en": {
         "brand": "Twitch X Telegram",
         "nav_home": "Home",
+        "nav_features": "Features",
+        "nav_pricing": "Pricing",
         "nav_guide": "Guide",
         "nav_webhook": "Webhook",
         "nav_start": "Open bot",
@@ -44,6 +46,8 @@ _UI = {
         "footer_links": "Site links",
         "footer_support": "Support the project",
         "footer_home": "Home",
+        "footer_features": "Features",
+        "footer_pricing": "Pricing",
         "footer_guide": "Guide",
         "footer_webhook": "Webhook docs",
         "footer_privacy": "Privacy",
@@ -57,10 +61,45 @@ _UI = {
         "guide_lead": "How to set up alerts, destinations, Premium, and everyday menus.",
         "webhook_hero": "Outbound webhook",
         "webhook_lead": "HTTPS JSON delivery contract with HMAC for integrators.",
+        "features_hero": "Features",
+        "features_lead": "What the bot can do — short overview before you open the full guide.",
+        "features_body": """
+<h2>Alert types</h2>
+<p>Stream start (free), category change, upcoming from Twitch schedule, stream end, Drops, game alerts, release dates (IGDB), and free giveaways.</p>
+<h2>Destinations</h2>
+<p>Private chat, Telegram channel/group with topics, Discord Incoming Webhook, Max DMs, or your own HTTPS JSON webhook with HMAC.</p>
+<h2>Settings &amp; sync</h2>
+<p>Language, bot defaults, topics, Premium, Twitch follow import and optional auto-sync.</p>
+<h2>History, schedule, chat</h2>
+<p>Alert history (7 days free / 60 on Premium), Twitch schedule tools, and a Mini App to watch and write stream chat from Telegram.</p>
+<p><a href="/guide?lang=en">Read the full guide →</a></p>
+""",
+        "pricing_hero": "Pricing",
+        "pricing_lead": "Free plan for go-live alerts; Premium unlocks more with Telegram Stars.",
+        "pricing_body": """
+<h2>Free</h2>
+<ul>
+<li>Up to 5 active alerts</li>
+<li>Stream-start type</li>
+<li>DM / channel / Discord / Max / webhook</li>
+<li>7-day alert history</li>
+</ul>
+<h2>Premium</h2>
+<p>From <strong>20 Stars</strong> — month, year, lifetime, or à la carte features.</p>
+<ul>
+<li>All alert types</li>
+<li>Twitch follow sync</li>
+<li>Advanced options, AI clips, longer history</li>
+<li>Schedule publish and more extras</li>
+</ul>
+<p>Plans and checkout live in the bot: <a href="https://t.me/twitchbot_game?start=site">Open bot →</a></p>
+""",
     },
     "ru": {
         "brand": "Twitch X Telegram",
         "nav_home": "Главная",
+        "nav_features": "Возможности",
+        "nav_pricing": "Тарифы",
         "nav_guide": "Инструкция",
         "nav_webhook": "Webhook",
         "nav_start": "Открыть бота",
@@ -72,6 +111,8 @@ _UI = {
         "footer_links": "Ссылки",
         "footer_support": "Поддержка проекта",
         "footer_home": "Главная",
+        "footer_features": "Возможности",
+        "footer_pricing": "Тарифы",
         "footer_guide": "Инструкция",
         "footer_webhook": "Документация webhook",
         "footer_privacy": "Конфиденциальность",
@@ -85,10 +126,45 @@ _UI = {
         "guide_lead": "Как настроить оповещения, куда слать, Premium и повседневные меню.",
         "webhook_hero": "Outbound webhook",
         "webhook_lead": "Контракт HTTPS JSON + HMAC для интеграторов.",
+        "features_hero": "Возможности",
+        "features_lead": "Кратко о том, что умеет бот — перед полной инструкцией.",
+        "features_body": """
+<h2>Типы оповещений</h2>
+<p>Старт стрима (бесплатно), смена категории, предстоящий по Twitch schedule, конец эфира, Drops, оповещение по игре, выход релизов (IGDB) и раздачи.</p>
+<h2>Куда слать</h2>
+<p>Личка, канал/группа Telegram с темами, Discord Incoming Webhook, Max или свой HTTPS JSON webhook с HMAC.</p>
+<h2>Настройки и sync</h2>
+<p>Язык, настройки по умолчанию, топики, Premium, импорт фолловов Twitch и автосинхронизация.</p>
+<h2>История, расписание, чат</h2>
+<p>История оповещений (7 дней бесплатно / 60 на Premium), инструменты расписания Twitch и Mini App чата стрима из Telegram.</p>
+<p><a href="/guide?lang=ru">Читать полную инструкцию →</a></p>
+""",
+        "pricing_hero": "Тарифы",
+        "pricing_lead": "Бесплатно — оповещения о старте; Premium открывает больше за Telegram Stars.",
+        "pricing_body": """
+<h2>Бесплатно</h2>
+<ul>
+<li>До 5 активных оповещений</li>
+<li>Тип «начало стрима»</li>
+<li>Личка / канал / Discord / Max / webhook</li>
+<li>История за 7 дней</li>
+</ul>
+<h2>Premium</h2>
+<p>От <strong>20 Stars</strong> — месяц, год, навсегда или отдельные функции.</p>
+<ul>
+<li>Все типы оповещений</li>
+<li>Sync фолловов Twitch</li>
+<li>Продвинутые опции, AI-клипы, длинная история</li>
+<li>Публикация расписания и другие extras</li>
+</ul>
+<p>Тарифы и оплата — в боте: <a href="https://t.me/twitchbot_game?start=site">Открыть бота →</a></p>
+""",
     },
     "uk": {
         "brand": "Twitch X Telegram",
         "nav_home": "Головна",
+        "nav_features": "Можливості",
+        "nav_pricing": "Тарифи",
         "nav_guide": "Інструкція",
         "nav_webhook": "Webhook",
         "nav_start": "Відкрити бота",
@@ -100,6 +176,8 @@ _UI = {
         "footer_links": "Посилання",
         "footer_support": "Підтримка проєкту",
         "footer_home": "Головна",
+        "footer_features": "Можливості",
+        "footer_pricing": "Тарифи",
         "footer_guide": "Інструкція",
         "footer_webhook": "Документація webhook",
         "footer_privacy": "Конфіденційність",
@@ -113,10 +191,45 @@ _UI = {
         "guide_lead": "Як налаштувати сповіщення, куди надсилати, Premium і меню.",
         "webhook_hero": "Outbound webhook",
         "webhook_lead": "Контракт HTTPS JSON + HMAC для інтеграторів.",
+        "features_hero": "Можливості",
+        "features_lead": "Коротко про те, що вміє бот — перед повною інструкцією.",
+        "features_body": """
+<h2>Типи сповіщень</h2>
+<p>Старт стріму (безкоштовно), зміна категорії, майбутній за Twitch schedule, кінець ефіру, Drops, сповіщення за грою, релізи (IGDB) і роздачі.</p>
+<h2>Куди надсилати</h2>
+<p>Особисті, канал/група Telegram з темами, Discord Incoming Webhook, Max або власний HTTPS JSON webhook з HMAC.</p>
+<h2>Налаштування і sync</h2>
+<p>Мова, типові налаштування, топіки, Premium, імпорт фоловів Twitch та автосинхронізація.</p>
+<h2>Історія, розклад, чат</h2>
+<p>Історія сповіщень (7 днів безкоштовно / 60 на Premium), інструменти розкладу Twitch і Mini App чату стріму з Telegram.</p>
+<p><a href="/guide?lang=uk">Читати повну інструкцію →</a></p>
+""",
+        "pricing_hero": "Тарифи",
+        "pricing_lead": "Безкоштовно — сповіщення про старт; Premium відкриває більше за Telegram Stars.",
+        "pricing_body": """
+<h2>Безкоштовно</h2>
+<ul>
+<li>До 5 активних сповіщень</li>
+<li>Тип «початок стріму»</li>
+<li>Особисті / канал / Discord / Max / webhook</li>
+<li>Історія за 7 днів</li>
+</ul>
+<h2>Premium</h2>
+<p>Від <strong>20 Stars</strong> — місяць, рік, назавжди або окремі функції.</p>
+<ul>
+<li>Усі типи сповіщень</li>
+<li>Sync фоловів Twitch</li>
+<li>Розширені опції, AI-кліпи, довша історія</li>
+<li>Публікація розкладу та інші extras</li>
+</ul>
+<p>Тарифи й оплата — в боті: <a href="https://t.me/twitchbot_game?start=site">Відкрити бота →</a></p>
+""",
     },
     "it": {
         "brand": "Twitch X Telegram",
         "nav_home": "Home",
+        "nav_features": "Funzionalità",
+        "nav_pricing": "Prezzi",
         "nav_guide": "Guida",
         "nav_webhook": "Webhook",
         "nav_start": "Apri il bot",
@@ -128,6 +241,8 @@ _UI = {
         "footer_links": "Link",
         "footer_support": "Supporta il progetto",
         "footer_home": "Home",
+        "footer_features": "Funzionalità",
+        "footer_pricing": "Prezzi",
         "footer_guide": "Guida",
         "footer_webhook": "Docs webhook",
         "footer_privacy": "Privacy",
@@ -141,6 +256,39 @@ _UI = {
         "guide_lead": "Come configurare avvisi, destinazioni, Premium e i menu.",
         "webhook_hero": "Outbound webhook",
         "webhook_lead": "Contratto HTTPS JSON + HMAC per gli integrator.",
+        "features_hero": "Funzionalità",
+        "features_lead": "Cosa fa il bot — panoramica breve prima della guida completa.",
+        "features_body": """
+<h2>Tipi di avviso</h2>
+<p>Inizio stream (gratis), cambio categoria, imminente da Twitch schedule, fine live, Drops, avvisi gioco, uscite (IGDB) e giveaway.</p>
+<h2>Destinazioni</h2>
+<p>Chat privata, canale/gruppo Telegram con topic, Discord Incoming Webhook, Max o il tuo HTTPS JSON webhook con HMAC.</p>
+<h2>Impostazioni e sync</h2>
+<p>Lingua, default, topic, Premium, import follow Twitch e sync automatico.</p>
+<h2>Cronologia, schedule, chat</h2>
+<p>Cronologia avvisi (7 giorni gratis / 60 con Premium), strumenti schedule Twitch e Mini App chat dallo stream in Telegram.</p>
+<p><a href="/guide?lang=it">Leggi la guida completa →</a></p>
+""",
+        "pricing_hero": "Prezzi",
+        "pricing_lead": "Gratis per gli avvisi di go-live; Premium sblocca di più con Telegram Stars.",
+        "pricing_body": """
+<h2>Gratis</h2>
+<ul>
+<li>Fino a 5 avvisi attivi</li>
+<li>Tipo inizio stream</li>
+<li>DM / canale / Discord / Max / webhook</li>
+<li>Cronologia 7 giorni</li>
+</ul>
+<h2>Premium</h2>
+<p>Da <strong>20 Stars</strong> — mese, anno, lifetime o funzioni à la carte.</p>
+<ul>
+<li>Tutti i tipi di avviso</li>
+<li>Sync follow Twitch</li>
+<li>Opzioni avanzate, AI clip, cronologia più lunga</li>
+<li>Pubblicazione schedule e altri extra</li>
+</ul>
+<p>Piani e pagamento nel bot: <a href="https://t.me/twitchbot_game?start=site">Apri il bot →</a></p>
+""",
     },
 }
 
@@ -459,6 +607,8 @@ def wrap_doc_page(
     </a>
     <nav class="sw-nav-links" aria-label="Navigation">
       <a href="/?lang={esc(lang)}"{_nav_cls("home")}>{esc(u["nav_home"])}</a>
+      <a href="/features?lang={esc(lang)}"{_nav_cls("features")}>{esc(u["nav_features"])}</a>
+      <a href="/pricing?lang={esc(lang)}"{_nav_cls("pricing")}>{esc(u["nav_pricing"])}</a>
       <a href="/guide?lang={esc(lang)}"{_nav_cls("guide")}>{esc(u["nav_guide"])}</a>
       <a href="/webhook?lang={esc(lang)}"{_nav_cls("webhook")}>{esc(u["nav_webhook"])}</a>
       <span class="sw-lang">{switch}</span>
@@ -472,7 +622,18 @@ def wrap_doc_page(
   <article class="sw-doc">
 {content_html}
   </article>
-  <footer class="sw-footer">
+  {footer_html(lang)}
+</div>
+</body>
+</html>
+"""
+    return apply_html_asset_versions(page.encode("utf-8"))
+
+
+def footer_html(lang: str) -> str:
+    u = _ui(lang)
+    esc = html.escape
+    return f"""<footer class="sw-footer">
     <div>
       <h4>{esc(u["brand"])}</h4>
       <p>{esc(u["footer_blurb"])}</p>
@@ -486,6 +647,8 @@ def wrap_doc_page(
       <h4>{esc(u["footer_links"])}</h4>
       <ul>
         <li><a href="/?lang={esc(lang)}">{esc(u["footer_home"])}</a></li>
+        <li><a href="/features?lang={esc(lang)}">{esc(u["footer_features"])}</a></li>
+        <li><a href="/pricing?lang={esc(lang)}">{esc(u["footer_pricing"])}</a></li>
         <li><a href="/guide?lang={esc(lang)}">{esc(u["footer_guide"])}</a></li>
         <li><a href="/webhook?lang={esc(lang)}">{esc(u["footer_webhook"])}</a></li>
         <li><a href="/privacy?lang={esc(lang)}">{esc(u["footer_privacy"])}</a></li>
@@ -496,12 +659,35 @@ def wrap_doc_page(
       </ul>
     </div>
     <div class="sw-copy">{esc(u["footer_copy"])}</div>
-  </footer>
-</div>
-</body>
-</html>
-"""
-    return apply_html_asset_versions(page.encode("utf-8"))
+  </footer>"""
+
+
+def features_page(lang: str) -> bytes:
+    loc = normalize_lang(lang)
+    u = _ui(loc)
+    return wrap_doc_page(
+        lang=loc,
+        title=f'{u["brand"]} — {u["features_hero"]}',
+        hero=u["features_hero"],
+        lead=u["features_lead"],
+        content_html=u["features_body"].strip(),
+        nav_current="features",
+        path="/features",
+    )
+
+
+def pricing_page(lang: str) -> bytes:
+    loc = normalize_lang(lang)
+    u = _ui(loc)
+    return wrap_doc_page(
+        lang=loc,
+        title=f'{u["brand"]} — {u["pricing_hero"]}',
+        hero=u["pricing_hero"],
+        lead=u["pricing_lead"],
+        content_html=u["pricing_body"].strip(),
+        nav_current="pricing",
+        path="/pricing",
+    )
 
 
 def guide_page(lang: str) -> bytes | None:

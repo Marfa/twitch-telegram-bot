@@ -7,15 +7,13 @@
 
 Русский: [README.md](README.md)
 
-| Main menu | Alert types |
+| Alert types | Destination |
 |---|---|
-| ![Main menu](assets/gallery/ph-gallery-01-main-menu.png) | ![Alert types](assets/gallery/ph-gallery-02-alert-types.png) |
-| Custom template + placeholders |
-| ![Template](assets/gallery/ph-gallery-03-templates.png) |
-| Destination | Import from Twitch |
-| ![Destination](assets/gallery/ph-gallery-05-destinations.png) | ![Import from Twitch](assets/gallery/ph-gallery-06-import-twitch.png) |
+| ![Alert types](assets/gallery/ph-gallery-02-alert-types.png) | ![Destination](assets/gallery/ph-gallery-05-destinations.png) |
 | Schedule | History |
 | ![Schedule](assets/gallery/ph-gallery-07-schedule.png) | ![History](assets/gallery/ph-gallery-08-history.png) |
+| Settings | Chat |
+| ![Settings](assets/gallery/ph-gallery-09-settings.png) | ![Chat](assets/gallery/ph-gallery-10-chat.png) |
 
 | Feature | How it works |
 |---|---|
