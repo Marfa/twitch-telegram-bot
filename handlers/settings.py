@@ -604,7 +604,7 @@ async def open_other_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await context.bot.send_message(
         reply_chat_id(update),
         t("menu_other", lang),
-        reply_markup=other_menu_inline(lang),
+        reply_markup=other_menu_inline(lang, user_id=user_id),
     )
 
 
@@ -714,7 +714,7 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not beta_features.is_enabled(db, user_id, BETA_FEATURE_ID):
         await update.effective_message.reply_text(
             t("chat_beta_required", lang),
-            reply_markup=other_menu_inline(lang),
+            reply_markup=other_menu_inline(lang, user_id=user_id),
         )
         return
     open_url = chat_webapp_url(
@@ -724,7 +724,7 @@ async def open_stream_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not open_url:
         await update.effective_message.reply_text(
             t("chat_beta_required", lang),
-            reply_markup=other_menu_inline(lang),
+            reply_markup=other_menu_inline(lang, user_id=user_id),
         )
         return
     await sync_stream_chat_menu_button(context.bot, db, user_id)
@@ -1564,7 +1564,7 @@ async def complete_whisper_oauth(
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
-            reply_markup=other_menu_inline(lang),
+            reply_markup=other_menu_inline(lang, user_id=owner_id),
         )
         return
     refresh = info.get("refresh_token") or ""
@@ -1589,14 +1589,14 @@ async def complete_whisper_oauth(
         await application.bot.send_message(
             owner_id,
             t("whisper_alerts_failed", lang),
-            reply_markup=other_menu_inline(lang),
+            reply_markup=other_menu_inline(lang, user_id=owner_id),
         )
         return
     analytics.capture(owner_id, "whisper_alerts_toggled", {"enabled": True})
     await application.bot.send_message(
         owner_id,
         t("whisper_alerts_enabled", lang),
-        reply_markup=other_menu_inline(lang),
+        reply_markup=other_menu_inline(lang, user_id=owner_id),
     )
 
 async def notify_whisper_received(application: Application, event: Any) -> None:

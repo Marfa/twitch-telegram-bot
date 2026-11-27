@@ -29,7 +29,7 @@
 | 4 | Guide host | HTML `/guide` в `webapp/guide/` (Mintlify не делаем) |
 | 5 | `PUBLIC_BASE_URL` | ✅ `https://twitchbot.games` (VPS plaintext + local dotenvx) |
 | 6 | SEO | GSC/Вебмастер на `twitchbot.games` + 301 — **Phase C** |
-| 7 | PingZen / status | ✅ monitors → `https://twitchbot.games/health` (+ `/health/c/*`); status title `twitchbot.games` (slug `bot-themarfa` пока) |
+| 7 | PingZen / status | ✅ monitors → `https://twitchbot.games/health` (+ `/health/c/*`); status title `twitchbot.games` (slug `twitchbot`) |
 | 8 | DNS / CDN | ✅ Cloudflare full zone; **DNS-only (grey cloud)** на `@`/`www` → VPS `152.114.195.134` (для РФ); NS: `coco` / `jim`.ns.cloudflare.com |
 
 ---

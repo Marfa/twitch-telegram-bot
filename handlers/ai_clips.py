@@ -813,7 +813,9 @@ async def on_ai_clips_callback(
         except BadRequest:
             pass
         await context.bot.send_message(
-            chat, t("menu_other", lang), reply_markup=other_menu_inline(lang)
+            chat,
+            t("menu_other", lang),
+            reply_markup=other_menu_inline(lang, user_id=user_id),
         )
         return
 
@@ -923,7 +925,9 @@ async def on_ai_clips_callback(
         except BadRequest:
             pass
         await context.bot.send_message(
-            chat, t("menu_other", lang), reply_markup=other_menu_inline(lang)
+            chat,
+            t("menu_other", lang),
+            reply_markup=other_menu_inline(lang, user_id=user_id),
         )
         return
 

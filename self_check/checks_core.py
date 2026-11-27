@@ -3771,7 +3771,7 @@ def check_core() -> None:
             "https://t.me/themarfa",
             "https://t.me/themarfa_gaming",
             "https://blog.themarfa.name/",
-            "https://pingzen.dev/status/bot-themarfa",
+            "https://pingzen.dev/status/twitchbot",
         ]
         fb_pos = [fb.find(u) for u in fb_urls]
         assert all(p >= 0 for p in fb_pos), (loc, fb_pos)
@@ -3927,7 +3927,7 @@ def check_core() -> None:
         assert "<code>42</code>" in feedback
         assert "@immarfa" in feedback
         assert "t.me/themarfa_gaming" in feedback
-        assert "pingzen.dev/status/bot-themarfa" in feedback
+        assert "pingzen.dev/status/twitchbot" in feedback
         assert "igdb.com" in feedback.lower()
         from i18n import igdb_attribution
 

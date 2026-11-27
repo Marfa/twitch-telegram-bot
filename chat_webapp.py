@@ -144,25 +144,36 @@ def stream_chat_open_markup(lang: str, url: str, *, private: bool) -> InlineKeyb
     return InlineKeyboardMarkup(rows)
 
 
-def stream_chat_reply_button(lang: str) -> KeyboardButton:
+def stream_chat_reply_button(
+    lang: str, *, user_id: int | None = None
+) -> KeyboardButton:
     """Reply-keyboard Chat: WebApp opens Mini App with no bot message; else plain text."""
     from i18n import btn
 
     label = btn("chat", lang)
-    url = chat_webapp_url(lang=lang if lang in SUPPORTED_LOCALES else None)
+    url = chat_webapp_url(
+        lang=lang if lang in SUPPORTED_LOCALES else None,
+        user_id=user_id,
+    )
     if url:
         return KeyboardButton(label, web_app=WebAppInfo(url=url))
     return KeyboardButton(label)
 
 
 def stream_chat_menu_inline_button(
-    lang: str, *, fallback_callback: str = "new_sub_other:chat"
+    lang: str,
+    *,
+    user_id: int | None = None,
+    fallback_callback: str = "new_sub_other:chat",
 ) -> InlineKeyboardButton:
     """Inline Chat for menus: WebApp when URL known, else callback fallback."""
     from i18n import btn
 
     label = btn("chat", lang)
-    url = chat_webapp_url(lang=lang if lang in SUPPORTED_LOCALES else None)
+    url = chat_webapp_url(
+        lang=lang if lang in SUPPORTED_LOCALES else None,
+        user_id=user_id,
+    )
     if url:
         return InlineKeyboardButton(label, web_app=WebAppInfo(url=url))
     return InlineKeyboardButton(label, callback_data=fallback_callback)
@@ -175,6 +186,18 @@ def embed_parent_host() -> str:
     return host.lower()
 
 
+def _webapp_data_check_hash(pairs: dict[str, str], received_hash: str) -> bool:
+    """True if HMAC-SHA256(data-check-string, WebAppData-secret) matches hash."""
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
+    secret_key = hmac.new(
+        b"WebAppData", TELEGRAM_BOT_TOKEN.encode("utf-8"), hashlib.sha256
+    ).digest()
+    calculated = hmac.new(
+        secret_key, data_check_string.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(calculated, received_hash)
+
+
 def validate_webapp_init_data(init_data: str) -> dict[str, Any] | None:
     """Validate Telegram WebApp initData; returns parsed user dict or None."""
     raw = (init_data or "").strip()
@@ -184,17 +207,16 @@ def validate_webapp_init_data(init_data: str) -> dict[str, Any] | None:
     received_hash = pairs.pop("hash", None)
     if not received_hash:
         return None
-    # Newer Telegram clients also send signature; it is not part of the hash check.
-    pairs.pop("signature", None)
-    check_list = [f"{k}={v}" for k, v in sorted(pairs.items())]
-    data_check_string = "\n".join(check_list)
-    secret_key = hmac.new(
-        b"WebAppData", TELEGRAM_BOT_TOKEN.encode("utf-8"), hashlib.sha256
-    ).digest()
-    calculated = hmac.new(
-        secret_key, data_check_string.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-    if not hmac.compare_digest(calculated, received_hash):
+    # Bot API 8.0+ may include Ed25519 `signature`. Bot-token HMAC docs say
+    # "all received fields" (minus hash); third-party docs also drop signature.
+    # Clients disagree — accept either data-check-string.
+    signature = pairs.pop("signature", None)
+    hash_ok = _webapp_data_check_hash(pairs, received_hash)
+    if not hash_ok and signature is not None:
+        hash_ok = _webapp_data_check_hash(
+            {**pairs, "signature": signature}, received_hash
+        )
+    if not hash_ok:
         return None
     try:
         auth_date = int(pairs.get("auth_date") or "0")

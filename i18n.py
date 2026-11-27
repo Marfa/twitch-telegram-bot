@@ -435,7 +435,7 @@ def subscriptions_menu_inline(
     return InlineKeyboardMarkup(_pair_inline_rows(buttons))
 
 
-def other_menu(lang: str) -> ReplyKeyboardMarkup:
+def other_menu(lang: str, *, user_id: int | None = None) -> ReplyKeyboardMarkup:
     """Legacy reply keyboard (feature exits / old clients). Prefer other_menu_inline."""
     from chat_webapp import stream_chat_reply_button
 
@@ -451,7 +451,9 @@ def other_menu(lang: str) -> ReplyKeyboardMarkup:
         "back",
     ]
     buttons = [
-        stream_chat_reply_button(lang) if k == "chat" else KeyboardButton(btn(k, lang))
+        stream_chat_reply_button(lang, user_id=user_id)
+        if k == "chat"
+        else KeyboardButton(btn(k, lang))
         for k in keys
     ]
     return _reply_keyboard(_pair_reply_rows(buttons))
@@ -470,7 +472,9 @@ def _pair_inline_rows(
     return rows
 
 
-def other_menu_inline(lang: str) -> InlineKeyboardMarkup:
+def other_menu_inline(
+    lang: str, *, user_id: int | None = None
+) -> InlineKeyboardMarkup:
     """Other features as a message — does not replace the main reply keyboard."""
     from chat_webapp import stream_chat_menu_inline_button
 
@@ -485,7 +489,9 @@ def other_menu_inline(lang: str) -> InlineKeyboardMarkup:
         "channel_stats",
     ]
     buttons = [
-        stream_chat_menu_inline_button(lang, fallback_callback="menu_other:chat")
+        stream_chat_menu_inline_button(
+            lang, user_id=user_id, fallback_callback="menu_other:chat"
+        )
         if k == "chat"
         else InlineKeyboardButton(btn(k, lang), callback_data=f"menu_other:{k}")
         for k in keys
@@ -2768,7 +2774,9 @@ def alert_type_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
+def new_sub_other_keyboard(
+    lang: str, *, user_id: int | None = None
+) -> InlineKeyboardMarkup:
     """Other features from New subscription (§2.1); Back returns to alert type."""
     from chat_webapp import stream_chat_menu_inline_button
 
@@ -2783,7 +2791,7 @@ def new_sub_other_keyboard(lang: str) -> InlineKeyboardMarkup:
         "channel_stats",
     ]
     buttons = [
-        stream_chat_menu_inline_button(lang)
+        stream_chat_menu_inline_button(lang, user_id=user_id)
         if k == "chat"
         else InlineKeyboardButton(btn(k, lang), callback_data=f"new_sub_other:{k}")
         for k in keys

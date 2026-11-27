@@ -2124,7 +2124,43 @@ def check_handlers() -> None:
     assert validate_webapp_init_data("") is None
     assert validate_webapp_init_data("hash=deadbeef") is None
     import asyncio
+    import hashlib
+    import hmac as _hmac
+    import json as _json
+    import time as _time
+    from urllib.parse import urlencode as _urlencode
     from unittest.mock import AsyncMock, patch
+
+    _tok = "123456:TEST_TOKEN_FOR_SELF_CHECK"
+    with patch("chat_webapp.TELEGRAM_BOT_TOKEN", _tok):
+        _user = _json.dumps(
+            {"id": 7, "first_name": "T", "username": "t", "language_code": "ru"},
+            separators=(",", ":"),
+        )
+        _base = {
+            "auth_date": str(int(_time.time())),
+            "query_id": "AATest",
+            "user": _user,
+        }
+
+        def _sign(pairs: dict[str, str]) -> str:
+            check = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
+            secret = _hmac.new(b"WebAppData", _tok.encode(), hashlib.sha256).digest()
+            return _hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+
+        no_sig = dict(_base)
+        no_sig["hash"] = _sign(no_sig)
+        assert validate_webapp_init_data(_urlencode(no_sig))["id"] == 7
+
+        sig_out = dict(_base)
+        sig_out["hash"] = _sign(sig_out)
+        sig_out["signature"] = "dGVzdC1zaWc"
+        assert validate_webapp_init_data(_urlencode(sig_out))["id"] == 7
+
+        sig_in = dict(_base)
+        sig_in["signature"] = "dGVzdC1zaWc"
+        sig_in["hash"] = _sign(sig_in)
+        assert validate_webapp_init_data(_urlencode(sig_in))["id"] == 7
 
     with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"), patch(
         "chat_webapp.TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK"
@@ -2293,6 +2329,20 @@ def check_handlers() -> None:
         assert uid == 42 and loc == "ru"
         url = chat_webapp_url(lang="ru", user_id=42)
         assert "lang=ru" in url and "t=" in url
+        from chat_webapp import stream_chat_menu_inline_button
+
+        chat_btn = stream_chat_menu_inline_button("ru", user_id=42)
+        assert chat_btn.web_app is not None and "t=" in chat_btn.web_app.url
+        from i18n import other_menu_inline as _other_inline
+
+        other_panel = _other_inline("ru", user_id=42)
+        other_chat_btn = next(
+            b
+            for row in other_panel.inline_keyboard
+            for b in row
+            if getattr(b, "web_app", None)
+        )
+        assert "t=" in other_chat_btn.web_app.url
         alert_url = alert_chat_button_url(login="SomeStreamer", lang="ru", user_id=42)
         assert "login=somestreamer" in alert_url
         assert "open=1" in alert_url and "t=" in alert_url

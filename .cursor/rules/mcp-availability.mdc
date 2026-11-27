@@ -1,42 +1,58 @@
 ---
-description: Before work — verify project MCPs are available; ask user to connect if not
+description: Project MCP setup, new-device sync, availability gate; no plaintext tokens
 alwaysApply: true
 ---
 
-# MCP availability gate
-
-Перед началом работы (первый содержательный шаг агента в сессии / перед задачей, где MCP нужен) **проверить доступность MCP проекта**. Не продолжать работу, которая зависит от недоступного MCP, молча.
+# MCP availability + setup
 
 ## Expected MCP
 
-| Config | Namespace (typical) | Role |
-|--------|---------------------|------|
-| Project `.cursor/mcp.json` → `posthog` | `project-*-posthog` / PostHog tools | analytics, errors, insights |
-| Project `.cursor/mcp.json` → `viaduct` | `project-*-viaduct` / `c4_*` | C4 architecture model |
-| Project `.cursor/mcp.json` → `pingzen` | `project-*-pingzen` / PingZen tools | monitors, maintenance windows |
-| Project `.cursor/mcp.json` → `vps-db` | `project-*-vps-db` / `run_sql` | **live VPS Postgres SoR** (read+write via `vps-psql.sh`); Aiven only for DR reads |
-| Project `.cursor/mcp.json` → `aiven` | `project-*-aiven` / Aiven tools | cold DR / Aiven cloud (not live bot DB writes) |
-| User / docs → Polylane MCP (`https://mcp.polylane.com/mcp`) | Polylane tools | prod Issues, PR impact; **close source Issue** after a `polylane` PR merges/closes |
+| Config | Namespace (typical) | Auth | Role |
+|--------|---------------------|------|------|
+| Project `.cursor/mcp.json` → `posthog` | `project-*-posthog` | Cursor OAuth | analytics, errors, insights |
+| Project `.cursor/mcp.json` → `viaduct` | `project-*-viaduct` / `c4_*` | `VIADUCT_MCP_TOKEN` via sync | C4 architecture model |
+| Project `.cursor/mcp.json` → `pingzen` | `project-*-pingzen` | `PINGZEN_MCP_TOKEN` via sync | monitors, maintenance windows |
+| Project `.cursor/mcp.json` → `vps-db` | `project-*-vps-db` / `run_sql` | gitignored SSH key | **live VPS Postgres SoR** |
+| Project `.cursor/mcp.json` → `aiven` | `project-*-aiven` | Cursor OAuth | cold DR reads only |
+| Optional → Polylane | Polylane tools | Cursor OAuth / enable when needed | prod Issues, PR impact |
 
-Sources of truth: project `.cursor/mcp.json` (git) + secrets in encrypted `.env` (`VIADUCT_MCP_TOKEN`, `PINGZEN_MCP_TOKEN`) pushed into the OS env via `scripts/sync-cursor-mcp-env.sh` / `.ps1`. Personal MCP (Search Console, Cloudflare, …) may live in `~/.cursor/mcp.json` — not required for this bot. Polylane is not in project `mcp.json` by default — enable it when investigating Issues or finishing Polylane PRs ([`polylane-pr-merge.mdc`](polylane-pr-merge.mdc)).
+Sources of truth: project `.cursor/mcp.json` (git, **no secrets**) + encrypted `.env` (`VIADUCT_MCP_TOKEN`, `PINGZEN_MCP_TOKEN`) → OS env via [`scripts/sync-cursor-mcp-env.sh`](scripts/sync-cursor-mcp-env.sh) / `.ps1`. Personal MCP (Search Console, Cloudflare, …) may live in `~/.cursor/mcp.json` — not required for this bot.
 
-## How to check
+Remote HTTP MCP **cannot** use `envFile`. Cursor resolves `${env:NAME}` only from the GUI process environment (`launchctl setenv` on macOS).
 
-1. Inspect available dynamic MCP namespaces / `namespaceStatus` (or a cheap tool call per server).
-2. Treat as **unavailable**: missing namespace, `needsAuth`, `error`, `loading` that does not become ready, auth/connection failures on a cheap probe.
-3. Cheap probes (optional, one each): PostHog `project-get` / `user-get`; Viaduct `c4_whoami`; PingZen `list_monitors` or `ping`; **vps-db** `run_sql` with `SELECT 1` (source `vps` or `auto`).
+## New device / after token rotate (Viaduct + PingZen)
 
-Do **not** burn a long workflow before the check. One short availability pass is enough per session unless a later call fails with auth/connection.
+1. `git pull` (ciphertext `.env` arrives).
+2. Unlock Bitwarden / materialize `.env.keys` (dotenvx custody).
+3. `./scripts/sync-cursor-mcp-env.sh --install-login-agent` (Windows: `scripts\sync-cursor-mcp-env.ps1`).
+4. **Fully quit Cursor (Cmd+Q)** and reopen — Reload MCP is not enough for new env.
+5. Settings → MCP → **Enable / Approve** each project server once if it stays `disconnected` (must appear in approved project MCPs). PingZen especially: without approve it vanishes from the tool list after restart.
 
-## If unavailable
+Login LaunchAgent (`com.themarfa.cursor-mcp-env`) re-runs sync at login so Dock-launched Cursor sees tokens. Needs decrypt at login (`.env.keys` or unlocked vault).
 
-1. **Stop** the part of the work that needs that MCP (or stop entirely if the task cannot proceed without it).
-2. **Ask the user** to connect / enable / re-auth the missing MCP(s). Name them explicitly (e.g. «PostHog MCP», «Viaduct», «PingZen»).
-3. Give a short hint: Cursor Settings → MCP; for Viaduct/PingZen run `./scripts/sync-cursor-mcp-env.sh` (or `.ps1`) after dotenvx unlock, then **fully quit and reopen Cursor**; for **vps-db** SSH failures check gitignored `.ssh/artalk_vps` (`./scripts/vps-ssh-key-pull.sh` from Bitwarden), then reload MCP / retry.
-4. Resume only after the user confirms they are connected, or after a re-check shows the namespace is ready.
+## Do not (multi-device pain)
 
-## Do not
+- Paste `pz_…` / Viaduct tokens into `~/.cursor/mcp.json` or vendor «Add to Cursor» when that writes **plaintext** per machine.
+- Rely on PingZen **OAuth** in Cursor for this project — it hits **HTTP 405** on their metadata endpoint; use **API key Bearer** via `${env:PINGZEN_MCP_TOKEN}` instead.
+- Commit `.env.keys`, plaintext `.env`, or tokens in rules/chat.
+- Assume `dotenvx get KEY` reflects the file if `KEY` is already set in the shell/`launchctl` — sync script unsets before read; agents must do the same when verifying.
 
-- Assume MCP tools work without checking when starting work that uses them.
-- Invent fallbacks that bypass PingZen maintenance / PostHog / Viaduct rules just because MCP is down — ask the user instead.
-- Put MCP tokens into Git, rules, or chat (use `${env:…}` + dotenvx).
+## Availability gate (every session)
+
+Перед началом работы, где MCP нужен: проверить namespaces / `namespaceStatus` (или cheap probe).
+
+Treat as **unavailable**: missing namespace, `needsAuth`, `error`, `loading` that never becomes ready, auth failures.
+
+Cheap probes: PostHog `project-get`; Viaduct `c4_whoami`; PingZen `list_monitors`; **vps-db** `run_sql` `SELECT 1` (source `vps`/`auto`).
+
+### If unavailable
+
+1. Stop the part of the work that needs that MCP.
+2. Ask the user to connect / approve / re-auth — name the server.
+3. Hint: Settings → MCP; for Viaduct/PingZen → sync script + Cmd+Q; for **vps-db** → `.ssh/artalk_vps` (`./scripts/vps-ssh-key-pull.sh`) then reload MCP.
+4. Resume only after confirm or re-check shows ready.
+
+### Do not
+
+- Invent fallbacks that bypass PingZen maintenance / PostHog / Viaduct / vps-db rules because MCP is down.
+- Put MCP tokens into Git, rules, or chat.

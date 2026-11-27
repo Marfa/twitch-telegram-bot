@@ -2207,10 +2207,12 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
     db.upsert_user(_FREE_UID)
     db.set_user_locale(_FREE_UID, "ru")
 
-    with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"):
+    with patch("chat_webapp.PUBLIC_BASE_URL", "https://example.com"), patch(
+        "chat_webapp.TELEGRAM_BOT_TOKEN", "123456:TEST_TOKEN_FOR_SELF_CHECK"
+    ):
         from i18n import other_menu_inline
 
-        other = other_menu_inline("ru")
+        other = other_menu_inline("ru", user_id=_FREE_UID)
         assert markup_has_escape_hatch(other)
         other_chat = next(
             b
@@ -2219,8 +2221,9 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
             if b.text == btn("chat", "ru")
         )
         assert other_chat.web_app is not None
+        assert "t=" in other_chat.web_app.url
 
-        new_other = new_sub_other_keyboard("ru")
+        new_other = new_sub_other_keyboard("ru", user_id=_FREE_UID)
         assert markup_has_escape_hatch(new_other)
         new_chat = next(
             b
@@ -2230,6 +2233,7 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
         )
         assert new_chat.web_app is not None
         assert new_chat.callback_data is None
+        assert "t=" in new_chat.web_app.url
 
         application, bot = _app(db)
         cap = _BotCapture()
@@ -2240,7 +2244,10 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
         assert any(
             getattr(m, "inline_keyboard", None)
             and any(
-                getattr(b, "web_app", None) for row in m.inline_keyboard for b in row
+                getattr(b, "web_app", None)
+                and "t=" in (b.web_app.url or "")
+                for row in m.inline_keyboard
+                for b in row
             )
             for m in cap.markups
         )
@@ -2265,6 +2272,7 @@ async def _scenario_stream_chat_webapp_and_menu_commands(db) -> None:
             if b.text == btn("chat", "ru")
         )
         assert opened.web_app is not None
+        assert "t=" in opened.web_app.url
         cap.assert_turn("wizard_other_chat_webapp")
 
         from telegram.constants import ChatType

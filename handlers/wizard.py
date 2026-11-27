@@ -958,7 +958,7 @@ async def alert_type_open_other(
     await query.answer()
     lang = _user_lang(context, query.from_user.id)
     text = t("new_sub_other_prompt", lang)
-    markup = new_sub_other_keyboard(lang)
+    markup = new_sub_other_keyboard(lang, user_id=query.from_user.id)
     parse_mode = ParseMode.HTML if "<b>" in text else None
     await query.edit_message_text(text, reply_markup=markup, parse_mode=parse_mode)
     return _wz()["ALERT_TYPE"]
@@ -1010,7 +1010,7 @@ async def receive_new_sub_other(
         "game_info",
         "channel_stats",
     ):
-        markup = new_sub_other_keyboard(lang)
+        markup = new_sub_other_keyboard(lang, user_id=query.from_user.id)
         await query.edit_message_reply_markup(reply_markup=markup)
         return _wz()["ALERT_TYPE"]
     await query.edit_message_text("✓")
