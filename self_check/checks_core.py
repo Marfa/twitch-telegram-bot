@@ -2545,7 +2545,8 @@ def check_core() -> None:
         landing = urllib.request.urlopen(
             f"http://127.0.0.1:{port}/", timeout=2
         ).read()
-        assert b"data-i18n=" in landing and b"/site/css/main.css" in landing
+        assert b"<title>" in landing and b"t.me/twitchbot_game" in landing
+        assert b"/site/images/logo-square.png?v=" in landing
         assert b"Sitemap:" in urllib.request.urlopen(
             f"http://127.0.0.1:{port}/robots.txt", timeout=2
         ).read()
