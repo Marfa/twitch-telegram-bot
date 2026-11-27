@@ -91,14 +91,7 @@ DEPLOY_MODE="$(classify_mode)"
 echo "deploy: mode=${DEPLOY_MODE} prev=${PREV_SHA:-none} new=${NEW_SHA}"
 
 wait_bot_health() {
-  local i
-  for i in $(seq 1 30); do
-    if curl -fsS "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 2
-  done
-  return 1
+  bash scripts/wait-bot-health.sh
 }
 
 sync_site_into_bot() {
@@ -141,13 +134,26 @@ if [[ "$DEPLOY_MODE" == "site" ]]; then
   echo "deploy: site-only sync failed; falling back to full recreate" >&2
 fi
 
-# Dump 17→18 / 18→19 before compose up (each script no-ops once already on target).
-if [[ -f scripts/pg-upgrade-to-18.sh ]]; then
-  bash scripts/pg-upgrade-to-18.sh
-fi
-if [[ -f scripts/pg-upgrade-to-19.sh ]]; then
-  bash scripts/pg-upgrade-to-19.sh
-fi
+# Dump 17→18 / 18→19 before compose up. Each script's --check-needed says whether
+# an upgrade is still pending; a pending one runs inside the one maintenance
+# window, which stops the bot for the dump and recreates the previous bot when the
+# script exits nonzero. A database already on the target major opens no window, so
+# a steady-state deploy does not restart the bot for nothing.
+run_pg_upgrade() {
+  local script="$1"
+  [[ -f "$script" ]] || return 0
+  if ! bash "$script" --check-needed; then
+    echo "deploy: $script: database is already on the target major; no window"
+    return 0
+  fi
+  if [[ ! -f scripts/bot-maintenance.sh ]]; then
+    echo "ERROR: $script needs scripts/bot-maintenance.sh; refusing to stop the bot without a maintenance window" >&2
+    return 1
+  fi
+  bash scripts/bot-maintenance.sh -- bash "$script"
+}
+run_pg_upgrade scripts/pg-upgrade-to-18.sh
+run_pg_upgrade scripts/pg-upgrade-to-19.sh
 
 # Build-first: image is compiled while the old bot container still runs;
 # then only bot is recreated (~5–15s gap vs stopping during the whole build).

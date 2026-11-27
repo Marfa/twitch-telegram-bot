@@ -231,6 +231,9 @@ def main() -> None:
     from .checks_helix_budget import run as check_helix_budget
 
     check_helix_budget()
+    from .checks_deploy_maintenance import run as check_deploy_maintenance
+
+    check_deploy_maintenance()
     print("ok")
 
 
