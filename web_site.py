@@ -1,4 +1,4 @@
-"""Public marketing site (Dazzle landing) + shared chrome for /guide and /webhook."""
+"""Public marketing site (Stillwater landing) + shared chrome for /guide and /webhook."""
 
 from __future__ import annotations
 
@@ -432,104 +432,72 @@ def wrap_doc_page(
 ) -> bytes:
     u = _ui(lang)
     esc = html.escape
-    nav = {
-        "home": "",
-        "guide": "",
-        "webhook": "",
-    }
-    if nav_current in nav:
-        nav[nav_current] = ' class="current"'
+
+    def _nav_cls(key: str) -> str:
+        return ' class="is-active"' if nav_current == key else ""
+
     switch = _lang_switch(path, lang)
     page = f"""<!DOCTYPE html>
-<html class="no-js" lang="{esc(lang)}">
+<html lang="{esc(lang)}">
 <head>
 <meta charset="utf-8">
 <title>{esc(title)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="{esc(lead)}">
-<link rel="stylesheet" href="/site/css/base.css">
-<link rel="stylesheet" href="/site/css/vendor.css">
-<link rel="stylesheet" href="/site/css/main.css">
-<link rel="stylesheet" href="/site/css/site.css?v=20261110b">
-<script src="/site/js/modernizr.js"></script>
-<script src="/site/js/pace.min.js"></script>
-<link rel="shortcut icon" href="/site/favicon.ico" type="image/x-icon">
+<link rel="icon" href="/site/images/logo-square.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/site/css/stillwater.css">
 </head>
-<body id="top" class="page-docs">
-<header id="header" class="row">
-  <div class="header-logo"><a href="/?lang={esc(lang)}">{esc(u["brand"])}</a></div>
-  <nav id="header-nav-wrap">
-    <ul class="header-main-nav">
-      <li{nav["home"]}><a href="/?lang={esc(lang)}">{esc(u["nav_home"])}</a></li>
-      <li{nav["guide"]}><a href="/guide?lang={esc(lang)}">{esc(u["nav_guide"])}</a></li>
-      <li{nav["webhook"]}><a href="/webhook?lang={esc(lang)}">{esc(u["nav_webhook"])}</a></li>
-    </ul>
-    {switch}
-    <a href="{esc(BOT_TELEGRAM_FROM_SITE)}" class="button button-primary cta">{esc(u["nav_start"])}</a>
-  </nav>
-  <a class="header-menu-toggle" href="#"><span>Menu</span></a>
-</header>
-<section class="doc-hero">
-  <div class="row">
-    <div class="col-twelve">
-      <h1>{esc(hero)}</h1>
-      <p>{esc(lead)}</p>
-    </div>
-  </div>
-</section>
-<section class="doc-wrap">
-  <div class="row">
-    <div class="col-twelve">
-      <article class="doc-content">
+<body class="sw" id="top">
+<div class="sw-shell">
+  <header class="sw-nav">
+    <a class="sw-logo" href="/?lang={esc(lang)}">
+      <img src="/site/images/logo-square.png" alt="" width="28" height="28">
+      {esc(u["brand"])}
+    </a>
+    <nav class="sw-nav-links" aria-label="Navigation">
+      <a href="/?lang={esc(lang)}"{_nav_cls("home")}>{esc(u["nav_home"])}</a>
+      <a href="/guide?lang={esc(lang)}"{_nav_cls("guide")}>{esc(u["nav_guide"])}</a>
+      <a href="/webhook?lang={esc(lang)}"{_nav_cls("webhook")}>{esc(u["nav_webhook"])}</a>
+      <span class="sw-lang">{switch}</span>
+      <a class="sw-cta sw-cta-solid" href="{esc(BOT_TELEGRAM_FROM_SITE)}">{esc(u["nav_start"])}</a>
+    </nav>
+  </header>
+  <section class="sw-hero">
+    <h1>{esc(hero)}</h1>
+    <p>{esc(lead)}</p>
+  </section>
+  <article class="sw-doc">
 {content_html}
-      </article>
+  </article>
+  <footer class="sw-footer">
+    <div>
+      <h4>{esc(u["brand"])}</h4>
+      <p>{esc(u["footer_blurb"])}</p>
     </div>
-  </div>
-</section>
-<footer>
-  <div class="footer-main">
-    <div class="row">
-      <div class="col-four tab-full footer-info">
-        <div class="footer-logo"></div>
-        <p>{esc(u["footer_blurb"])}</p>
-      </div>
-      <div class="col-four tab-full footer-contact">
-        <h4>{esc(u["footer_contact"])}</h4>
-        <p><a href="https://t.me/immarfa">@immarfa</a><br>
-        <a href="mailto:biz@themarfa.name">biz@themarfa.name</a></p>
-      </div>
-      <div class="col-four tab-full footer-site-links">
-        <h4>{esc(u["footer_links"])}</h4>
-        <ul class="list-links">
-          <li><a href="/?lang={esc(lang)}">{esc(u["footer_home"])}</a></li>
-          <li><a href="/guide?lang={esc(lang)}">{esc(u["footer_guide"])}</a></li>
-          <li><a href="/webhook?lang={esc(lang)}">{esc(u["footer_webhook"])}</a></li>
-          <li><a href="/privacy?lang={esc(lang)}">{esc(u["footer_privacy"])}</a></li>
-          <li><a href="/placeholders?lang={esc(lang)}">{esc(u["footer_placeholders"])}</a></li>
-          <li><a href="https://github.com/Marfa/twitch-telegram-bot">{esc(u["footer_github"])}</a></li>
-          <li><a href="https://www.donationalerts.com/r/themarfa">{esc(u["footer_donate"])}</a></li>
-          <li><a href="https://nowpayments.io/donation/themarfa">{esc(u["footer_crypto"])}</a></li>
-        </ul>
-      </div>
+    <div>
+      <h4>{esc(u["footer_contact"])}</h4>
+      <p><a href="https://t.me/immarfa">@immarfa</a><br>
+      <a href="mailto:biz@themarfa.name">biz@themarfa.name</a></p>
     </div>
-  </div>
-  <div class="footer-bottom">
-    <div class="row">
-      <div class="col-twelve">
-        <div class="copyright">
-          <span>{esc(u["footer_copy"])}</span>
-          <span>{esc(u["footer_design"])} <a href="https://www.styleshout.com/">styleshout</a> (Dazzle)</span>
-        </div>
-        <div id="go-top"><a class="smoothscroll" title="Back to Top" href="#top"><i class="icon-arrow-up"></i></a></div>
-      </div>
+    <div>
+      <h4>{esc(u["footer_links"])}</h4>
+      <ul>
+        <li><a href="/?lang={esc(lang)}">{esc(u["footer_home"])}</a></li>
+        <li><a href="/guide?lang={esc(lang)}">{esc(u["footer_guide"])}</a></li>
+        <li><a href="/webhook?lang={esc(lang)}">{esc(u["footer_webhook"])}</a></li>
+        <li><a href="/privacy?lang={esc(lang)}">{esc(u["footer_privacy"])}</a></li>
+        <li><a href="/placeholders?lang={esc(lang)}">{esc(u["footer_placeholders"])}</a></li>
+        <li><a href="https://github.com/Marfa/twitch-telegram-bot">{esc(u["footer_github"])}</a></li>
+        <li><a href="https://www.donationalerts.com/r/themarfa">{esc(u["footer_donate"])}</a></li>
+        <li><a href="https://nowpayments.io/donation/themarfa">{esc(u["footer_crypto"])}</a></li>
+      </ul>
     </div>
-  </div>
-</footer>
-<div id="preloader"><div id="loader"></div></div>
-<script src="/site/js/jquery-2.1.3.min.js"></script>
-<script src="/site/js/plugins.js"></script>
-<script src="/site/js/main.js"></script>
-<script src="/site/js/i18n.js"></script>
+    <div class="sw-copy">{esc(u["footer_copy"])}</div>
+  </footer>
+</div>
 </body>
 </html>
 """
