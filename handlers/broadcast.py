@@ -554,6 +554,8 @@ def _cancel_broadcast_job(job_queue, broadcast_id: int) -> None:
 
 def _cancel_broadcast_jobs(job_queue, db: Database, broadcast_id: int) -> None:
     _cancel_broadcast_job(job_queue, broadcast_id)
+    for job in job_queue.get_jobs_by_name(f"broadcast_{broadcast_id}_empty"):
+        job.schedule_removal()
     item = db.get_scheduled_broadcast(broadcast_id)
     if not item:
         return
@@ -572,9 +574,20 @@ def _schedule_broadcast_waves(job_queue, db: Database, broadcast_id: int) -> Non
     item = db.get_scheduled_broadcast(broadcast_id)
     if not item:
         return
+    waves = _broadcast_waves(db, item)
+    if not waves:
+        # No audience → finalize via job tick (needs context for admin report).
+        _broadcast_run_once(
+            job_queue,
+            _run_scheduled_broadcast,
+            when=0.0,
+            data={"broadcast_id": broadcast_id, "finalize_empty": True},
+            name=f"broadcast_{broadcast_id}_empty",
+        )
+        return
     now = datetime.now(timezone.utc)
     sent = db.get_broadcast_sent_offsets(broadcast_id)
-    for offset, due_utc in _broadcast_waves(db, item):
+    for offset, due_utc in waves:
         if offset in sent:
             continue
         when = max(0.0, (due_utc - now).total_seconds())
@@ -664,6 +677,74 @@ def _release_broadcast_wave_send(
     sending = bot_data.get("sending_broadcast_waves")
     if isinstance(sending, set):
         sending.discard((broadcast_id, int(utc_offset)))
+
+
+async def _broadcast_wave_task(
+    context: ContextTypes.DEFAULT_TYPE, item, utc_offset: int
+) -> None:
+    bot_data = context.application.bot_data
+    try:
+        await _run_broadcast_offset_wave(context, item, utc_offset)
+    finally:
+        _release_broadcast_wave_send(bot_data, item.id, utc_offset)
+
+
+async def _broadcast_full_task(
+    context: ContextTypes.DEFAULT_TYPE, broadcast_id: int
+) -> None:
+    bot_data = context.application.bot_data
+    db: Database = bot_data["db"]
+    try:
+        item = db.get_scheduled_broadcast(broadcast_id)
+        if not item:
+            return
+        source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
+        recipients = _parse_broadcast_recipient_ids(item.recipient_ids or "")
+        sent, _failed, total = await _send_admin_broadcast(
+            context,
+            item.msg_type,
+            item.text,
+            broadcast_id=broadcast_id,
+            source_lang=source_lang,
+            recipient_ids=recipients or None,
+        )
+        db.mark_scheduled_broadcast_sent(broadcast_id)
+        await _report_broadcast_done(
+            context,
+            item.created_by,
+            sent=sent,
+            total=total,
+        )
+    finally:
+        _release_broadcast_send(bot_data, broadcast_id)
+
+
+def _kick_broadcast_wave(
+    context: ContextTypes.DEFAULT_TYPE, item, utc_offset: int
+) -> bool:
+    """Claim a TZ wave and send it off the JobQueue tick (create_task)."""
+    bot_data = context.application.bot_data
+    if not _claim_broadcast_wave_send(bot_data, item.id, int(utc_offset)):
+        return False
+    context.application.create_task(
+        _broadcast_wave_task(context, item, int(utc_offset)),
+        name=_broadcast_offset_job_name(item.id, int(utc_offset)),
+    )
+    return True
+
+
+def _kick_broadcast_full(
+    context: ContextTypes.DEFAULT_TYPE, broadcast_id: int
+) -> bool:
+    """Claim a full-blast send and run it off the JobQueue tick."""
+    bot_data = context.application.bot_data
+    if not _claim_broadcast_send(bot_data, int(broadcast_id)):
+        return False
+    context.application.create_task(
+        _broadcast_full_task(context, int(broadcast_id)),
+        name=_broadcast_job_name(int(broadcast_id)),
+    )
+    return True
 
 
 async def _send_admin_broadcast(
@@ -911,10 +992,6 @@ async def on_broadcast_feedback(
     query = update.callback_query
     if not query:
         return
-    try:
-        await query.answer()
-    except BadRequest:
-        pass
     if not query.data:
         return
     parts = query.data.split(":")
@@ -931,8 +1008,22 @@ async def on_broadcast_feedback(
     current = db.get_broadcast_feedback_vote(broadcast_id, user_id)
     if current == vote:
         db.clear_broadcast_feedback(broadcast_id, user_id)
-    else:
-        db.set_broadcast_feedback(broadcast_id, user_id, vote)
+    elif not db.set_broadcast_feedback(broadcast_id, user_id, vote):
+        # Row purged after retention; Telegram still shows the old keyboard.
+        try:
+            await query.answer(t("broadcast_feedback_expired", lang), show_alert=True)
+        except BadRequest:
+            pass
+        if query.message:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except (BadRequest, Forbidden):
+                pass
+        return
+    try:
+        await query.answer()
+    except BadRequest:
+        pass
     up_count, down_count = db.get_broadcast_feedback_counts(broadcast_id)
     markup = broadcast_feedback_keyboard(broadcast_id, up_count, down_count, lang)
     if query.message:
@@ -1157,49 +1248,26 @@ async def admin_schedule_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def _run_scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """JobQueue entry: kick send onto create_task so the executor stays free."""
     broadcast_id = int(context.job.data["broadcast_id"])
-    utc_offset = context.job.data.get("utc_offset")
     bot_data = context.application.bot_data
     db: Database = bot_data["db"]
 
-    if utc_offset is None:
-        if not _claim_broadcast_send(bot_data, broadcast_id):
-            return
-        try:
-            item = db.get_scheduled_broadcast(broadcast_id)
-            if not item:
-                return
-            source_lang = db.get_user_locale(item.created_by) or DEFAULT_LOCALE
-            recipients = _parse_broadcast_recipient_ids(item.recipient_ids or "")
-            sent, _failed, total = await _send_admin_broadcast(
-                context,
-                item.msg_type,
-                item.text,
-                broadcast_id=broadcast_id,
-                source_lang=source_lang,
-                recipient_ids=recipients or None,
-            )
-            db.mark_scheduled_broadcast_sent(broadcast_id)
-            await _report_broadcast_done(
-                context,
-                item.created_by,
-                sent=sent,
-                total=total,
-            )
-        finally:
-            _release_broadcast_send(bot_data, broadcast_id)
+    if context.job.data.get("finalize_empty"):
+        item = db.get_scheduled_broadcast(broadcast_id)
+        if item and not _broadcast_waves(db, item):
+            await _maybe_finish_broadcast(context, item)
         return
 
-    offset = int(utc_offset)
-    if not _claim_broadcast_wave_send(bot_data, broadcast_id, offset):
+    utc_offset = context.job.data.get("utc_offset")
+    if utc_offset is None:
+        _kick_broadcast_full(context, broadcast_id)
         return
-    try:
-        item = db.get_scheduled_broadcast(broadcast_id)
-        if not item:
-            return
-        await _run_broadcast_offset_wave(context, item, offset)
-    finally:
-        _release_broadcast_wave_send(bot_data, broadcast_id, offset)
+
+    item = db.get_scheduled_broadcast(broadcast_id)
+    if not item:
+        return
+    _kick_broadcast_wave(context, item, int(utc_offset))
 
 
 async def admin_sent_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1631,6 +1699,11 @@ async def admin_sb_schedule_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Poll due TZ waves and kick each as a background task (non-blocking).
+
+    Awaiting the DM loop here starved newer broadcasts behind an old backlog
+    and blocked the whole JobQueue (max_instances=1) while /health stayed green.
+    """
     db: Database = context.application.bot_data["db"]
     bot_data = context.application.bot_data
     now = datetime.now(timezone.utc)
@@ -1640,16 +1713,15 @@ async def process_scheduled_broadcasts(context: ContextTypes.DEFAULT_TYPE) -> No
         # separate set — without this skip, due TZ waves double-DM the audience.
         if item.id in sending_full:
             continue
+        waves = _broadcast_waves(db, item)
+        if not waves:
+            await _maybe_finish_broadcast(context, item)
+            continue
         sent_offsets = db.get_broadcast_sent_offsets(item.id)
-        for offset, due_utc in _broadcast_waves(db, item):
+        for offset, due_utc in waves:
             if offset in sent_offsets or due_utc > now:
                 continue
-            if not _claim_broadcast_wave_send(bot_data, item.id, offset):
-                continue
-            try:
-                await _run_broadcast_offset_wave(context, item, offset)
-            finally:
-                _release_broadcast_wave_send(bot_data, item.id, offset)
+            _kick_broadcast_wave(context, item, offset)
 
 
 async def _restore_broadcast_jobs(app: Application) -> None:

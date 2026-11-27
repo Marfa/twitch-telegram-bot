@@ -2960,6 +2960,7 @@ def check_handlers() -> None:
     _check_broadcast_feedback_refresh()
     _check_broadcast_feedback_refresh_transient_failures()
     _check_broadcast_feedback_refresh_skips_undeliverable()
+    _check_broadcast_poll_kicks_due_waves_nonblocking()
     _check_posthog_inbox_poll_network_blip()
     _check_polylane_new_issue_poll()
     _check_posthog_admin_notify_transient_failure()
@@ -3327,6 +3328,75 @@ def _check_broadcast_feedback_refresh_transient_failures() -> None:
     assert failed == deliveries[1:]
     assert _edited(flaky_bot) == [1, 2, 3, 4, 5, 6, 2, 4, 5]
     assert 16 not in broadcast._feedback_refresh_pending
+
+
+def _check_broadcast_poll_kicks_due_waves_nonblocking() -> None:
+    """Due waves are kicked as create_task; an in-flight older wave does not block a newer one."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    import handlers.broadcast as broadcast
+
+    now = datetime.now(timezone.utc)
+    older = SimpleNamespace(
+        id=101,
+        msg_type="other",
+        text="old",
+        scheduled_at=(now - timedelta(hours=2)).isoformat(),
+        created_by=1,
+        recipient_ids="1",
+        sent_utc_offsets="",
+        sent_count=0,
+    )
+    newer = SimpleNamespace(
+        id=102,
+        msg_type="other",
+        text="new",
+        scheduled_at=(now - timedelta(minutes=5)).isoformat(),
+        created_by=1,
+        recipient_ids="2",
+        sent_utc_offsets="",
+        sent_count=0,
+    )
+    kicked: list[tuple[int, int]] = []
+
+    class _Db:
+        def get_unsent_scheduled_broadcasts(self):
+            return [older, newer]
+
+        def get_broadcast_sent_offsets(self, broadcast_id):
+            return set()
+
+    def _waves(db, item):
+        # Both due in the past; distinct offsets so claims do not collide.
+        off = 180 if item.id == 101 else 120
+        return [(off, now - timedelta(minutes=1))]
+
+    def _kick(context, item, utc_offset):
+        kicked.append((item.id, int(utc_offset)))
+        return True
+
+    bot_data = {
+        "db": _Db(),
+        "sending_broadcasts": set(),
+        # Older wave already claimed/in-flight — kick helper would no-op if we
+        # used real claims; we stub _kick and still expect both ids requested.
+        "sending_broadcast_waves": {(101, 180)},
+    }
+    tasks: list[str] = []
+    app = SimpleNamespace(
+        bot_data=bot_data,
+        create_task=lambda coro, **kw: tasks.append(kw.get("name") or ""),
+    )
+    ctx = SimpleNamespace(application=app, bot=None)
+    with (
+        patch.object(broadcast, "_broadcast_waves", _waves),
+        patch.object(broadcast, "_kick_broadcast_wave", _kick),
+    ):
+        asyncio.run(broadcast.process_scheduled_broadcasts(ctx))
+    assert kicked == [(101, 180), (102, 120)], kicked
 
 
 def _check_broadcast_feedback_refresh_skips_undeliverable() -> None:

@@ -793,6 +793,19 @@ def check_db_premium() -> None:
             "async def ", 1
         )[0]
         assert "sending_broadcasts" in _poll or "sending_full" in _poll
+        # Long DM loops must not await on the JobQueue tick (starves new broadcasts).
+        assert "def _kick_broadcast_wave" in bc
+        assert "_kick_broadcast_wave" in _poll
+        assert "await _run_broadcast_offset_wave" not in _poll
+        assert "await _send_admin_broadcast" not in _poll
+        _run_job = bc.split("async def _run_scheduled_broadcast", 1)[1].split(
+            "async def ", 1
+        )[0]
+        assert "_kick_broadcast_wave" in _run_job
+        assert "_kick_broadcast_full" in _run_job
+        assert "await _run_broadcast_offset_wave" not in _run_job
+        assert "await _send_admin_broadcast" not in _run_job
+        assert "finalize_empty" in _run_job or "finalize_empty" in _poll
         _send = bc.split("async def _send_admin_broadcast", 1)[1].split(
             "async def ", 1
         )[0]
@@ -1300,13 +1313,16 @@ def check_db_premium() -> None:
         assert any(b.id == bid2 for b in sent_items)
         up, down = db.get_broadcast_feedback_counts(bid2)
         assert up == 0 and down == 0
-        db.set_broadcast_feedback(bid2, 1, 1)
-        db.set_broadcast_feedback(bid2, 2, -1)
+        assert db.set_broadcast_feedback(bid2, 1, 1) is True
+        assert db.set_broadcast_feedback(bid2, 2, -1) is True
         assert db.get_broadcast_feedback_vote(bid2, 1) == 1
         assert db.get_broadcast_feedback_counts(bid2) == (1, 1)
         db.clear_broadcast_feedback(bid2, 1)
         assert db.get_broadcast_feedback_vote(bid2, 1) is None
         assert db.get_broadcast_feedback_counts(bid2) == (0, 1)
+        # Purged / missing broadcast: no FK crash; write is a no-op.
+        assert db.set_broadcast_feedback(9_999_999, 1, 1) is False
+        assert db.get_broadcast_feedback_vote(9_999_999, 1) is None
         db.add_broadcast_delivery(bid2, 1, 100)
         assert db.get_broadcast_deliveries(bid2) == [(1, 100)]
         with db._conn() as conn:
@@ -1353,6 +1369,49 @@ def check_db_premium() -> None:
         assert db.get_broadcast_sent_offsets(bid_tz) == set()
         assert db.get_broadcast_sent_count(bid_tz) == 0
         assert db.delete_scheduled_broadcast(bid_tz)
+
+        # Empty audience → waves=[] → poll finalizes (mark sent) instead of sticking.
+        import asyncio
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        import handlers.broadcast as broadcast_mod
+
+        db.upsert_user(909001)
+        db.set_bot_blocked(909001, True)
+        bid_empty = db.add_scheduled_broadcast(
+            "other",
+            "nobody",
+            "2020-01-01T00:00:00+00:00",
+            1,
+            recipient_ids="909001",
+        )
+        item_empty = db.get_scheduled_broadcast(bid_empty)
+        assert item_empty is not None
+        assert _broadcast_waves(db, item_empty) == []
+        app_empty = SimpleNamespace(
+            bot_data={
+                "db": db,
+                "sending_broadcasts": set(),
+                "sending_broadcast_waves": set(),
+            },
+            create_task=lambda *a, **k: None,
+        )
+        ctx_empty = SimpleNamespace(application=app_empty, bot=AsyncMock())
+        reported: list[tuple[int, int, int]] = []
+
+        async def _report(ctx, created_by, *, sent, total):
+            reported.append((created_by, sent, total))
+
+        with patch.object(broadcast_mod, "_report_broadcast_done", _report):
+            asyncio.run(broadcast_mod.process_scheduled_broadcasts(ctx_empty))
+        assert reported == [(1, 0, 0)], reported
+        assert db.get_scheduled_broadcast(bid_empty) is None
+        assert any(
+            b.id == bid_empty
+            for b in db.get_sent_broadcasts(retention_days=3650)
+        )
+
         assert not db.update_subscription(999, 1, message_template="x")
 
     import premium as prem
