@@ -261,4 +261,30 @@ def check_youtube_live_probe_quota() -> None:
         assert interval >= per_channel - 1
         spent_per_day = 2 * ms._YOUTUBE_SEARCH_WINDOW_SEC / interval
         assert spent_per_day <= ms.YOUTUBE_SEARCH_CALLS_PER_DAY
+
+        # A channel only the multistream gate checks is a one-shot probe: it
+        # must not stretch the polled channel's interval and hide a short live.
+        _reset_youtube_probe()
+        now = time.monotonic()
+        ms._youtube_live_seen["UC1"] = now
+        with patch(
+            "multistream._SESSION", _FakeYouTubeSession([(200, {"items": []})])
+        ):
+            assert ms._youtube_live_video_id("UC2", fresh=True) is None
+        assert "UC2" not in ms._youtube_live_seen
+        one_channel = ms.youtube_live_probe_interval(now)
+        two_channel = (
+            ms._YOUTUBE_SEARCH_WINDOW_SEC * 2 / ms.YOUTUBE_SEARCH_CALLS_PER_DAY
+        )
+        assert one_channel < two_channel, (
+            f"a gate-only channel lengthened the poll interval: {one_channel}"
+        )
+
+        # A 429 waits past the Pacific-midnight quota reset, not a short cap
+        # that retries while the provider still answers 429.
+        _reset_youtube_probe()
+        reset_wait = ms._seconds_until_youtube_quota_reset()
+        assert 0 < reset_wait <= ms._YOUTUBE_SEARCH_WINDOW_SEC + 300
+        ms.youtube_search_budget.got_429()
+        assert ms.youtube_search_budget.wait_seconds(1) >= reset_wait - 1
         _reset_youtube_probe()

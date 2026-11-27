@@ -4600,6 +4600,20 @@ def _check_screen_registry() -> None:
     assert sticky_screen_keys() == frozenset({"main_menu"}), (
         f"only main_menu is sticky, declared: {sorted(sticky_screen_keys())}"
     )
+
+    # Demo mode posts main_menu(demo_active=True); it is the sticky main menu,
+    # not a submenu to coerce.
+    for loc in SUPPORTED_LOCALES:
+        demo = i18n.main_menu(loc, demo_active=True)
+        assert screen_key_for_markup(demo, sticky_only=True) == "main_menu", (
+            f"demo main_menu for {loc} must be the sticky main menu"
+        )
+        coerced_demo = _coerce_main_reply_keyboard(
+            demo, chat_id=7, user_id=7, lang=loc
+        )
+        assert coerced_demo.keyboard == demo.keyboard, (
+            f"demo main_menu for {loc} must not be coerced"
+        )
     for spec in SCREEN_REGISTRY.values():
         if spec.sticky:
             assert spec.kind == "reply", (

@@ -448,9 +448,21 @@ def _parse_youtube(parsed, raw: str) -> MultistreamChannel | None:
 _YOUTUBE_SEARCH_WINDOW_SEC = 86400.0
 _YOUTUBE_LIVE_PROBE_MIN_INTERVAL_SEC = 600.0
 # A 429 means the project quota is spent: retry with a growing pause and keep
-# the last known state meanwhile.
+# the last known state meanwhile. The project quota resets at midnight Pacific,
+# which is 07:00 or 08:00 UTC, so a pause shorter than that only spends another
+# denied call; 08:00 UTC is at or after the reset all year.
 _YOUTUBE_QUOTA_PAUSE_SEC = 900.0
-_YOUTUBE_QUOTA_PAUSE_MAX_SEC = 21600.0
+_YOUTUBE_QUOTA_RESET_UTC_HOUR = 8
+_YOUTUBE_QUOTA_RESET_MARGIN_SEC = 300.0
+
+
+def _seconds_until_youtube_quota_reset() -> float:
+    """Seconds until the next Pacific-midnight quota reset, plus a margin."""
+    now = time.time()
+    wait = _YOUTUBE_QUOTA_RESET_UTC_HOUR * 3600.0 - now % 86400.0
+    if wait <= 0:
+        wait += 86400.0
+    return wait + _YOUTUBE_QUOTA_RESET_MARGIN_SEC
 
 
 class YouTubeSearchQuotaExhausted(RuntimeError):
@@ -502,9 +514,9 @@ class YouTubeSearchBudget:
 
     def got_429(self) -> None:
         self._consecutive_429 += 1
-        pause = min(
-            _YOUTUBE_QUOTA_PAUSE_MAX_SEC,
+        pause = max(
             _YOUTUBE_QUOTA_PAUSE_SEC * (2 ** (self._consecutive_429 - 1)),
+            _seconds_until_youtube_quota_reset(),
         )
         self._pause_until = time.monotonic() + pause
         logger.warning(
@@ -515,12 +527,15 @@ class YouTubeSearchBudget:
 youtube_search_budget = YouTubeSearchBudget()
 # channel id -> (monotonic probe time, live video id, or None when offline)
 youtube_live_cache: dict[str, tuple[float, str | None]] = {}
-# channel id -> monotonic time of its latest probe request, for the interval
+# channel id -> monotonic time of its latest alert-poll probe, for the interval.
+# One-shot gate probes (fresh=True) are not recorded: a channel the gate checks
+# but the alert poll does not would otherwise stretch every polled channel's
+# interval and hide short live streams.
 _youtube_live_seen: dict[str, float] = {}
 
 
 def youtube_live_probe_interval(now: float) -> float:
-    """Seconds between probes of one channel so the allowance covers them all."""
+    """Seconds between probes of one polled channel so the allowance covers them."""
     horizon = now - _YOUTUBE_SEARCH_WINDOW_SEC
     for cid, seen in list(_youtube_live_seen.items()):
         if seen < horizon:
@@ -705,7 +720,8 @@ def _youtube_live_video_id(channel_id: str, *, fresh: bool = False) -> str | Non
     instead of treating a blip as offline.
     """
     now = time.monotonic()
-    _youtube_live_seen[channel_id] = now
+    if not fresh:
+        _youtube_live_seen[channel_id] = now
     cached = youtube_live_cache.get(channel_id)
     if (
         not fresh
