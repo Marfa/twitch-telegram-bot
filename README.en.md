@@ -3,21 +3,19 @@
 **Go-live on Twitch, YouTube Live, TikTok, VK Play Live, GoodGame, or Kick; category change, upcoming or stream end, a new Drop, game giveaways, or a Twitch whisper — the bot notifies wherever you choose: Telegram, Discord, Max, or your own Webhook.** AI clips from VOD. Manage Twitch schedule from Telegram.
 
 > [!IMPORTANT]
-> **Live bot:** [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu · [status](https://pingzen.dev/status/bot-themarfa)
+> **Live bot:** [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu · [status](https://pingzen.dev/status/twitchbot)
 
 Русский: [README.md](README.md)
 
-| Main menu | Alert types |
+| Schedule | History |
 |---|---|
-| ![Main menu](assets/gallery/ph-gallery-01-main-menu.png) | ![Alert types](assets/gallery/ph-gallery-02-alert-types.png) |
-| Custom template + placeholders |
-| ![Template](assets/gallery/ph-gallery-03-templates.png) |
-| Destination | Import from Twitch |
-| ![Destination](assets/gallery/ph-gallery-05-destinations.png) | ![Import from Twitch](assets/gallery/ph-gallery-06-import-twitch.png) |
+| ![Schedule](assets/gallery/ph-gallery-07-schedule.png) | ![History](assets/gallery/ph-gallery-08-history.png) |
+| Destination | Alert types |
+| ![Destination](assets/gallery/ph-gallery-05-destinations.png) | ![Alert types](assets/gallery/ph-gallery-02-alert-types.png) |
 
 | Feature | How it works |
 |---|---|
-| Live bot | [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu; [status](https://pingzen.dev/status/bot-themarfa) |
+| Live bot | [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` for the menu; [status](https://pingzen.dev/status/twitchbot) |
 | Languages | Russian, English, Ukrainian, Italian — picked on first `/start`, change in **⚙️ Settings** |
 | Alert types | Stream start · category change · upcoming (Twitch schedule) · stream end · Drops · game alert · release alerts (IGDB) · game giveaways (GamerPower + ITAD) |
 | Destinations | DM, channel/group/community (with topics), Discord, Max, or a universal HTTPS Webhook (JSON + HMAC) |
@@ -276,7 +274,7 @@ When a subscription is deleted (manually or via Twitch sync) it is saved to the 
 | ↳ 💸 Withdrawals | Partner requests: ✅ paid / ❌ reject (balance restored) |
 | ↳ 📊 Statistics | Users, subscriptions, languages, paid Premium; same snapshot sent daily to PostHog (`daily_bot_stats`) |
 | ↳ 🎬 Demo mode | Start from Admin: free-user menu without Premium, demo subscriptions; **Admin is hidden**, «Demo mode» stays on the main menu — press again to exit and wipe all demo data |
-| ❓ Help | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues); [bot status](https://pingzen.dev/status/bot-themarfa) |
+| ❓ Help | @immarfa or [Issues](https://github.com/Marfa/twitch-telegram-bot/issues); [bot status](https://pingzen.dev/status/twitchbot) |
 
 ### Partner program
 

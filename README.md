@@ -3,21 +3,19 @@
 **Старт стрима на Twitch, YouTube Live, TikTok, VK Play Live, GoodGame или Kick; смена категории, скоро стрим или конец эфира, доступен новый Drops, раздачи игр или пришло сообщение в ЛС — бот напишет туда, куда вы скажете: в Telegram, Discord, Max или на свой Webhook.** AI-клипы из VOD. Настройка Расписания Twitch из Telegram.
 
 > [!IMPORTANT]
-> **Готовый бот:** [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню · [статус](https://pingzen.dev/status/bot-themarfa)
+> **Готовый бот:** [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню · [статус](https://pingzen.dev/status/twitchbot)
 
 English: [README.en.md](README.en.md)
 
-| Главное меню | Типы оповещений |
+| Расписание | История |
 |---|---|
-| ![Главное меню](assets/gallery/ph-gallery-01-main-menu.ru.png) | ![Типы оповещений](assets/gallery/ph-gallery-02-alert-types.ru.png) |
-| Шаблон + плейсхолдеры |
-| ![Шаблон](assets/gallery/ph-gallery-03-templates.ru.png) |
-| Куда слать | Импорт из Twitch |
-| ![Куда слать](assets/gallery/ph-gallery-05-destinations.ru.png) | ![Импорт из Twitch](assets/gallery/ph-gallery-06-import-twitch.ru.png) |
+| ![Расписание](assets/gallery/ph-gallery-07-schedule.ru.png) | ![История](assets/gallery/ph-gallery-08-history.ru.png) |
+| Куда слать | Типы оповещений |
+| ![Куда слать](assets/gallery/ph-gallery-05-destinations.ru.png) | ![Типы оповещений](assets/gallery/ph-gallery-02-alert-types.ru.png) |
 
 | Возможность | Как работает |
 |---|---|
-| Готовый бот | [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню; [статус](https://pingzen.dev/status/bot-themarfa) |
+| Готовый бот | [@twitchbot_game](https://t.me/twitchbot_game) / [@twitch2telegram_bot](https://t.me/twitch2telegram_bot) — `/start` и меню; [статус](https://pingzen.dev/status/twitchbot) |
 | Языки | Русский, English, Українська, Italiano — выбор при первом `/start`, смена в **⚙️ Настройки** |
 | Типы оповещений | Начало стрима · смена категории · предстоящий (Twitch schedule) · окончание стрима · Drops · оповещение по игре · выход релизов (IGDB) · раздачи игр (GamerPower + ITAD) |
 | Куда слать | Личка, канал/группа/сообщество (с темами), Discord, Max или универсальный HTTPS Webhook (JSON + HMAC) |
@@ -276,7 +274,7 @@ python main.py
 | ↳ 💸 Выводы | Заявки партнёров: ✅ выплачено / ❌ отклонить (баланс возвращается) |
 | ↳ 📊 Статистика | Пользователи, подписки, языки, платный Premium; тот же снимок раз в сутки уходит в PostHog (`daily_bot_stats`) |
 | ↳ 🎬 Демо режим | Вкл. из админки: меню как у free без Premium, демо-подписки; **Админка скрыта**, кнопка «Демо режим» остаётся в главном меню — повторное нажатие выходит и сбрасывает всё демо |
-| ❓ Помощь | @immarfa или [Issues](https://github.com/Marfa/twitch-telegram-bot/issues); [статус бота](https://pingzen.dev/status/bot-themarfa) |
+| ❓ Помощь | @immarfa или [Issues](https://github.com/Marfa/twitch-telegram-bot/issues); [статус бота](https://pingzen.dev/status/twitchbot) |
 
 ### Партнёрская программа
 
