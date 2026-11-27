@@ -759,6 +759,7 @@ from handlers.subscriptions import (
     on_welcome_demo_offer_yes,
     offer_due_welcome_demos,
     on_menu_subs_cart,
+    on_menu_subs_delete,
     open_cart_menu,
     open_subscriptions_menu,
     open_sync_settings,
@@ -3283,6 +3284,10 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
     )
     app.add_handler(
         CallbackQueryHandler(on_menu_subs_cart, pattern=r"^menu_subs:cart$"),
+        group=0,
+    )
+    app.add_handler(
+        CallbackQueryHandler(on_menu_subs_delete, pattern=r"^menu_subs:delete$"),
         group=0,
     )
     app.add_handler(

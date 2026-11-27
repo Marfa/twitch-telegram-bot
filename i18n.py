@@ -405,11 +405,16 @@ def subscriptions_menu(
 def subscriptions_menu_inline(
     lang: str,
     *,
+    delete: bool = False,
     cart: bool = False,
     pause_notifications: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Cart / Pause rows for My subscriptions list / type pick (last, after alert types)."""
+    """Delete / Cart / Pause rows for My subscriptions list / type pick (last, after alert types)."""
     buttons: list[InlineKeyboardButton] = []
+    if delete:
+        buttons.append(
+            InlineKeyboardButton(btn("delete", lang), callback_data="menu_subs:delete")
+        )
     if cart:
         buttons.append(
             InlineKeyboardButton(btn("cart", lang), callback_data="menu_subs:cart")

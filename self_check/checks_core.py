@@ -2217,14 +2217,17 @@ def check_core() -> None:
                     f"{[b.text for b in row]}"
                 )
         subs_inline = subscriptions_menu_inline(
-            loc, cart=True, pause_notifications=True
+            loc, delete=True, cart=True, pause_notifications=True
         )
         assert [
             [(b.text, b.callback_data) for b in row]
             for row in subs_inline.inline_keyboard
         ] == [
             [
+                (btn("delete", loc), "menu_subs:delete"),
                 (btn("cart", loc), "menu_subs:cart"),
+            ],
+            [
                 (btn("pause_notifications", loc), "menu_subs:pause"),
             ],
         ]

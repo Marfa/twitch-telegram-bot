@@ -166,6 +166,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("toggle", f"toggle:{_SAMPLE_SUB}"),
     ("alert_pause", f"alert_pause:{_SAMPLE_SUB}"),
     ("enable_all", "enable_all"),
+    ("menu_subs_delete", "menu_subs:delete"),
     ("delete_go", "delete_go"),
     ("delete_all", "delete_all"),
     ("delete_all_yes", "delete_all:yes"),

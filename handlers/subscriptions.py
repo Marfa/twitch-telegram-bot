@@ -222,14 +222,17 @@ def _format_pause_until(until_ts: int, lang: str) -> str:
 
 
 def _subs_kb(lang: str, db: Database, user_id: int) -> ReplyKeyboardMarkup:
-    """Sticky for My subscriptions exits — always main_menu (cart/pause are inline)."""
+    """Sticky for My subscriptions exits — always main_menu (delete/cart/pause are inline)."""
     _ = db
     return _menu(lang, user_id)
 
 
-def _subs_inline(lang: str, db: Database, user_id: int) -> InlineKeyboardMarkup:
+def _subs_inline(
+    lang: str, db: Database, user_id: int, *, delete: bool = False
+) -> InlineKeyboardMarkup:
     return subscriptions_menu_inline(
         lang,
+        delete=delete,
         cart=_deleted_subscriptions_cart_enabled(db, user_id),
         pause_notifications=_pause_notifications_enabled(db, user_id),
     )
@@ -238,8 +241,8 @@ def _subs_inline(lang: str, db: Database, user_id: int) -> InlineKeyboardMarkup:
 def _subs_action_rows(
     lang: str, db: Database, user_id: int
 ) -> list[list[InlineKeyboardButton]]:
-    """Cart / Pause rows — append after type pick / list actions (after release)."""
-    return list(_subs_inline(lang, db, user_id).inline_keyboard)
+    """Delete / Cart / Pause — append after type pick / list actions (after release)."""
+    return list(_subs_inline(lang, db, user_id, delete=True).inline_keyboard)
 
 
 async def _send_subs_panel(
@@ -798,6 +801,21 @@ async def on_menu_subs_cart(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     except BadRequest:
         pass
     await open_cart_menu(update, context)
+
+
+async def on_menu_subs_delete(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Inline My subscriptions → multi-select delete."""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    try:
+        await query.edit_message_text("✓")
+    except BadRequest:
+        pass
+    await open_delete_menu(update, context)
 
 
 async def start_pause_from_menu_subs(
@@ -5100,25 +5118,27 @@ async def on_edit_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.edit_message_text(t("sub_not_found", lang))
 
 
-async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def open_delete_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Multi-select delete (inline list button or legacy reply «Delete subscription»)."""
     context.user_data.clear()
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
     db: Database = context.application.bot_data["db"]
+    chat_id = reply_chat_id(update)
     subs = _subs_for_owner(db, user_id)
     if not subs:
-        await update.effective_message.reply_text(
-            t("no_subs_short", lang),
-            reply_markup=_subs_kb(lang, db, user_id),
+        await _pulse_reply_keyboard(
+            context.bot, chat_id, _menu(lang, user_id), user_id=user_id, lang=lang
         )
+        await context.bot.send_message(chat_id, t("no_subs_short", lang))
         return
     context.user_data["delete_selected"] = set()
     context.user_data["delete_page"] = 0
     types = _edit_present_types(subs)
-    # Reply keyboard first — same mobile gap fix as list_subscriptions.
-    await update.effective_message.reply_text(
-        t("menu_subs", lang),
-        reply_markup=_subs_kb(lang, db, user_id),
+    await _pulse_reply_keyboard(
+        context.bot, chat_id, _menu(lang, user_id), user_id=user_id, lang=lang
     )
     if len(types) > 1:
         extra_rows: list[list[InlineKeyboardButton]] = []
@@ -5129,15 +5149,20 @@ async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         markup = _alert_type_pick_keyboard(
             lang, types, "delete_type", extra_rows=extra_rows or None
         )
-        await update.effective_message.reply_text(
-            t("delete_type_pick", lang),
-            reply_markup=markup,
+        await context.bot.send_message(
+            chat_id, t("delete_type_pick", lang), reply_markup=markup
         )
         return
-    await update.effective_message.reply_text(
+    await context.bot.send_message(
+        chat_id,
         t("delete_pick", lang),
         reply_markup=_delete_pick_keyboard(db, user_id, lang, subs, set()),
     )
+
+
+async def delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Legacy reply «Delete subscription» → multi-select delete."""
+    await open_delete_menu(update, context)
 
 
 async def on_delete_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -212,7 +212,9 @@ def _check_submenu_reply_keyboards() -> None:
             ("wizard_nav_inline_no_back", wizard_nav_inline(loc, back=False)),
             (
                 "subscriptions_menu_inline",
-                subscriptions_menu_inline(loc, cart=True, pause_notifications=True),
+                subscriptions_menu_inline(
+                    loc, delete=True, cart=True, pause_notifications=True
+                ),
             ),
             ("other_menu_inline", other_menu_inline(loc)),
             (
@@ -641,6 +643,7 @@ async def _scenario_subscriptions(db) -> None:
         for row in m.inline_keyboard
         for b in row
     ]
+    assert "menu_subs:delete" in inline_cbs
     assert "menu_subs:cart" in inline_cbs
     assert "menu_subs:pause" in inline_cbs
     assert any(cb.startswith("toggle:") for cb in inline_cbs)
@@ -3654,21 +3657,70 @@ async def _scenario_subscriptions_edit_checkboxes(db) -> None:
     cap.assert_turn("subscriptions_edit_checkboxes")
 
 async def _scenario_subscriptions_delete(db) -> None:
-    """§4 delete flow — pick, delete-all confirm, No returns to pick."""
+    """§4 delete flow — list multi-select entry, pick, delete-all confirm, No returns to pick."""
     from handlers.subscriptions import (
         delete_menu,
+        list_subscriptions,
         on_delete_all,
         on_delete_all_confirm,
+        on_menu_subs_delete,
     )
 
-    _seed_live_sub(db, _FREE_UID)
+    sub_id = _seed_live_sub(db, _FREE_UID)
+
+    application, bot = _app(db)
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, btn("list", "ru"), cap)
+    ctx = _ctx(application)
+    with patch(
+        "handlers.subscriptions._deleted_subscriptions_cart_enabled",
+        return_value=False,
+    ), patch(
+        "handlers.subscriptions._pause_notifications_enabled",
+        return_value=False,
+    ), patch(
+        "handlers.subscriptions._share_enabled",
+        return_value=False,
+    ):
+        await list_subscriptions(update, ctx)
+    list_cbs = [
+        (b.callback_data or "")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert "menu_subs:delete" in list_cbs
+    cap.assert_turn("subscriptions_list_multidelete_entry")
+
+    update, _query = _cb_update(_FREE_UID, "menu_subs:delete", cap)
+    ctx = _ctx(application, dict(ctx.user_data))
+    with patch("handlers.subscriptions._pulse_reply_keyboard", new_callable=AsyncMock):
+        await on_menu_subs_delete(update, ctx)
+    pick_cbs = [
+        (b.callback_data or "")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    assert f"delete_sel:{sub_id}" in pick_cbs
+    assert "delete_go" in pick_cbs
+    assert "delete_all" in pick_cbs
+    # Multi-select pick has no Cancel; sticky main menu is pulsed (patched → note).
+    cap.note_pulse()
+    cap.assert_turn("subscriptions_list_multidelete_pick")
 
     application, bot = _app(db)
     cap = _BotCapture()
     cap.wrap(bot)
     update = _msg_update(_FREE_UID, btn("delete", "ru"), cap)
     ctx = _ctx(application)
-    await delete_menu(update, ctx)
+    with patch("handlers.subscriptions._pulse_reply_keyboard", new_callable=AsyncMock):
+        await delete_menu(update, ctx)
+    cap.note_pulse()
     cap.assert_turn("subscriptions_delete_pick")
 
     update, _query = _cb_update(_FREE_UID, "delete_all", cap)
