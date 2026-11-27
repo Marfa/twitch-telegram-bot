@@ -42,7 +42,7 @@ jobs:
         with:
           fetch-depth: 0
       # No floating major tag (v10); pin a release. See astral-sh/setup-uv releases.
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
       - name: omerta check (tracked files)
         run: |
           set -euo pipefail
