@@ -3689,16 +3689,31 @@ async def _scenario_subscriptions_delete(db) -> None:
         list_subscriptions,
         on_delete_all,
         on_delete_all_confirm,
+        on_delete_type,
         on_menu_subs_delete,
     )
 
-    sub_id = _seed_live_sub(db, _FREE_UID)
+    # Own owner id + one subscription per alert type: the type step and the
+    # pick list stay the same no matter what other scenarios leave on _FREE_UID.
+    owner = 900_778
+    sub_id = _seed_live_sub(db, owner)
+    db.add_subscription(
+        owner_id=owner,
+        twitch_username="streamer_end",
+        twitch_user_id="101",
+        message_template="ended {streamer}",
+        dest_type="dm",
+        chat_id=owner,
+        thread_id=None,
+        notify_on_live=False,
+        notify_on_end=True,
+    )
 
     application, bot = _app(db)
     bot.get_me = AsyncMock(return_value=SimpleNamespace(username="testbot"))
     cap = _BotCapture()
     cap.wrap(bot)
-    update = _msg_update(_FREE_UID, btn("list", "ru"), cap)
+    update = _msg_update(owner, btn("list", "ru"), cap)
     ctx = _ctx(application)
     with patch(
         "handlers.subscriptions._deleted_subscriptions_cart_enabled",
@@ -3721,10 +3736,22 @@ async def _scenario_subscriptions_delete(db) -> None:
     assert "menu_subs:delete" in list_cbs
     cap.assert_turn("subscriptions_list_multidelete_entry")
 
-    update, _query = _cb_update(_FREE_UID, "menu_subs:delete", cap)
+    update, _query = _cb_update(owner, "menu_subs:delete", cap)
     ctx = _ctx(application, dict(ctx.user_data))
     with patch("handlers.subscriptions._pulse_reply_keyboard", new_callable=AsyncMock):
         await on_menu_subs_delete(update, ctx)
+    pick_cbs = [
+        (b.callback_data or "")
+        for m in cap.markups
+        if getattr(m, "inline_keyboard", None)
+        for row in m.inline_keyboard
+        for b in row
+    ]
+    # Two alert types → the menu first asks which type to delete.
+    assert "delete_type:live" in pick_cbs
+    assert "delete_type:end" in pick_cbs
+    update, _query = _cb_update(owner, "delete_type:live", cap)
+    await on_delete_type(update, ctx)
     pick_cbs = [
         (b.callback_data or "")
         for m in cap.markups
@@ -3742,25 +3769,33 @@ async def _scenario_subscriptions_delete(db) -> None:
     application, bot = _app(db)
     cap = _BotCapture()
     cap.wrap(bot)
-    update = _msg_update(_FREE_UID, btn("delete", "ru"), cap)
+    update = _msg_update(owner, btn("delete", "ru"), cap)
     ctx = _ctx(application)
     with patch("handlers.subscriptions._pulse_reply_keyboard", new_callable=AsyncMock):
         await delete_menu(update, ctx)
     cap.note_pulse()
     cap.assert_turn("subscriptions_delete_pick")
 
-    update, _query = _cb_update(_FREE_UID, "delete_all", cap)
+    update, _query = _cb_update(owner, "delete_type:live", cap)
     ctx = _ctx(application, dict(ctx.user_data))
+    await on_delete_type(update, ctx)
+    update, _query = _cb_update(owner, "delete_all", cap)
     await on_delete_all(update, ctx)
     cap.assert_turn("subscriptions_delete_all_confirm")
 
-    update, query = _cb_update(_FREE_UID, "delete_all:no", cap)
+    update, query = _cb_update(owner, "delete_all:no", cap)
     await on_delete_all_confirm(update, ctx)
     query.edit_message_text.assert_awaited()
     markup = query.edit_message_text.call_args.kwargs.get("reply_markup")
     assert markup is not None
-    labels = [btn.text for row in markup.inline_keyboard for btn in row]
-    assert any("Удалить все" in text for text in labels)
+    back_cbs = [
+        btn.callback_data or ""
+        for row in markup.inline_keyboard
+        for btn in row
+    ]
+    # «No» returns to the same pick list, not to the confirm dialog.
+    assert "delete_all" in back_cbs
+    assert f"delete_sel:{sub_id}" in back_cbs
 
 
 async def _scenario_subscriptions_edit_game_alert(db) -> None:
