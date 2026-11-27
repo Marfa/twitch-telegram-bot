@@ -56,7 +56,6 @@ write_counts() {
   docker compose -f "$COMPOSE_FILE" exec -T db psql -U bot -d bot -v ON_ERROR_STOP=1 -At -c "
 SELECT t || E'\t' || c::text FROM (
   SELECT 'alert_history'::text AS t, COUNT(*)::bigint AS c FROM alert_history
-  UNION ALL SELECT 'lucky_templates', COUNT(*) FROM lucky_templates
   UNION ALL SELECT 'referral_credits', COUNT(*) FROM referral_credits
   UNION ALL SELECT 'referral_withdrawals', COUNT(*) FROM referral_withdrawals
   UNION ALL SELECT 'scheduled_broadcasts', COUNT(*) FROM scheduled_broadcasts
