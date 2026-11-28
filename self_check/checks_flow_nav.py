@@ -117,13 +117,14 @@ class _BotCapture:
         self.pulsed_wizard = False
 
 
-def _sanitize_twitch(tw: MagicMock) -> MagicMock:
+def _sanitize_twitch(tw):
     # Auto-child MagicMocks are truthy; receive_channel treats any truthy
-    # parse_team_name as a Twitch Team URL.
-    if tw.parse_team_name.side_effect is None and isinstance(
-        tw.parse_team_name.return_value, MagicMock
+    # parse_team_name as a Twitch Team URL. Skip real TwitchClient methods.
+    parse = getattr(tw, "parse_team_name", None)
+    if isinstance(parse, MagicMock) and parse.side_effect is None and isinstance(
+        parse.return_value, MagicMock
     ):
-        tw.parse_team_name.return_value = None
+        parse.return_value = None
     return tw
 
 
@@ -517,6 +518,9 @@ async def _scenario_wizard_team_channel(db) -> None:
     """§2 Twitch Team URL → team subscription wizard (live / reject upcoming)."""
     from handlers.wizard import _wz, receive_channel
     from i18n import t as tr
+
+    db.upsert_user(_FREE_UID)
+    db.set_user_locale(_FREE_UID, "ru")
 
     twitch = MagicMock()
     twitch.parse_team_name.side_effect = lambda text: (

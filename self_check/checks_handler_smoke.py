@@ -25,13 +25,14 @@ _FREE_UID = 900001
 _ADMIN_UID = 1
 
 
-def _sanitize_twitch(tw: MagicMock) -> MagicMock:
+def _sanitize_twitch(tw):
     # Auto-child MagicMocks are truthy; receive_channel treats any truthy
-    # parse_team_name as a Twitch Team URL.
-    if tw.parse_team_name.side_effect is None and isinstance(
-        tw.parse_team_name.return_value, MagicMock
+    # parse_team_name as a Twitch Team URL. Skip real TwitchClient methods.
+    parse = getattr(tw, "parse_team_name", None)
+    if isinstance(parse, MagicMock) and parse.side_effect is None and isinstance(
+        parse.return_value, MagicMock
     ):
-        tw.parse_team_name.return_value = None
+        parse.return_value = None
     return tw
 
 
