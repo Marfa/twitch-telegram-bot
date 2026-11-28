@@ -1,5 +1,5 @@
 ---
-description: Respect third-party API licenses, ToS, and attribution when integrating
+description: Respect third-party API licenses, ToS, paid fees/tariffs, and attribution when integrating
 alwaysApply: true
 ---
 
@@ -10,21 +10,28 @@ When connecting or extending any third-party API or data feed (Twitch Helix, IGD
 ## Before first use (and when changing usage)
 
 1. **Find the rules** — official ToS / Developer Agreement / Trademark / rate-limit docs / `robots.txt`. If none are published, treat the public documented API as the ceiling; do not scrape HTML/pages that are not part of the documented API.
-2. **Prefer official / documented endpoints** over scraping, unofficial GQL, or reverse-engineered clients.
-3. **Attribution** — if the provider requires (or clearly expects) source credit, show it in user-facing copy and/or README. Keep a clear path from displayed data back to the source (links).
-4. **Rate limits & caching** — honor documented limits and `Cache-Control` / `Retry-After` / `429` where applicable; poll no faster than needed.
-5. **Commercial / redistribution** — do not sell raw API metadata dumps; Premium may charge for *our* product features that *use* API data, not for reselling the data itself. When unsure, ask before shipping.
-6. **Auth & privacy** — OAuth scopes least-privilege; do not log tokens; privacy notices for user data collected via the API.
-7. **Marks** — Twitch (and other) trademarks only per trademark guidelines; do not imply affiliation/endorsement when the provider forbids it.
+2. **Paid fees / tariffs** — before enabling a platform capability (BotFather toggles, API products, add-ons, higher limits, forum/topics modes, ads, payouts, …), read the provider ToS **and** pricing / payments docs for **extra commissions, withheld %, subscription tiers, or one-time fees**. Surface cost and scope to the user **before** implementing or shipping (who pays, % or amount, bot-wide vs per-user, how to turn off). Do not assume a free UI toggle is free for the developer.
+3. **Prefer official / documented endpoints** over scraping, unofficial GQL, or reverse-engineered clients.
+4. **Attribution** — if the provider requires (or clearly expects) source credit, show it in user-facing copy and/or README. Keep a clear path from displayed data back to the source (links).
+5. **Rate limits & caching** — honor documented limits and `Cache-Control` / `Retry-After` / `429` where applicable; poll no faster than needed.
+6. **Commercial / redistribution** — do not sell raw API metadata dumps; Premium may charge for *our* product features that *use* API data, not for reselling the data itself. When unsure, ask before shipping.
+7. **Auth & privacy** — OAuth scopes least-privilege; do not log tokens; privacy notices for user data collected via the API.
+8. **Marks** — Twitch (and other) trademarks only per trademark guidelines; do not imply affiliation/endorsement when the provider forbids it.
 
 ## Checklist (PR)
 
 - [ ] Endpoint is documented / allowed (not a disallowed scrape path)
+- [ ] Provider ToS / pricing checked for fees tied to the new capability; costs disclosed to the user if non-zero
 - [ ] Attribution / disclaimer updated if required
 - [ ] Polling/caching respects provider guidance
 - [ ] No new secret hardcoding; scopes minimal
 - [ ] Self-check or comment notes any intentional gray-area (e.g. unofficial endpoint) with upgrade path
 
+## Known fee traps (do not rediscover)
+
+| Provider | Capability | Fee | Authority |
+|---|---|---|---|
+| Telegram | Topics in private chats (BotFather Threaded Mode) | **15%** withheld from **all** Stars purchases on that bot while enabled (not per end-user `topics_enabled`) | [Bot Developer ToS §6.2.6](https://telegram.org/tos/bot-developers) |
 ## Twitch Helix (baseline)
 
 Authority: [Twitch Developer Services Agreement](https://legal.twitch.com/legal/developer-agreement) + [API guide](https://dev.twitch.tv/docs/api/guide).
