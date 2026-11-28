@@ -1904,7 +1904,11 @@ owner_id, twitch_username, twitch_user_id,
                 """,
                 (
                     owner_id,
-                    twitch_username.lower() if plat == "twitch" else twitch_username,
+                    (
+                        twitch_username.lower()
+                        if plat in ("twitch", "twitch_team")
+                        else twitch_username
+                    ),
                     twitch_user_id,
                     message_template,
                     dest_type,
@@ -2668,8 +2672,30 @@ owner_id, twitch_username, twitch_user_id,
                     twitch_user_id LIKE 'ext:%'
                     OR (
                       COALESCE(stream_platform, 'twitch') != ''
-                      AND COALESCE(stream_platform, 'twitch') != 'twitch'
+                      AND COALESCE(stream_platform, 'twitch') NOT IN (
+                        'twitch', 'twitch_team'
+                      )
                     )
+                  )
+                ORDER BY id
+                """
+            ).fetchall()
+        return [_row_to_sub(r) for r in rows]
+
+    def get_enabled_team_subscriptions(self) -> list[Subscription]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE enabled = 1
+                  AND COALESCE(stream_platform, 'twitch') = 'twitch_team'
+                  AND COALESCE(category_watch_prefs, '') = ''
+                  AND COALESCE(release_watch_prefs, '') = ''
+                  AND COALESCE(giveaway_watch_prefs, '') = ''
+                  AND (
+                    notify_on_live = 1
+                    OR notify_on_end = 1
+                    OR notify_on_category_change = 1
                   )
                 ORDER BY id
                 """

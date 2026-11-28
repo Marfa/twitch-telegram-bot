@@ -3623,7 +3623,7 @@ def build_application(token: str, db: Database, twitch: TwitchClient) -> Applica
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_twitch_link_start),
-                pattern=r"^twitch_link:start:[a-zA-Z0-9_]{4,25}$",
+                pattern=r"^twitch_link:start:(?:team/[a-zA-Z0-9_]{1,50}|[a-zA-Z0-9_]{4,25})$",
             ),
             CallbackQueryHandler(
                 dm_only_conv_entry(on_welcome_demo_offer_new),

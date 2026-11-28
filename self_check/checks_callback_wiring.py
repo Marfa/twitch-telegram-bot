@@ -159,6 +159,7 @@ _EXTRA_CALLBACKS: tuple[tuple[str, str], ...] = (
     ("premium_gift_month", "premium:gift_month"),
     ("premium_gift_skip_msg", "premium:gift_skip_msg"),
     ("twitch_link_start", "twitch_link:start:shroud"),
+    ("twitch_link_start_team", "twitch_link:start:team/livecoders"),
     ("twitch_link_decline", "twitch_link:decline"),
     ("list_del", f"list_del:{_SAMPLE_SUB}"),
     ("list_del_ok", f"list_del_ok:{_SAMPLE_SUB}"),

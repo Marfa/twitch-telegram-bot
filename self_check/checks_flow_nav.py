@@ -503,6 +503,62 @@ async def _scenario_wizard_external_channel(db) -> None:
     )
 
 
+async def _scenario_wizard_team_channel(db) -> None:
+    """§2 Twitch Team URL → team subscription wizard (live / reject upcoming)."""
+    from handlers.wizard import _wz, receive_channel
+    from i18n import t as tr
+
+    twitch = MagicMock()
+    twitch.parse_team_name.side_effect = lambda text: (
+        "livecoders"
+        if "team/" in str(text or "").lower()
+        else None
+    )
+    twitch.parse_username.return_value = None
+    twitch.is_twitch_url.return_value = True
+    twitch.team_page_url.side_effect = (
+        lambda name: f"https://www.twitch.tv/team/{name}"
+    )
+    twitch.team_subscription_user_id.side_effect = lambda tid: f"team:{tid}"
+    twitch.get_team.return_value = {
+        "id": "6358",
+        "team_name": "livecoders",
+        "team_display_name": "Live Coders",
+        "users": [{"user_id": "1", "user_login": "a", "user_name": "A"}],
+    }
+
+    application, bot = _app(db, twitch=twitch)
+    cap = _BotCapture()
+    cap.wrap(bot)
+    update = _msg_update(_FREE_UID, "https://www.twitch.tv/team/livecoders", cap)
+    ctx = _ctx(application, {"alert_type": "live"})
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=False)
+    ):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["TEMPLATE"]
+    assert ctx.user_data.get("stream_platform") == "twitch_team"
+    assert ctx.user_data.get("twitch_username") == "livecoders"
+    assert ctx.user_data.get("twitch_user_id") == "team:6358"
+    assert "team/livecoders" in str(ctx.user_data.get("stream_url") or "")
+    cap.assert_turn("wizard_team_channel")
+
+    # Upcoming is not supported for teams (stays on CHANNEL).
+    application, bot = _app(db, twitch=twitch)
+    update = _msg_update(_FREE_UID, "https://www.twitch.tv/team/livecoders")
+    ctx = _ctx(application, {"alert_type": "upcoming"})
+    with patch(
+        "handlers.wizard.prem.has_feature", new=AsyncMock(return_value=True)
+    ):
+        state = await receive_channel(update, ctx)
+    assert state == _wz()["CHANNEL"]
+    no_upcoming = tr("channel_team_no_upcoming", "ru")
+    assert any(
+        no_upcoming in str(c.args[0] if c.args else c.kwargs.get("text") or "")
+        for c in update.effective_message.reply_text.await_args_list
+    )
+
+
 async def _scenario_wizard_channel_dup_by_type(db) -> None:
     """§2 CHANNEL_DUP only when same streamer and same alert type."""
     from handlers.wizard import _wz, receive_channel
@@ -5918,6 +5974,7 @@ async def _run_flow_nav_checks() -> None:
         await _scenario_premium_channel_ad(db)
         await _scenario_wizard_channel_step(db)
         await _scenario_wizard_external_channel(db)
+        await _scenario_wizard_team_channel(db)
         await _scenario_wizard_channel_dup_by_type(db)
         await _scenario_subscriptions(db)
         await _scenario_settings_and_partner(db)

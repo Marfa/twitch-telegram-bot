@@ -3648,6 +3648,11 @@ def check_core() -> None:
         assert "{game_igdb}" in tr("placeholders_page_body", loc)
         assert "{game_steam}" in tr("placeholders_page_body", loc)
         assert "{url}" in tr("placeholders_page_body", loc)
+        assert "{team_name}" in tr("placeholders_page_body", loc)
+        assert "{team_member}" in tr("placeholders_page_body", loc)
+        assert "Twitch Teams" in tr("alert_type_prompt", loc) or "Twitch Team" in tr(
+            "alert_type_prompt", loc
+        )
         assert tr("duration_n_unit", loc, n=2, unit=tr("duration_unit_hour_few", loc))
         assert tr("watch_cats_prompt", loc)
         assert tr("watch_cats_lucky", loc)

@@ -894,13 +894,19 @@ async def _wizard_back_before_dest(
 
 async def _go_channel_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     has_alert_type = bool(context.user_data.get("alert_type"))
+    pending_team = context.user_data.pop("pending_twitch_team", None)
     pending = context.user_data.pop("pending_twitch_channel", None)
-    if pending:
-        context.user_data["_channel_text_override"] = f"https://twitch.tv/{pending}"
+    if pending_team or pending:
+        label = f"team/{pending_team}" if pending_team else pending
+        context.user_data["_channel_text_override"] = (
+            f"https://twitch.tv/team/{pending_team}"
+            if pending_team
+            else f"https://twitch.tv/{pending}"
+        )
         _set_wizard_back(context, _wz()["CHANNEL"])
         # Lasting Reply Cancel/Back — pulse+delete drops it before Extras (inline-only).
         await update.effective_message.reply_text(
-            t("twitch_link_using_channel", lang, username=pending),
+            t("twitch_link_using_channel", lang, username=label),
             reply_markup=_wizard(lang, back=has_alert_type),
         )
         state = await receive_channel(update, context)
@@ -2305,7 +2311,9 @@ def _is_external_wizard(context: ContextTypes.DEFAULT_TYPE) -> bool:
     if context.user_data.get("external_stream"):
         return True
     plat = str(context.user_data.get("stream_platform") or "twitch").strip().lower()
-    return bool(plat and plat != "twitch")
+    if plat in ("", "twitch", "twitch_team"):
+        return False
+    return True
 
 async def _go_repeat_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str) -> int:
     return await _prompt_repeat_step(update, context, lang)
@@ -2818,18 +2826,25 @@ async def offer_twitch_link_wizard(
         return
 
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    username = twitch.parse_username(text)
-    if not username:
+    team_name = twitch.parse_team_name(text)
+    username = twitch.parse_username(text) if not team_name else None
+    if not team_name and not username:
         return
 
     user_id = update.effective_user.id
     lang = _user_lang(context, user_id)
+    offer_key = f"team/{team_name}" if team_name else username
     analytics.capture(
-        user_id, "twitch_link_wizard_offered", {"twitch_username": username}
+        user_id,
+        "twitch_link_wizard_offered",
+        {
+            "twitch_username": offer_key,
+            "is_team": bool(team_name),
+        },
     )
     await update.effective_message.reply_text(
-        t("twitch_link_offer", lang, username=username),
-        reply_markup=_twitch_link_offer_keyboard(lang, username),
+        t("twitch_link_offer", lang, username=offer_key),
+        reply_markup=_twitch_link_offer_keyboard(lang, offer_key),
     )
 
 
@@ -2842,7 +2857,15 @@ async def on_twitch_link_start(
     parts = (query.data or "").split(":")
     username = parts[2].lower() if len(parts) >= 3 else ""
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    if not username or not twitch.parse_username(username):
+    is_team = username.startswith("team/")
+    team_slug = username[5:] if is_team else ""
+    if is_team:
+        if not team_slug or not TwitchClient.parse_team_name(
+            f"https://www.twitch.tv/team/{team_slug}"
+        ):
+            await query.edit_message_text(t("channel_not_parsed", lang))
+            return ConversationHandler.END
+    elif not username or not twitch.parse_username(username):
         await query.edit_message_text(t("channel_not_parsed", lang))
         return ConversationHandler.END
 
@@ -2850,11 +2873,14 @@ async def on_twitch_link_start(
     analytics.capture(
         query.from_user.id,
         "twitch_link_wizard_started",
-        {"twitch_username": username},
+        {"twitch_username": username, "is_team": is_team},
     )
     state = await start_new_subscription(update, context)
     if state != ConversationHandler.END:
-        context.user_data["pending_twitch_channel"] = username
+        if is_team:
+            context.user_data["pending_twitch_team"] = team_slug
+        else:
+            context.user_data["pending_twitch_channel"] = username
     return state
 
 
@@ -3140,8 +3166,77 @@ async def receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return _wz()["CHANNEL"]
 
     twitch: TwitchClient = context.application.bot_data["twitch"]
-    username = twitch.parse_username(text)
     alert_kind = context.user_data.get("alert_type") or "live"
+    team_name = twitch.parse_team_name(text)
+    if team_name:
+        if alert_kind == "upcoming":
+            await update.effective_message.reply_text(
+                t("channel_team_no_upcoming", lang)
+            )
+            return _wz()["CHANNEL"]
+        if alert_kind not in ("live", "category", "end"):
+            await update.effective_message.reply_text(
+                t("channel_team_live_types_only", lang)
+            )
+            return _wz()["CHANNEL"]
+        try:
+            team = await asyncio.to_thread(twitch.get_team, team_name)
+        except requests.RequestException as exc:
+            logger.warning("Twitch team lookup failed for %s: %s", team_name, exc)
+            await update.effective_message.reply_text(t("channel_lookup_failed", lang))
+            return _wz()["CHANNEL"]
+        if not team or not team.get("id"):
+            await update.effective_message.reply_text(
+                t("channel_team_not_found", lang, team=team_name)
+            )
+            return _wz()["CHANNEL"]
+        if alert_kind != "live" and not await prem.has_feature(
+            context.bot,
+            context.application.bot_data["db"],
+            update.effective_user.id,
+            "alert_types",
+            channel=str(team.get("team_name") or team_name),
+        ):
+            return await _show_premium_gate(
+                update, context, feature="alert_type", first_step=True
+            )
+        team_slug = str(team.get("team_name") or team_name).strip().lower()
+        display = str(team.get("team_display_name") or team_slug).strip() or team_slug
+        context.user_data.pop("external_stream", None)
+        context.user_data["stream_platform"] = "twitch_team"
+        context.user_data["stream_url"] = twitch.team_page_url(team_slug)
+        context.user_data["twitch_username"] = team_slug
+        context.user_data["twitch_user_id"] = twitch.team_subscription_user_id(
+            str(team["id"])
+        )
+        context.user_data["twitch_display_name"] = display
+        context.user_data["twitch_team_display_name"] = display
+        context.user_data["channel_input_was_url"] = True
+        if alert_kind == "live":
+            context.user_data["notify_on_live"] = True
+            context.user_data["notify_on_end"] = False
+            context.user_data["notify_on_category_change"] = False
+        db: Database = context.application.bot_data["db"]
+        owner_id = update.effective_user.id
+        from handlers.subscriptions import _existing_sub_for_twitch
+
+        existing = _existing_sub_for_twitch(
+            db,
+            owner_id,
+            context.user_data["twitch_user_id"],
+            alert_type=alert_kind,
+        )
+        if existing:
+            await update.effective_message.reply_text(
+                t("channel_dup_prompt", lang),
+                reply_markup=channel_dup_keyboard(lang, existing.id),
+            )
+            context.user_data["dup_sub_id"] = existing.id
+            _set_wizard_back(context, _wz()["CHANNEL_DUP"])
+            return _wz()["CHANNEL_DUP"]
+        return await _go_template_prompt(update, context, lang)
+
+    username = twitch.parse_username(text)
 
     if not username:
         import stream_platforms as sp

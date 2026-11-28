@@ -328,6 +328,139 @@
       padding: 28px 20px 48px;
     }
 
+    .compare {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+      padding: 40px 20px 8px;
+    }
+
+    .compare-head {
+      max-width: 640px;
+      margin-bottom: 22px;
+    }
+
+    .compare-head h2 {
+      font-family: var(--sw-serif);
+      font-weight: 500;
+      font-size: clamp(28px, 4vw, 36px);
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin: 0 0 10px;
+    }
+
+    .compare-head p {
+      margin: 0;
+      color: var(--sw-muted);
+      font-size: 14.5px;
+      line-height: 1.6;
+    }
+
+    .compare-scroll {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid var(--sw-line);
+      border-radius: 20px;
+      background: #fff;
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.04);
+    }
+
+    .compare-table {
+      width: 100%;
+      min-width: 920px;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .compare-table th,
+    .compare-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--sw-line);
+      text-align: left;
+      vertical-align: top;
+      line-height: 1.4;
+    }
+
+    .compare-table thead th {
+      background: #f7f5f1;
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .compare-table th:first-child,
+    .compare-table td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background: #f7f5f1;
+      font-weight: 600;
+      min-width: 118px;
+      box-shadow: 4px 0 12px rgba(0, 0, 0, 0.03);
+    }
+
+    .compare-table tbody td:first-child { background: #faf9f6; }
+
+    .compare-table .col-us {
+      background: rgba(94, 122, 110, 0.08);
+      font-weight: 500;
+    }
+
+    .compare-table thead .col-us {
+      background: rgba(94, 122, 110, 0.16);
+      color: var(--sw-sage-deep);
+    }
+
+    .compare-table tbody td:first-child.col-us { background: rgba(94, 122, 110, 0.12); }
+
+    .compare-table .yes { color: #2f6b4f; font-weight: 600; }
+    .compare-table .no { color: #aaa; }
+    .compare-table .partial { color: #8a6d3b; }
+
+    .compare-table tr.edge td.col-us {
+      background: rgba(94, 122, 110, 0.18);
+      box-shadow: inset 0 0 0 1px rgba(94, 122, 110, 0.28);
+    }
+
+    .compare-table tr.price td {
+      border-bottom: none;
+      font-size: 12px;
+      color: #444;
+      background: #faf9f6;
+    }
+
+    .compare-table tr.price td.col-us {
+      background: rgba(94, 122, 110, 0.12);
+      color: var(--sw-sage-deep);
+    }
+
+    .compare-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      margin-top: 14px;
+      font-size: 12.5px;
+      color: var(--sw-muted);
+    }
+
+    .compare-legend strong { color: var(--sw-ink); font-weight: 600; }
+
+    .compare-note {
+      margin: 16px 0 0;
+      font-size: 12.5px;
+      color: #888;
+      line-height: 1.55;
+      max-width: 72ch;
+    }
+
+    .compare-note a {
+      color: var(--sw-sage);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
     @media (max-width: 1200px) and (min-width: 981px) {
       .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
@@ -519,6 +652,143 @@
       <p class="cards-hint">Листайте карточки →</p>
     </section>
   </div>
+
+  <section class="compare" aria-labelledby="compare-title">
+    <div class="compare-head">
+      <h2 id="compare-title">Сравнение с аналогами</h2>
+      <p>
+        Live, смена категории, конец, предстоящий, Drops, Discord и webhook —
+        и сколько это стоит у нас и у платных сервисов. Зелёная колонка и
+        подсветка строк — фичи, где мы заметно шире рынка.
+      </p>
+    </div>
+
+    <div class="compare-scroll">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th scope="col">Фича</th>
+            <th class="col-us" scope="col">Twitch&nbsp;X&nbsp;Telegram</th>
+            <th scope="col">AximoBot</th>
+            <th scope="col">Streamcord</th>
+            <th scope="col">Twitch&nbsp;Alerts</th>
+            <th scope="col">ttt.so</th>
+            <th scope="col">Stream-Alert.ru</th>
+            <th scope="col">Satomi&nbsp;Pro</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Live (старт стрима)</td>
+            <td class="col-us yes">Да · free до&nbsp;5</td>
+            <td class="yes">Да · платный интервал</td>
+            <td class="yes">Да · free/Pro</td>
+            <td class="yes">Да · free/Premium</td>
+            <td class="yes">Да · free+</td>
+            <td class="yes">Да · за пост</td>
+            <td class="yes">Да · Pro</td>
+          </tr>
+          <tr class="edge">
+            <td>Category (смена категории)</td>
+            <td class="col-us yes">Да · алерт о смене · от&nbsp;20★</td>
+            <td class="no">Нет</td>
+            <td class="partial">~ фильтр игры, не смена</td>
+            <td class="partial">~ фильтр игры, не смена</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+            <td class="partial">~ правит пост</td>
+          </tr>
+          <tr>
+            <td>End (конец эфира)</td>
+            <td class="col-us yes">Да · от&nbsp;20★</td>
+            <td class="partial">~ VOD/запись, не end-алерт</td>
+            <td class="yes">Да · cleanup Pro</td>
+            <td class="partial">~ правка/удаление</td>
+            <td class="yes">Да · Streamer+</td>
+            <td class="no">Нет</td>
+            <td class="yes">Да · правка/удаление</td>
+          </tr>
+          <tr class="edge">
+            <td>Upcoming (расписание Twitch)</td>
+            <td class="col-us yes">Да · от&nbsp;20★</td>
+            <td class="no">Нет</td>
+            <td class="partial">~ sync в Discord events · Pro</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+          </tr>
+          <tr class="edge">
+            <td>Drops</td>
+            <td class="col-us yes">Да · каталог + live · от&nbsp;20★</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+            <td class="yes">Да · кампании</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+          </tr>
+          <tr>
+            <td>Discord</td>
+            <td class="col-us yes">Да · free</td>
+            <td class="no">Нет (Telegram)</td>
+            <td class="yes">Да · native</td>
+            <td class="yes">Да · native</td>
+            <td class="no">Нет (Telegram)</td>
+            <td class="no">Нет (TG/VK)</td>
+            <td class="yes">Да · Pro</td>
+          </tr>
+          <tr class="edge">
+            <td>Webhook (свой HTTPS)</td>
+            <td class="col-us yes">Да · JSON+HMAC · free</td>
+            <td class="no">Нет</td>
+            <td class="partial">~ Discord webhook · Pro</td>
+            <td class="partial">~ Discord webhook · Premium</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+          </tr>
+          <tr class="edge">
+            <td>Twitch Team</td>
+            <td class="col-us yes">Да · ссылка /team/… · free/⭐</td>
+            <td class="no">Нет</td>
+            <td class="yes">Да</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+            <td class="no">Нет</td>
+          </tr>
+          <tr class="price">
+            <td>Стоимость</td>
+            <td class="col-us">
+              Live free · типы / опции à&nbsp;la&nbsp;carte от&nbsp;20★/мес ·
+              полный Premium 100★/мес · 1000★/год · 2000★ lifetime
+            </td>
+            <td>Pro ≈$10 · Expert ≈$25 · Ultra ≈$40/мес</td>
+            <td>Pro $2.99/мес</td>
+            <td>Premium: Discord Nitro-style sub / саб Twitch</td>
+            <td>Streamer $5 · Pro $39/мес</td>
+            <td>~8 коинов за пост в TG</td>
+            <td>Satomi Pro через Steam (цена кошелька)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="compare-legend">
+      <span><strong class="yes">Да</strong> — есть как продукт</span>
+      <span><strong class="partial">~</strong> — похоже, но другая модель</span>
+      <span><strong class="no">Нет</strong> — публично не заявлено</span>
+      <span><strong>Подсветка строк</strong> — у нас есть, у большинства нет или иначе</span>
+    </div>
+    <p class="compare-note">
+      Срез по публичным сайтам (Aximo, Streamcord, Twitch&nbsp;Alerts/Sunkwi, ttt.so,
+      Stream-Alert, Satomi). Цены и состав тарифов меняются — актуальные
+      <a href="/pricing?lang=ru">наши тарифы</a> и
+      <a href="/features?lang=ru">возможности</a> в боте.
+      ★ = Telegram Stars.
+    </p>
+  </section>
 
   <div class="landing-footer">
     <footer class="sw-footer">

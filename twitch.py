@@ -54,7 +54,38 @@ TWITCH_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.|m\.)?twitch\.tv/([a-zA-Z0-9_]{4,25})",
     re.IGNORECASE,
 )
+TWITCH_TEAM_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.|m\.)?twitch\.tv/team/([a-zA-Z0-9_]{1,50})",
+    re.IGNORECASE,
+)
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{4,25}$")
+# First path segment of twitch.tv/… that is never a channel login.
+TWITCH_PATH_RESERVED = frozenset(
+    {
+        "team",
+        "directory",
+        "downloads",
+        "jobs",
+        "p",
+        "products",
+        "turbo",
+        "settings",
+        "search",
+        "subscriptions",
+        "inventory",
+        "wallet",
+        "drops",
+        "prime",
+        "popout",
+        "embed",
+        "videos",
+        "clips",
+        "about",
+        "schedule",
+    }
+)
+TEAM_USER_ID_PREFIX = "team:"
+TEAM_MEMBERS_CACHE_TTL_SEC = 3600
 
 # Helix stream tags for Drops-enabled (EN + RU + short "Drops"), compared casefold.
 _DROPS_ENABLED_TAG_NEEDLES = ("drops enabled", "drops включены", "drops")
@@ -601,23 +632,62 @@ class TwitchClient:
         text = text.strip()
         if not text:
             return None
+        if self.parse_team_name(text):
+            return None
         match = TWITCH_URL_RE.search(text)
         if match:
-            return match.group(1).lower()
+            login = match.group(1).lower()
+            if login in TWITCH_PATH_RESERVED:
+                return None
+            return login
         cleaned = text.lstrip("@").lower()
+        if cleaned in TWITCH_PATH_RESERVED:
+            return None
         if USERNAME_RE.match(cleaned):
             return cleaned
         return None
 
     @staticmethod
+    def parse_team_name(text: str) -> str | None:
+        """Return Twitch Team slug from a /team/… URL, or None."""
+        raw = (text or "").strip()
+        if not raw:
+            return None
+        match = TWITCH_TEAM_URL_RE.search(raw)
+        if not match:
+            return None
+        name = match.group(1).lower()
+        return name or None
+
+    @staticmethod
+    def is_team_user_id(twitch_user_id: str | None) -> bool:
+        return str(twitch_user_id or "").startswith(TEAM_USER_ID_PREFIX)
+
+    @staticmethod
+    def team_subscription_user_id(team_id: str) -> str:
+        return f"{TEAM_USER_ID_PREFIX}{str(team_id or '').strip()}"
+
+    @staticmethod
+    def team_page_url(team_name: str) -> str:
+        bare = (team_name or "").strip().lstrip("@")
+        return f"https://www.twitch.tv/team/{bare}" if bare else ""
+
+    @staticmethod
     def is_twitch_url(text: str) -> bool:
-        return bool(TWITCH_URL_RE.search((text or "").strip()))
+        raw = (text or "").strip()
+        if TWITCH_TEAM_URL_RE.search(raw):
+            return True
+        return bool(TWITCH_URL_RE.search(raw))
 
     @staticmethod
     def is_standalone_twitch_url(text: str) -> bool:
         """True if the whole message is a channel URL (not embedded in other text)."""
         text = (text or "").strip().rstrip("/")
-        return bool(text) and TWITCH_URL_RE.fullmatch(text) is not None
+        if not text:
+            return False
+        if TWITCH_TEAM_URL_RE.fullmatch(text) is not None:
+            return True
+        return TWITCH_URL_RE.fullmatch(text) is not None
 
     def _ensure_token(self) -> str:
         if self._token and time.time() < self._token_expires - 60:
@@ -688,6 +758,48 @@ class TwitchClient:
                 if login:
                     out[login] = user
         return out
+
+    def get_team(self, name: str) -> dict[str, Any] | None:
+        """Helix GET /teams?name=… — team_name, display name, id, users[]."""
+        slug = (name or "").strip().lower()
+        if not slug:
+            return None
+        resp = self._session.get(
+            "https://api.twitch.tv/helix/teams",
+            headers=self._headers(),
+            params={"name": slug},
+            timeout=15,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        rows = resp.json().get("data") or []
+        if not rows:
+            return None
+        team = rows[0]
+        users_out: list[dict[str, str]] = []
+        for raw in team.get("users") or []:
+            uid = str(raw.get("user_id") or "").strip()
+            login = str(raw.get("user_login") or "").strip().lower()
+            if not uid or not login:
+                continue
+            users_out.append(
+                {
+                    "user_id": uid,
+                    "user_login": login,
+                    "user_name": str(raw.get("user_name") or login).strip() or login,
+                }
+            )
+        team_name = str(team.get("team_name") or slug).strip().lower() or slug
+        display = str(team.get("team_display_name") or team_name).strip() or team_name
+        return {
+            "id": str(team.get("id") or "").strip(),
+            "team_name": team_name,
+            "team_display_name": display,
+            "users": users_out,
+            "thumbnail_url": team.get("thumbnail_url"),
+            "info": team.get("info") or "",
+        }
 
     @staticmethod
     def matched_drops_tag(stream: dict[str, Any]) -> str | None:
@@ -3157,6 +3269,8 @@ def _template_values(
         "vkplay_url": "—",
         "youtube_url": "—",
         "tiktok_url": "—",
+        "team_name": "—",
+        "team_member": "—",
     }
     if stream:
         started = stream.get("started_at")
@@ -3227,6 +3341,8 @@ _TEMPLATE_PLACEHOLDERS = (
     "vkplay_url",
     "youtube_url",
     "tiktok_url",
+    "team_name",
+    "team_member",
 )
 _STREAM_SNAPSHOT_KEYS = (
     "user_id",
@@ -3257,6 +3373,12 @@ _PLACEHOLDER_ALIASES: dict[str, str] = {
     "user": "username",
     "link": "url",
     "twitch_url": "url",
+    "team": "team_name",
+    "twitch_team": "team_name",
+    "teamname": "team_name",
+    "teammember": "team_member",
+    "member": "team_member",
+    "team_user": "team_member",
     "stream_url": "url",
     "channel_url": "url",
     "profile_url": "url",

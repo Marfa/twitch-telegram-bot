@@ -183,6 +183,15 @@ def main() -> None:
     check_external_user_id_roundtrip()
     check_external_live_stream_id_stable()
     check_external_subscription_db()
+    from .checks_twitch_teams import (
+        check_twitch_team_db_roundtrip,
+        check_twitch_team_not_external,
+        check_twitch_team_url_parse,
+    )
+
+    check_twitch_team_url_parse()
+    check_twitch_team_not_external()
+    check_twitch_team_db_roundtrip()
     from .checks_top_donations import check_top_donations
 
     check_top_donations()

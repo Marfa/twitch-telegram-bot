@@ -63,9 +63,15 @@ def is_external_subscription(
     twitch_user_id: str | None = None,
 ) -> bool:
     plat = (stream_platform or "").strip().lower()
+    if plat == "twitch_team":
+        return False
     if plat and plat != "twitch":
         return True
     return bool(parse_external_user_id(twitch_user_id or ""))
+
+
+def is_twitch_team_subscription(*, stream_platform: str | None = None) -> bool:
+    return (stream_platform or "").strip().lower() == "twitch_team"
 
 
 def looks_like_external_stream_url(text: str) -> bool:

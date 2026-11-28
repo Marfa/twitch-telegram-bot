@@ -28,6 +28,7 @@ from handlers.delivery import (
 from handlers.stream_preview import clear_preview_refresh
 from i18n import DEFAULT_LOCALE, format_duration_hm, t
 from twitch import (
+    TEAM_MEMBERS_CACHE_TTL_SEC,
     TwitchClient,
     accumulate_viewer_stats,
     filter_streams_for_watch,
@@ -652,6 +653,7 @@ def schedule_delayed_live_notification(
     stream_id: str,
     delay_minutes: int,
     db: Database | None = None,
+    extra_data: dict | None = None,
 ) -> bool:
     """Arm one delayed live send for the first edge; ignore later stream_id changes until it fires."""
     if job_queue is None or int(delay_minutes or 0) <= 0:
@@ -659,11 +661,14 @@ def schedule_delayed_live_notification(
     name = delayed_live_job_name(sub_id)
     if has_pending_named_jobs(job_queue, name, db=db):
         return False
+    data: dict = {"sub_id": sub_id, "stream_id": stream_id}
+    if extra_data:
+        data.update(extra_data)
     schedule_alert_run_once(
         job_queue,
         _send_delayed_notification,
         when=int(delay_minutes) * 60,
-        data={"sub_id": sub_id, "stream_id": stream_id},
+        data=data,
         name=name,
         db=db,
         kind=ALERT_JOB_LIVE,
@@ -874,14 +879,19 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
         stream_platform=getattr(sub, "stream_platform", None),
         twitch_user_id=sub.twitch_user_id,
     )
+    is_team = sp.is_twitch_team_subscription(
+        stream_platform=getattr(sub, "stream_platform", None)
+    )
+    poll_uid = str(job_data.get("member_user_id") or "").strip() or sub.twitch_user_id
     stream: dict | None = None
     if external:
         stream = await asyncio.to_thread(_external_stream_snapshot, sub)
         live_streams = {sub.twitch_user_id: stream} if stream else {}
+        poll_uid = sub.twitch_user_id
     else:
         try:
             live_streams = await asyncio.to_thread(
-                twitch.get_live_streams, [sub.twitch_user_id]
+                twitch.get_live_streams, [poll_uid]
             )
         except Exception:
             logger.exception(
@@ -890,9 +900,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
             return
 
     lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
-    if sub.twitch_user_id not in live_streams or not live_streams.get(
-        sub.twitch_user_id
-    ):
+    if poll_uid not in live_streams or not live_streams.get(poll_uid):
         if silent_offline:
             return
         if _user_notifications_paused(db, sub.owner_id):
@@ -915,7 +923,7 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
             logger.warning("Cannot notify owner %s: %s", sub.owner_id, exc)
         return
 
-    stream = live_streams[sub.twitch_user_id]
+    stream = live_streams[poll_uid]
     if is_on_notify_cooldown(sub):
         return
     username = stream.get("user_login", stream.get("user_name", ""))
@@ -929,17 +937,23 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
     ):
         attempt = int(job_data.get("live_game_attempt") or 1)
         if attempt < LIVE_GAME_RECHECK_COVER_ATTEMPTS:
+            retry_data = {
+                "sub_id": sub.id,
+                "silent_offline": True,
+                "stream_id": str(job_data.get("stream_id") or ""),
+                "live_game_recheck": True,
+                "live_game_attempt": attempt + 1,
+            }
+            if job_data.get("member_user_id"):
+                retry_data["member_user_id"] = job_data.get("member_user_id")
+            if job_data.get("team_name") or job_data.get("team_member"):
+                retry_data["team_name"] = job_data.get("team_name") or ""
+                retry_data["team_member"] = job_data.get("team_member") or ""
             schedule_alert_run_once(
                 context.job_queue,
                 _send_delayed_notification,
                 when=LIVE_GAME_RECHECK_SECONDS,
-                data={
-                    "sub_id": sub.id,
-                    "silent_offline": True,
-                    "stream_id": str(job_data.get("stream_id") or ""),
-                    "live_game_recheck": True,
-                    "live_game_attempt": attempt + 1,
-                },
+                data=retry_data,
                 name=f"live_game_{sub.id}",
                 replace_existing=True,
                 db=db,
@@ -958,8 +972,22 @@ async def _send_delayed_notification(context: ContextTypes.DEFAULT_TYPE) -> None
             context, sub_id=sub_id, stream_id=str(job_data.get("stream_id") or "")
         )
         return
+    team_extra = None
+    if is_team or job_data.get("team_name") or job_data.get("team_member"):
+        team_extra = {
+            "team_name": str(job_data.get("team_name") or sub.twitch_username or "—"),
+            "team_member": str(
+                job_data.get("team_member") or username or "—"
+            ),
+        }
     text = _render_sub_template(
-        sub, username, game, title, twitch=twitch, stream=stream
+        sub,
+        username,
+        game,
+        title,
+        twitch=twitch,
+        stream=stream,
+        extra=team_extra,
     )
     await _send_notification(
         context.bot,
@@ -1078,22 +1106,36 @@ async def _send_delayed_end_notification(context: ContextTypes.DEFAULT_TYPE) -> 
     if not sub or not sub.enabled or not sub.notify_on_end:
         return
     sub = _sub_for_delivery(db, sub)
+    poll_uid = str(job_data.get("member_user_id") or "").strip() or sub.twitch_user_id
 
     try:
         live_streams = await asyncio.to_thread(
-            twitch.get_live_streams, [sub.twitch_user_id]
+            twitch.get_live_streams, [poll_uid]
         )
     except Exception:
         logger.exception("Twitch poll failed for delayed end notification sub %s", sub_id)
         return
 
-    if sub.twitch_user_id in live_streams:
+    if poll_uid in live_streams:
         return
     if is_on_notify_cooldown(sub):
         return
     end_stream = _end_stream_from_job(job_data)
     lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
     username, game, title, extra = _end_alert_template_args(sub, end_stream, lang)
+    if job_data.get("team_name") or job_data.get("team_member"):
+        extra = {
+            **(extra or {}),
+            "team_name": str(job_data.get("team_name") or sub.twitch_username or "—"),
+            "team_member": str(
+                job_data.get("team_member")
+                or (end_stream or {}).get("user_login")
+                or username
+                or "—"
+            ),
+        }
+        if not username:
+            username = str(job_data.get("team_member") or sub.twitch_username)
     text = _render_sub_template(
         sub,
         username,
@@ -1132,10 +1174,12 @@ async def _send_delayed_category_notification(
     sub = _sub_for_delivery(db, sub)
     if not _wants_category_change_alert(sub):
         return
+    job_data = context.job.data or {}
+    poll_uid = str(job_data.get("member_user_id") or "").strip() or sub.twitch_user_id
 
     try:
         live_streams = await asyncio.to_thread(
-            twitch.get_live_streams, [sub.twitch_user_id]
+            twitch.get_live_streams, [poll_uid]
         )
     except Exception:
         logger.exception(
@@ -1143,11 +1187,11 @@ async def _send_delayed_category_notification(
         )
         return
 
-    if sub.twitch_user_id not in live_streams:
+    if poll_uid not in live_streams:
         return
     if is_on_notify_cooldown(sub):
         return
-    stream = live_streams[sub.twitch_user_id]
+    stream = live_streams[poll_uid]
     username = stream.get("user_login", stream.get("user_name", ""))
     game = stream.get("game_name", "")
     title = stream.get("title", "")
@@ -1157,10 +1201,21 @@ async def _send_delayed_category_notification(
         return
     if _should_skip_category_filter(sub, stream.get("game_id")):
         return
+    team_extra = None
+    if job_data.get("team_name") or job_data.get("team_member"):
+        team_extra = {
+            "team_name": str(job_data.get("team_name") or sub.twitch_username or "—"),
+            "team_member": str(job_data.get("team_member") or username or "—"),
+        }
     text = _render_sub_template(
-        sub, username, game, title, twitch=twitch, stream=stream
+        sub,
+        username,
+        game,
+        title,
+        twitch=twitch,
+        stream=stream,
+        extra=team_extra,
     )
-    job_data = context.job.data or {}
     await _send_notification(
         context.bot,
         db,
@@ -1227,6 +1282,78 @@ async def _notify_premium_expiries(
                 continue
             lang = _user_lang(context, user_id) or DEFAULT_LOCALE
             await send_stars_grace_dm(context.bot, db, user_id, lang)
+
+
+def _team_extra(meta: dict, member_login: str) -> dict[str, str]:
+    display = str(meta.get("display_name") or meta.get("team_name") or "").strip()
+    member = (member_login or "").strip()
+    return {
+        "team_name": display or "—",
+        "team_member": member or "—",
+    }
+
+
+def _resolve_team_meta(
+    twitch: TwitchClient,
+    bot_data: dict,
+    team_name: str,
+) -> dict | None:
+    """Cached Helix team → {team_name, display_name, user_ids, login_by_uid}."""
+    slug = (team_name or "").strip().lower()
+    if not slug:
+        return None
+    cache: dict = bot_data.setdefault("twitch_team_cache", {})
+    now = datetime.now(timezone.utc).timestamp()
+    hit = cache.get(slug)
+    if (
+        isinstance(hit, dict)
+        and now - float(hit.get("fetched_at") or 0) < TEAM_MEMBERS_CACHE_TTL_SEC
+    ):
+        return hit
+    try:
+        team = twitch.get_team(slug)
+    except Exception:
+        logger.exception("Twitch team refresh failed for %s", slug)
+        return hit if isinstance(hit, dict) else None
+    if not team:
+        cache.pop(slug, None)
+        return None
+    login_by_uid: dict[str, str] = {}
+    for user in team.get("users") or []:
+        uid = str(user.get("user_id") or "").strip()
+        login = str(user.get("user_login") or "").strip().lower()
+        if uid and login:
+            login_by_uid[uid] = login
+    meta = {
+        "team_name": str(team.get("team_name") or slug).strip().lower() or slug,
+        "display_name": str(
+            team.get("team_display_name") or team.get("team_name") or slug
+        ).strip()
+        or slug,
+        "user_ids": set(login_by_uid),
+        "login_by_uid": login_by_uid,
+        "fetched_at": now,
+    }
+    cache[slug] = meta
+    return meta
+
+
+def _build_team_member_index(
+    twitch: TwitchClient,
+    bot_data: dict,
+    team_subs: list[Subscription],
+) -> tuple[dict[str, list[tuple[Subscription, dict]]], set[str]]:
+    """member_uid → [(sub, meta), …] and the set of all member Helix ids."""
+    index: dict[str, list[tuple[Subscription, dict]]] = {}
+    member_ids: set[str] = set()
+    for sub in team_subs:
+        meta = _resolve_team_meta(twitch, bot_data, sub.twitch_username)
+        if not meta:
+            continue
+        for uid in meta["user_ids"]:
+            index.setdefault(uid, []).append((sub, meta))
+            member_ids.add(uid)
+    return index, member_ids
 
 
 async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1300,7 +1427,23 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
     user_ids = db.get_unique_twitch_user_ids()
     category_watch_subs = db.get_enabled_category_watch_subscriptions()
     external_subs = db.get_enabled_external_live_subscriptions()
-    if not user_ids and not category_watch_subs and not external_subs:
+    team_subs = db.get_enabled_team_subscriptions()
+    team_member_index: dict[str, list[tuple[Subscription, dict]]] = {}
+    if team_subs:
+        team_member_index, team_member_ids = await asyncio.to_thread(
+            _build_team_member_index,
+            twitch,
+            context.application.bot_data,
+            team_subs,
+        )
+        if team_member_ids:
+            user_ids = list(dict.fromkeys([*user_ids, *sorted(team_member_ids)]))
+    if (
+        not user_ids
+        and not category_watch_subs
+        and not external_subs
+        and not team_subs
+    ):
         from health import note_check_streams_ok
 
         note_check_streams_ok()
@@ -1537,6 +1680,88 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         bot_data=context.application.bot_data,
                     )
 
+            for uid in list(went_live) + stream_restarts:
+                if uid not in team_member_index:
+                    continue
+                stream = live_streams[uid]
+                username = stream.get("user_login", stream.get("user_name", ""))
+                game = stream.get("game_name", "")
+                title = stream.get("title", "")
+                stream_id = str(stream.get("id") or "")
+                for sub, meta in team_member_index[uid]:
+                    sub = _sub_for_delivery(db, sub)
+                    if not sub.notify_on_live:
+                        continue
+                    if is_on_notify_cooldown(sub):
+                        continue
+                    if await _should_skip_ignored_alert(
+                        sub, db, twitch, game, title, stream.get("game_id")
+                    ):
+                        continue
+                    game_id = str(stream.get("game_id") or "").strip()
+                    team_job = {
+                        "member_user_id": uid,
+                        "team_name": meta.get("display_name") or "",
+                        "team_member": str(username or ""),
+                    }
+                    if sub.delay_minutes > 0:
+                        schedule_delayed_live_notification(
+                            context.job_queue,
+                            sub_id=sub.id,
+                            stream_id=stream_id,
+                            delay_minutes=sub.delay_minutes,
+                            db=db,
+                            extra_data=team_job,
+                        )
+                        continue
+                    if needs_live_game_recheck(game, sub.delay_minutes) or (
+                        has_category_filter(sub) and not game_id
+                    ):
+                        schedule_alert_run_once(
+                            context.job_queue,
+                            _send_delayed_notification,
+                            when=LIVE_GAME_RECHECK_SECONDS,
+                            data={
+                                "sub_id": sub.id,
+                                "silent_offline": True,
+                                "stream_id": stream_id,
+                                "live_game_recheck": True,
+                                "live_game_attempt": 1,
+                                **team_job,
+                            },
+                            name=f"live_game_{sub.id}",
+                            replace_existing=True,
+                            db=db,
+                            kind=ALERT_JOB_LIVE_GAME,
+                        )
+                        continue
+                    if _should_skip_category_filter(sub, game_id):
+                        continue
+                    if not await _multistream_gate_ok(sub):
+                        _schedule_multistream_wait(
+                            context, sub_id=sub.id, stream_id=stream_id
+                        )
+                        continue
+                    text = _render_sub_template(
+                        sub,
+                        username,
+                        game,
+                        title,
+                        twitch=twitch,
+                        stream=stream,
+                        extra=_team_extra(meta, str(username or "")),
+                    )
+                    await _send_notification(
+                        context.bot,
+                        db,
+                        sub,
+                        text,
+                        alert_type="live",
+                        stream=stream,
+                        twitch=twitch,
+                        bot_data=context.application.bot_data,
+                    )
+
             for uid in went_offline:
                 await unpin_stream_alert_messages(context.bot, db, uid)
                 clear_preview_refresh(
@@ -1565,6 +1790,68 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         delay_data = {
                             "sub_id": sub.id,
                             "stream_id": stream_id,
+                        }
+                        if end_stream:
+                            delay_data["stream_snapshot"] = dict(end_stream)
+                        schedule_alert_run_once(
+                            context.job_queue,
+                            _send_delayed_end_notification,
+                            when=sub.delay_minutes * 60,
+                            data=delay_data,
+                            name=delayed_end_job_name(sub.id),
+                            replace_existing=True,
+                            db=db,
+                            kind=ALERT_JOB_END,
+                        )
+                        continue
+                    text = _render_sub_template(
+                        sub,
+                        username,
+                        game,
+                        title,
+                        twitch=twitch,
+                        stream=end_stream,
+                        extra=extra,
+                    )
+                    text = _with_top_donations_suffix(db, sub, text, end_stream)
+                    await _send_notification(
+                        context.bot,
+                        db,
+                        sub,
+                        text,
+                        alert_type="end",
+                        stream=end_stream,
+                        stream_id=stream_id,
+                        twitch=twitch,
+                        bot_data=context.application.bot_data,
+                    )
+                for sub, meta in team_member_index.get(uid, []):
+                    cancel_repeat_notify_jobs(context.job_queue, db, sub.id)
+                    sub = _sub_for_delivery(db, sub)
+                    if not sub.notify_on_end:
+                        continue
+                    if is_on_notify_cooldown(sub):
+                        continue
+                    lang = db.get_user_locale(sub.owner_id) or DEFAULT_LOCALE
+                    username, game, title, extra = _end_alert_template_args(
+                        sub, end_stream, lang
+                    )
+                    member_login = str(
+                        (end_stream or {}).get("user_login")
+                        or username
+                        or meta.get("login_by_uid", {}).get(uid)
+                        or ""
+                    )
+                    extra = {**(extra or {}), **_team_extra(meta, member_login)}
+                    if not username:
+                        username = member_login or sub.twitch_username
+                    if sub.delay_minutes > 0:
+                        delay_data = {
+                            "sub_id": sub.id,
+                            "stream_id": stream_id,
+                            "member_user_id": uid,
+                            "team_name": meta.get("display_name") or "",
+                            "team_member": member_login,
                         }
                         if end_stream:
                             delay_data["stream_snapshot"] = dict(end_stream)
@@ -1642,6 +1929,59 @@ async def check_streams(context: ContextTypes.DEFAULT_TYPE) -> None:
                         continue
                     text = _render_sub_template(
                         sub, username, game, title, twitch=twitch, stream=stream
+                    )
+                    await _send_notification(
+                        context.bot,
+                        db,
+                        sub,
+                        text,
+                        alert_type="category",
+                        stream=stream,
+                        stream_id=stream_id,
+                        vod_offset_seconds=_vod_offset_seconds(stream),
+                        twitch=twitch,
+                        bot_data=context.application.bot_data,
+                    )
+                for sub, meta in team_member_index.get(uid, []):
+                    sub = _sub_for_delivery(db, sub)
+                    if not _wants_category_change_alert(sub):
+                        continue
+                    if is_on_notify_cooldown(sub):
+                        continue
+                    if await _should_skip_ignored_alert(
+                        sub, db, twitch, game, title, stream.get("game_id")
+                    ):
+                        continue
+                    if _should_skip_category_filter(sub, stream.get("game_id")):
+                        continue
+                    if sub.delay_minutes > 0:
+                        game_id = str(stream.get("game_id") or "")
+                        schedule_alert_run_once(
+                            context.job_queue,
+                            _send_delayed_category_notification,
+                            when=sub.delay_minutes * 60,
+                            data={
+                                "sub_id": sub.id,
+                                "stream_id": stream_id,
+                                "vod_offset_seconds": _vod_offset_seconds(stream),
+                                "member_user_id": uid,
+                                "team_name": meta.get("display_name") or "",
+                                "team_member": str(username or ""),
+                            },
+                            name=f"delay_cat_{sub.id}_{game_id}",
+                            replace_existing=True,
+                            db=db,
+                            kind=ALERT_JOB_CATEGORY,
+                        )
+                        continue
+                    text = _render_sub_template(
+                        sub,
+                        username,
+                        game,
+                        title,
+                        twitch=twitch,
+                        stream=stream,
+                        extra=_team_extra(meta, str(username or "")),
                     )
                     await _send_notification(
                         context.bot,
