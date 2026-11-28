@@ -25,6 +25,16 @@ _FREE_UID = 900001
 _ADMIN_UID = 1
 
 
+def _sanitize_twitch(tw: MagicMock) -> MagicMock:
+    # Auto-child MagicMocks are truthy; receive_channel treats any truthy
+    # parse_team_name as a Twitch Team URL.
+    if tw.parse_team_name.side_effect is None and isinstance(
+        tw.parse_team_name.return_value, MagicMock
+    ):
+        tw.parse_team_name.return_value = None
+    return tw
+
+
 def _app(db, twitch=None):
     bot = AsyncMock()
     bot.id = 42
@@ -35,7 +45,7 @@ def _app(db, twitch=None):
     application.bot = bot
     application.bot_data = {
         "db": db,
-        "twitch": twitch or MagicMock(),
+        "twitch": _sanitize_twitch(twitch or MagicMock()),
         "pending_schedule_publishes": {},
     }
     return application, bot
