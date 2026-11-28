@@ -262,6 +262,25 @@ def _details_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def _callback_alert_thread_id(query: Any) -> int | None:
+    """Thread of the digest/card message (alert topics), else None = General."""
+    msg = getattr(query, "message", None) if query else None
+    if msg is None:
+        return None
+    tid = getattr(msg, "message_thread_id", None)
+    if tid is None:
+        return None
+    try:
+        tid_i = int(tid)
+    except (TypeError, ValueError):
+        return None
+    from dm_topics import GENERAL_TOPIC_ID
+
+    if tid_i == GENERAL_TOPIC_ID:
+        return None
+    return tid_i
+
+
 def _store_browse(
     application: Any,
     user_id: int,
@@ -523,6 +542,7 @@ async def _send_one_card(
     *,
     footer: str = "",
     show_more_offset: int | None = None,
+    message_thread_id: int | None = None,
 ) -> None:
     body = _build_card_html(item, lang, footer=footer)
     markup = _card_keyboard(
@@ -531,6 +551,9 @@ async def _send_one_card(
         igdb_game_id=item.igdb_id,
         show_more_offset=show_more_offset,
     )
+    thread_kwargs: dict[str, Any] = {}
+    if message_thread_id is not None:
+        thread_kwargs["message_thread_id"] = message_thread_id
     if item.cover_url:
         try:
             await bot.send_photo(
@@ -539,6 +562,7 @@ async def _send_one_card(
                 caption=body,
                 parse_mode=ParseMode.HTML,
                 reply_markup=markup,
+                **thread_kwargs,
             )
             return
         except BadRequest:
@@ -549,6 +573,7 @@ async def _send_one_card(
         parse_mode=ParseMode.HTML,
         reply_markup=markup,
         disable_web_page_preview=True,
+        **thread_kwargs,
     )
 
 
@@ -678,6 +703,7 @@ async def _send_cards_batch(
     entries: list[GiveawayCatalogEntry],
     lang: str,
     offset: int = 0,
+    message_thread_id: int | None = None,
 ) -> int:
     """Send up to _PAGE_SIZE cards from offset; 'Show more' on the last if needed."""
     if offset < 0:
@@ -705,6 +731,7 @@ async def _send_cards_batch(
             lang,
             footer=footer if is_last and not has_more else "",
             show_more_offset=next_offset if is_last and has_more else None,
+            message_thread_id=message_thread_id,
         )
     return len(chunk)
 
@@ -1215,6 +1242,8 @@ async def on_giveaways_callback(
 
     if data == "gv:details":
         await query.answer()
+        # Digest lives in giveaway_watch topic — keep progress + cards there.
+        thread_id = _callback_alert_thread_id(query)
         loaded = _load_browse(context.application, user_id)
         if not loaded:
             # Cold path (restart): only the last digest batch — never the full
@@ -1225,14 +1254,19 @@ async def on_giveaways_callback(
                     context.application, user_id, entries, lang
                 )
             else:
+                empty_kwargs: dict[str, Any] = {}
+                if thread_id is not None:
+                    empty_kwargs["message_thread_id"] = thread_id
                 await context.bot.send_message(
-                    chat_id, t("giveaways_empty", lang)
+                    chat_id, t("giveaways_empty", lang), **empty_kwargs
                 )
                 return
             browse_lang = lang
         else:
             entries, browse_lang = loaded
-        async with request_progress(context.bot, chat_id, lang):
+        async with request_progress(
+            context.bot, chat_id, lang, message_thread_id=thread_id
+        ):
             await _send_cards_batch(
                 context.bot,
                 chat_id,
@@ -1240,23 +1274,30 @@ async def on_giveaways_callback(
                 entries=entries,
                 lang=browse_lang or lang,
                 offset=0,
+                message_thread_id=thread_id,
             )
         return
 
     if data.startswith("gv:more:"):
         await query.answer()
+        thread_id = _callback_alert_thread_id(query)
         try:
             offset = int(data.split(":")[-1])
         except ValueError:
             offset = 0
         loaded = _load_browse(context.application, user_id)
         if not loaded:
+            empty_kwargs = {}
+            if thread_id is not None:
+                empty_kwargs["message_thread_id"] = thread_id
             await context.bot.send_message(
-                chat_id, t("giveaways_empty", lang)
+                chat_id, t("giveaways_empty", lang), **empty_kwargs
             )
             return
         entries, browse_lang = loaded
-        async with request_progress(context.bot, chat_id, lang):
+        async with request_progress(
+            context.bot, chat_id, lang, message_thread_id=thread_id
+        ):
             await _send_cards_batch(
                 context.bot,
                 chat_id,
@@ -1264,6 +1305,7 @@ async def on_giveaways_callback(
                 entries=entries,
                 lang=browse_lang or lang,
                 offset=offset,
+                message_thread_id=thread_id,
             )
         return
 
